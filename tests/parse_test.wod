@@ -1,0 +1,8 @@
+void hi() {
+    return;
+}
+
+int hi() {
+    hi();
+    return 5;
+}
