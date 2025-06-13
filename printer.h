@@ -4,7 +4,7 @@
 #include "visitor.h"
 #include "ast.h"
 
-class Printer : Visitor {
+class Printer : public Visitor {
 public:
     void print(std::vector<Stmt*> &stmts) {
         for (Stmt* s : stmts) {

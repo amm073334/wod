@@ -7,7 +7,7 @@
 #include "commonevent.h"
 #include "command.h"
 
-class Codegen : Visitor {
+class Codegen : public Visitor {
 public:
     std::string gen(std::vector<Stmt*> &program) {
         for (Stmt* s : program) {
@@ -89,14 +89,6 @@ public:
         stmt->sym->ref = lhs.v;
     }
 
-    void visit_AssignStmt(AssignStmt* stmt) override {
-        Symbol* sym = stmt->env->get(stmt->name->text);
-        if (sym->type == TYPE_INT)
-            cmd_arith(WolfValue{WT_NUMREF, sym->ref}, eval_pop());
-        else
-            cmd_string(WolfValue{WT_STRREF, sym->ref}, eval_pop());
-    }
-
     void visit_IfStmt(IfStmt* stmt) override {
         stmt->condition->accept(this);
         WolfValue cond = eval_pop();
@@ -133,24 +125,36 @@ public:
     }
 
     // expressions
-    void visit_VariableExpr(VariableExpr* expr) override {
-        Symbol* sym = expr->env->get(expr->name->text);
-        if (sym->type == TYPE_INT)
-            eval_push({WT_NUMREF, sym->ref});
+    void visit_AssignExpr(AssignExpr* expr) override {
+        expr->lhs->accept(this);
+        WolfValue lhs = eval_pop();
+        expr->rhs->accept(this);
+        WolfValue rhs = eval_pop();
+        
+        if (lhs.wt == WT_NUMREF)
+            cmd_arith(lhs, rhs);
         else
-            eval_push({WT_STRREF, sym->ref});
+            cmd_string(lhs, rhs);
+    }
+
+    void visit_VariableExpr(VariableExpr* expr) override {
+        Symbol* sym = expr->env->get(expr->name);
+        if (sym->type == TYPE_INT)
+            eval_push(WolfValue{WT_NUMREF, sym->ref});
+        else
+            eval_push(WolfValue{WT_STRREF, sym->ref});
     }
 
     void visit_BinaryExpr(BinaryExpr* expr) override {
-        switch (expr->op->token_type) {
-            case T_PIPE_PIPE:
-            case T_AMP_AMP:
+        switch (expr->op) {
+            case BinaryExpr::LOGIC_OR:
+            case BinaryExpr::LOGIC_AND:
                 binary_logical_expr(expr);
                 break;
-            case T_GREATER:
-            case T_GREATER_EQUAL:
-            case T_LESS:
-            case T_LESS_EQUAL:
+            case BinaryExpr::GT:
+            case BinaryExpr::GTE:
+            case BinaryExpr::LT:
+            case BinaryExpr::LTE:
                 binary_comp_expr(expr);
                 break;
             default:
@@ -164,8 +168,8 @@ public:
         WolfValue left = eval_pop();
         WolfValue right;
         WolfValue out = new_int_temp();
-        switch (expr->op->token_type) {
-            case T_AMP_AMP:
+        switch (expr->op) {
+            case BinaryExpr::LOGIC_AND:
                 cmd_int_if(true, left, WolfValue{WT_NUM, 0}, IF_INT_OP_NEQ);
                     expr->right->accept(this);
                     right = eval_pop();
@@ -178,7 +182,7 @@ public:
                     cmd_arith(out, 0);
                 cmd_end_if();
                 break;
-            case T_PIPE_PIPE:
+            case BinaryExpr::LOGIC_OR:
                 cmd_int_if(true, left, WolfValue{WT_NUM, 0}, IF_INT_OP_NEQ);
                     cmd_arith(out, 1);
                 cmd_else();
@@ -196,16 +200,16 @@ public:
 
     void binary_comp_expr(BinaryExpr* expr) {
         expr->left->accept(this);
-        expr->right->accept(this);
-        IfIntBranchFlag op;
-        switch (expr->op->token_type) {
-            case T_GREATER:         op = IF_INT_OP_GT; break;
-            case T_GREATER_EQUAL:   op = IF_INT_OP_GTE; break;
-            case T_LESS:            op = IF_INT_OP_LT; break;
-            case T_LESS_EQUAL:      op = IF_INT_OP_LTE; break;
-        }
-        WolfValue right = eval_pop();
         WolfValue left = eval_pop();
+        expr->right->accept(this);
+        WolfValue right = eval_pop();
+        IfIntBranchFlag op;
+        switch (expr->op) {
+            case BinaryExpr::GT:    op = IF_INT_OP_GT; break;
+            case BinaryExpr::GTE:   op = IF_INT_OP_GTE; break;
+            case BinaryExpr::LT:    op = IF_INT_OP_LT; break;
+            case BinaryExpr::LTE:   op = IF_INT_OP_LTE; break;
+        }
         WolfValue out = new_int_temp();
         cmd_int_if(true, left, right, op);
         cmd_arith(out, 1);
@@ -216,19 +220,19 @@ public:
 
     void binary_normal_expr(BinaryExpr* expr) {
         expr->left->accept(this);
+        WolfValue left = eval_pop();
         expr->right->accept(this);
         WolfValue right = eval_pop();
-        WolfValue left = eval_pop();
         ArithFlag op;
-        switch (expr->op->token_type) {
-            case T_PLUS:        op = ARITH_OP_PLUS; break;
-            case T_MINUS:       op = ARITH_OP_MINUS; break;
-            case T_STAR:        op = ARITH_OP_TIMES; break;
-            case T_SLASH:       op = ARITH_OP_DIV; break;
-            case T_PIPE:        op = ARITH_OP_OR; break;
-            case T_AMP:         op = ARITH_OP_AND; break;
-            case T_LESS_LESS:   op = ARITH_OP_LSHIFT; break;
-            case T_GREATER_GREATER:
+        switch (expr->op) {
+            case BinaryExpr::ADD:       op = ARITH_OP_PLUS; break;
+            case BinaryExpr::SUB:       op = ARITH_OP_MINUS; break;
+            case BinaryExpr::MUL:       op = ARITH_OP_TIMES; break;
+            case BinaryExpr::DIV:       op = ARITH_OP_DIV; break;
+            case BinaryExpr::BIT_OR:    op = ARITH_OP_OR; break;
+            case BinaryExpr::BIT_AND:   op = ARITH_OP_AND; break;
+            case BinaryExpr::LSHIFT:    op = ARITH_OP_LSHIFT; break;
+            case BinaryExpr::RSHIFT:
                 op = ARITH_OP_LSHIFT;
                 cmd_arith(new_int_temp(), WolfValue{WT_NUM, 0}, right, ARITH_OP_MINUS);
                 right = eval_pop();
@@ -241,22 +245,22 @@ public:
         expr->right->accept(this);
         WolfValue right = eval_pop();
         WolfValue out = new_int_temp();
-        switch (expr->op->token_type) {
-            case T_BANG:
+        switch (expr->op) {
+            case UnaryExpr::LOGIC_NOT:
                 cmd_int_if(true, right, WolfValue{WT_NUM, 0}, IF_INT_OP_EQ);
                 cmd_arith(out, 1);
                 cmd_else();
                 cmd_arith(out, 0);
                 cmd_end_if();
                 break;
-            case T_MINUS:
+            case UnaryExpr::MINUS:
                 cmd_arith(out, WolfValue{WT_NUM, 0}, right, ARITH_OP_MINUS);
                 break;
         }
     }
 
     void visit_CallExpr(CallExpr* expr) override {
-        int32_t cev_ref = expr->env->get(expr->name->text)->ref;
+        int32_t cev_ref = expr->env->get(expr->name)->ref;
         std::vector<int32_t> int_args;
         std::vector<int32_t> strref_args;
         std::vector<std::string> str_args = {""};

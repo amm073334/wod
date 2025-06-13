@@ -8,7 +8,7 @@
 #include "ast.h"
 #include "environment.h"
 
-class Typechecker : Visitor {
+class Typechecker : public Visitor {
 public:
     Environment typecheck(std::vector<Stmt*> &program) {
         for (Stmt* s : program) s->accept(this);
@@ -27,35 +27,24 @@ public:
     }
 
     void define_function(FunctionStmt* stmt) {
-        WodType return_type;
-        switch (stmt->return_type->token_type) {
-            case T_VOID: return_type = TYPE_VOID; break;
-            case T_INT: return_type = TYPE_INT; break;
-            case T_STR: return_type = TYPE_STR; break;
-            default: error(stmt->return_type, "Invalid return type"); break;
-        }
         std::vector<WodType> arg_types;
         for (FunctionStmt::ParamDecl param : stmt->params) {
-            switch (param.type->token_type) {
-                case T_INT: arg_types.push_back(TYPE_INT); break;
-                case T_STR: arg_types.push_back(TYPE_STR); break;
-                default: error(param.type, "Invalid parameter type"); break;
-            }
+            arg_types.push_back(param.type);
         }
-        if (current_cev_ref > MAX_CEV_REF) error(stmt->name, "Maximum number of functions exceeded");
-        stmt->sym = current_env->define_function(stmt->name->text, current_cev_ref, return_type, arg_types);
-        if (!stmt->sym) error(stmt->name, "Function redeclaration");
+        if (current_cev_ref > MAX_CEV_REF) error(stmt->pos, "Maximum number of functions exceeded");
+        stmt->sym = current_env->define_function(stmt->name, current_cev_ref, stmt->return_type, arg_types);
+        if (!stmt->sym) error(stmt->pos, "Function redeclaration");
     }
 
     void function_block(FunctionStmt* stmt) {
-        current_return_type = current_env->get(stmt->name->text)->type;
+        current_return_type = current_env->get(stmt->name)->type;
         open_scope();
         int32_t int_param_ref = CSELF_THRESHOLD;
         int32_t str_param_ref = CSELF_THRESHOLD + 5;
         for (FunctionStmt::ParamDecl param : stmt->params) {
-            switch (param.type->token_type) {
-                case T_INT: current_env->define(param.name->text, TYPE_INT)->ref = int_param_ref++; break;
-                case T_STR: current_env->define(param.name->text, TYPE_STR)->ref = str_param_ref++; break;
+            switch (param.type) {
+                case T_INT: current_env->define(param.name, TYPE_INT)->ref = int_param_ref++; break;
+                case T_STR: current_env->define(param.name, TYPE_STR)->ref = str_param_ref++; break;
             }
         }
         for (Stmt* s : stmt->body) s->accept(this);
@@ -71,7 +60,7 @@ public:
     void visit_ReturnStmt(ReturnStmt* stmt) override {
         stmt->expr->accept(this);
         if (stmt->expr->type != current_return_type)
-            error(stmt->keyword, "Return type mismatch");
+            error(stmt->pos, "Return type mismatch");
     }
 
     void visit_ExprStmt(ExprStmt* stmt) override {
@@ -81,31 +70,16 @@ public:
     void visit_VarStmt(VarStmt* stmt) override {
         stmt->initializer->accept(this);
         // only one qualifier for now
-        WodType lhs_type;
-        switch (stmt->qualifiers.at(0)->token_type) {
-            case T_INT:
-                lhs_type = TYPE_INT;
-            case T_STR:
-                lhs_type = TYPE_STR;
-            default: error(stmt->qualifiers.at(0), "Invalid variable type"); break;
-        }
-        if (stmt->initializer->type != lhs_type)
-            error(stmt->qualifiers.at(0), "Declaration type mismatch");
+        if (stmt->initializer->type != stmt->type)
+            error(stmt->pos, "Declaration type mismatch");
 
-        stmt->sym = current_env->define(stmt->name->text, lhs_type);
-    }
-
-    void visit_AssignStmt(AssignStmt* stmt) override {
-        stmt->env = current_env;
-        stmt->expr->accept(this);
-        Symbol* sym = current_env->get(stmt->name->text);
-        if (!sym) error(stmt->name, "Variable not declared");
-        if (stmt->expr->type != sym->type) error(stmt->name, "Assignment type mismatch");
+        stmt->sym = current_env->define(stmt->name, stmt->type);
     }
 
     void visit_IfStmt(IfStmt* stmt) override {
         stmt->condition->accept(this);
-        if (stmt->condition->type != TYPE_INT) error(stmt->keyword, "Branch condition is not an integer");
+        if (stmt->condition->type != TYPE_INT)
+            error(stmt->pos, "Branch condition is not an integer");
         open_scope();
         stmt->then_branch->accept(this);
         close_scope();
@@ -119,7 +93,8 @@ public:
     void visit_LoopStmt(LoopStmt* stmt) override {
         if (stmt->count) {
             stmt->count->accept(this);
-            if (stmt->count->type != TYPE_INT) error(stmt->keyword, "Loop count is not an integer");
+            if (stmt->count->type != TYPE_INT)
+                error(stmt->pos, "Loop count is not an integer");
         }
         open_scope();
         stmt->body->accept(this);
@@ -127,63 +102,68 @@ public:
     }
 
     // expressions
+    void visit_AssignExpr(AssignExpr* expr) override {
+        expr->env = current_env;
+        expr->lhs->accept(this);
+        expr->rhs->accept(this);
+
+        if (!expr->lhs->assignable)
+            error(expr->pos, "Attempted to assign to non-variable expression");
+        if (expr->lhs->type != expr->rhs->type)
+            error(expr->pos, "Assignment type mismatch");
+        expr->type = expr->lhs->type;
+        expr->assignable = false;
+    }
+
     void visit_VariableExpr(VariableExpr* expr) override {
         expr->env = current_env;
-        Symbol* sym = current_env->get(expr->name->text);
-        if (!sym) error(expr->name, "Variable not declared");
+        Symbol* sym = current_env->get(expr->name);
+        if (!sym) error(expr->pos, "Variable not declared");
         expr->type = sym->type;
+        expr->assignable = true;
     }
 
     void visit_BinaryExpr(BinaryExpr* expr) override {
         expr->left->accept(this);
         expr->right->accept(this);
 
-        switch (expr->op->token_type) {
-            case T_PIPE_PIPE:
-            case T_AMP_AMP:
-            case T_PIPE:
-            case T_AMP:
-            case T_GREATER:
-            case T_GREATER_EQUAL:
-            case T_LESS:
-            case T_LESS_EQUAL:
-            case T_LESS_LESS:
-            case T_GREATER_GREATER:
-            case T_PLUS:
-            case T_MINUS:
-            case T_STAR:
-            case T_SLASH:
-                if (expr->left->type != TYPE_INT || expr->right->type != TYPE_INT)
-                    error(expr->op, "Integer arguments expected");
-                expr->type = TYPE_INT;
-                break;
-        }
+        if (expr->left->type != TYPE_INT || expr->right->type != TYPE_INT)
+            error(expr->pos, "Integer arguments expected");
+        expr->type = TYPE_INT;
+        expr->assignable = false;
     }
 
     void visit_UnaryExpr(UnaryExpr* expr) override {
         expr->right->accept(this);
-        if (expr->right->type != TYPE_INT) error(expr->op, "Integer argument expected");
+        if (expr->right->type != TYPE_INT)
+            error(expr->pos, "Integer argument expected");
         expr->type = TYPE_INT;
+        expr->assignable = false;
     }
 
     void visit_CallExpr(CallExpr* expr) override {
         expr->env = current_env;
-        Symbol* sym = current_env->get(expr->name->text);
-        if (!sym) error(expr->name, "Function not declared");
-        if (expr->args.size() != sym->arg_types.size()) error(expr->name, "Wrong number of arguments");
+        Symbol* sym = current_env->get(expr->name);
+        if (!sym) error(expr->pos, "Function not declared");
+        if (expr->args.size() != sym->arg_types.size())
+            error(expr->pos, "Wrong number of arguments");
         for (size_t i = 0; i < sym->arg_types.size(); i++) {
             expr->args.at(i)->accept(this);
-            if (expr->args.at(i)->type != sym->arg_types.at(i)) error(expr->name, "Type mismatch in argument list");
+            if (expr->args.at(i)->type != sym->arg_types.at(i))
+                error(expr->pos, "Type mismatch in argument list");
         }
         expr->type = sym->type;
+        expr->assignable = false;
     }
     
     void visit_IntLiteralExpr(IntLiteralExpr* expr) override {
         expr->type = TYPE_INT;
+        expr->assignable = false;
     }
 
     void visit_StrLiteralExpr(StrLiteralExpr* expr) override {
         expr->type = TYPE_STR;
+        expr->assignable = false;
     }
 
 private:
@@ -201,9 +181,9 @@ private:
     WodType current_return_type;
 
     // utility
-    void error(Token* t, std::string error_msg) {
+    void error(Position pos, std::string error_msg) {
         had_error = true;
-        std::cout << "typecheck error: line " << t->line << " " << t->text << " " << error_msg << std::endl;
+        std::cout << "typecheck error: line " << pos.line << " col " << pos.col << " " << error_msg << std::endl;
         throw std::runtime_error(error_msg);
     }
 };

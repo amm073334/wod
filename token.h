@@ -22,19 +22,17 @@ enum TokenType {
     T_IF, T_ELSE, T_LOOP,
 
     // literals
-    T_IDENT, T_NUMBER,
+    T_IDENT, T_NUMBER, T_STRING,
 
     // eof
     T_EOF
 };
 
 struct Token {
-    Token(TokenType token_type, std::string text, size_t line) 
-    : token_type(token_type), text(text), line(line) {}
-
     const TokenType token_type;
     const std::string text;
     const size_t line;
+    const size_t col;
 
     std::string to_string() {
         return "(" + std::to_string(token_type) + " " + text + ")";

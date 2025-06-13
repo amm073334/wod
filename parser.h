@@ -38,8 +38,13 @@ private:
     }
 
     Stmt* function_decl() {
-        Token* type = previous();
-        Token* name = eat(T_IDENT, "Expected function name");
+        WodType type;
+        switch (previous()->token_type) {
+            case T_VOID: type = TYPE_VOID; break;
+            case T_INT:  type = TYPE_INT; break;
+            case T_STR:  type = TYPE_STR; break;
+        }
+        Token* tok = eat(T_IDENT, "Expected function name");
         eat(T_LPAREN, "Expected '(' after function name");
         std::vector<FunctionStmt::ParamDecl> params;
         size_t n_int_args = 0;
@@ -48,14 +53,19 @@ private:
             if (n_int_args > 5 || n_str_args > 5)
                 error(peek(), "Too many parameters (max: 5)");
             if (match({T_INT, T_STR})) {
-                params.push_back({previous(), eat(T_IDENT, "Expected parameter name")});
+                WodType arg_type;
+                switch(previous()->token_type) {
+                    case T_INT: arg_type = TYPE_INT; break;
+                    case T_STR: arg_type = TYPE_STR; break;
+                }
+                params.push_back({arg_type, eat(T_IDENT, "Expected parameter name")->text});
                 previous()->token_type == T_INT ? n_int_args++ : n_str_args++;
             }
         } while (match(T_COMMA));
 
         eat(T_RPAREN, "Expected ')' after function parameters");
         eat(T_LBRACE, "Expected '{' before function body");
-        return new FunctionStmt(type, name, params, block());
+        return new FunctionStmt({tok->line, tok->col}, type, tok->text, params, block());
     }
 
     std::vector<Stmt*> block() {
@@ -72,134 +82,203 @@ private:
         if (match(T_IF)) return if_stmt();
         if (match(T_LOOP)) return loop_stmt();
         if (match(T_RETURN)) return return_stmt();
-        if (match(T_INT)) return var_stmt();
-        if (match(T_LBRACE)) return new BlockStmt(block());
-        if (match(T_IDENT)) return assign_stmt();
+        if (match({T_INT, T_STR})) return var_stmt();
+        if (match(T_LBRACE)) return new BlockStmt({previous()->line, previous()->col}, block());
 
         return expr_stmt();
     }
 
     Stmt* var_stmt() {
-        std::vector<Token*> qualifiers = {previous()};
-        Token* name = eat(T_IDENT, "Expected variable name");
+        WodType type;
+        switch (previous()->token_type) {
+            case T_INT: type = TYPE_INT; break;
+            case T_STR: type = TYPE_STR; break;
+        }
+        Token* tok = eat(T_IDENT, "Expected variable name");
 
         Expr* initializer = nullptr;
         if (match(T_EQUAL)) initializer = expression();
 
         eat(T_SEMICOLON, "Expected ';' after variable declaration.");
-        return new VarStmt(qualifiers, name, initializer);
+        return new VarStmt({tok->line, tok->col}, type, tok->text, initializer);
     }
 
     Stmt* if_stmt() {
-        Token* keyword = previous();
+        Token* tok = previous();
         eat(T_LPAREN, "Expected '(' after 'if'");
         Expr* condition = expression();
         eat(T_RPAREN, "Expected ')' after if condition");
         Stmt* then_branch = statement();
         Stmt* else_branch = nullptr;
         if (match(T_ELSE)) else_branch = statement();
-        return new IfStmt(keyword, condition, then_branch, else_branch);
+        return new IfStmt({tok->line, tok->col}, condition, then_branch, else_branch);
     }
 
     Stmt* loop_stmt() {
-        Token* keyword = previous();
+        Token* tok = previous();
         Expr* count = nullptr;
         if (match(T_LPAREN)) {
             count = expression();
             eat(T_RPAREN, "Expected ')' after loop count");
         }
         Stmt* body = statement();
-        return new LoopStmt(keyword, count, body);
+        return new LoopStmt({tok->line, tok->col}, count, body);
     }
 
     Stmt* return_stmt() {
-        Token* keyword = previous();
+        Token* tok = previous();
         Expr* expr = nullptr;
         if (!check(T_SEMICOLON)) expr = expression();
         eat(T_SEMICOLON, "Expected ';' after return statement");
-        return new ReturnStmt(keyword, expr);
-    }
-
-    Stmt* assign_stmt() {
-        Token* name = previous();
-        eat(T_EQUAL, "Expected assignment statement containing '='");
-        Expr* expr = expression();
-        eat(T_SEMICOLON, "Expected ';' after assignment statement");
-        return new AssignStmt(name, expr);
+        return new ReturnStmt({tok->line, tok->col}, expr);
     }
 
     Stmt* expr_stmt() {
+        Token* tok = peek();
         Expr* expr = expression();
         eat(T_SEMICOLON, "Expected ';' after expression");
-        return new ExprStmt(expr);
+        return new ExprStmt({tok->line, tok->col}, expr);
     }
 
     // expressions
     Expr* expression() {
-        return or();
+        return assignment();
     }
 
-    #define WOD_PARSE_LEFT_BINOP(NEXT_PREC, ...) do {   \
-        Expr* expr = NEXT_PREC();                       \
-        while (match(__VA_ARGS__)) {                    \
-            Token* op = previous();                     \
-            Expr* right = NEXT_PREC();                  \
-            expr = new BinaryExpr(expr, op, right);     \
-        }                                               \
-        return expr;                                    \
-    } while (0)
+    Expr* assignment() {
+        Expr* expr = or();
+        if (match(T_EQUAL)) {
+            Token* tok = previous();
+            Expr* value = or();
+            return new AssignExpr({tok->line, tok->col}, expr, value);
+        }
+        return expr;
+    }
 
     Expr* or() {
-        WOD_PARSE_LEFT_BINOP(and, T_PIPE_PIPE);
+        Expr* expr = and();
+        while (match(T_PIPE_PIPE)) {
+            Token* tok = previous();
+            Expr* right = and();
+            expr = new BinaryExpr({tok->line, tok->col}, expr, BinaryExpr::LOGIC_OR, right);
+        }
+        return expr;
     }
 
     Expr* and() {
-        WOD_PARSE_LEFT_BINOP(bit_or, T_AMP_AMP);
+        Expr* expr = bit_or();
+        while (match(T_AMP_AMP)) {
+            Token* tok = previous();
+            Expr* right = bit_or();
+            expr = new BinaryExpr({tok->line, tok->col}, expr, BinaryExpr::LOGIC_AND, right);
+        }
+        return expr;
     }
 
     Expr* bit_or() {
-        WOD_PARSE_LEFT_BINOP(bit_and, T_PIPE);
+        Expr* expr = bit_and();
+        while (match(T_PIPE)) {
+            Token* tok = previous();
+            Expr* right = bit_and();
+            expr = new BinaryExpr({tok->line, tok->col}, expr, BinaryExpr::BIT_OR, right);
+        }
+        return expr;
     }
 
     Expr* bit_and() {
-        WOD_PARSE_LEFT_BINOP(comparison, T_AMP);
+        Expr* expr = comparison();
+        while (match(T_AMP)) {
+            Token* tok = previous();
+            Expr* right = comparison();
+            expr = new BinaryExpr({tok->line, tok->col}, expr, BinaryExpr::BIT_AND, right);
+        }
+        return expr;
     }
 
     Expr* comparison() {
-        WOD_PARSE_LEFT_BINOP(bit_shift, {T_GREATER, T_GREATER_EQUAL, T_LESS, T_LESS_EQUAL});
+        Expr* expr = bit_shift();
+        while (match({T_GREATER, T_GREATER_EQUAL, T_LESS, T_LESS_EQUAL})) {
+            Token* tok = previous();
+            Expr* right = bit_shift();
+            BinaryExpr::BinaryOp op;
+            switch (tok->token_type) {
+                case T_GREATER:         op = BinaryExpr::GT; break;
+                case T_GREATER_EQUAL:   op = BinaryExpr::GTE; break;
+                case T_LESS:            op = BinaryExpr::LT; break;
+                case T_LESS_EQUAL:      op = BinaryExpr::LTE; break;
+            }
+            expr = new BinaryExpr({tok->line, tok->col}, expr, op, right);
+        }
+        return expr;
     }
 
     Expr* bit_shift() {
-        WOD_PARSE_LEFT_BINOP(addsub, {T_LESS_LESS, T_GREATER_GREATER});
+        Expr* expr = addsub();
+        while (match({T_LESS_LESS, T_GREATER_GREATER})) {
+            Token* tok = previous();
+            Expr* right = addsub();
+            BinaryExpr::BinaryOp op;
+            switch (tok->token_type) {
+                case T_LESS_LESS:         op = BinaryExpr::LSHIFT; break;
+                case T_GREATER_GREATER:   op = BinaryExpr::RSHIFT; break;
+            }
+            expr = new BinaryExpr({tok->line, tok->col}, expr, op, right);
+        }
+        return expr;
     }
     
     Expr* addsub() {
-        WOD_PARSE_LEFT_BINOP(muldiv, {T_PLUS, T_MINUS});
+        Expr* expr = muldiv();
+        while (match({T_PLUS, T_MINUS})) {
+            Token* tok = previous();
+            Expr* right = muldiv();
+            BinaryExpr::BinaryOp op;
+            switch (tok->token_type) {
+                case T_PLUS:    op = BinaryExpr::ADD; break;
+                case T_MINUS:   op = BinaryExpr::SUB; break;
+            }
+            expr = new BinaryExpr({tok->line, tok->col}, expr, op, right);
+        }
+        return expr;
     }
 
     Expr* muldiv() {
-        WOD_PARSE_LEFT_BINOP(unary, {T_STAR, T_SLASH});
+        Expr* expr = unary();
+        while (match({T_STAR, T_SLASH})) {
+            Token* tok = previous();
+            Expr* right = unary();
+            BinaryExpr::BinaryOp op;
+            switch (tok->token_type) {
+                case T_STAR:    op = BinaryExpr::MUL; break;
+                case T_SLASH:   op = BinaryExpr::DIV; break;
+            }
+            expr = new BinaryExpr({tok->line, tok->col}, expr, op, right);
+        }
+        return expr;
     }
-
-    #undef WOD_PARSE_LEFT_BINOP
 
     Expr* unary() {
         while (match({T_BANG, T_MINUS})) {
-            Token* op = previous();
+            Token* tok = previous();
             Expr* right = unary();
-            return new UnaryExpr(op, right);
+            UnaryExpr::UnaryOp op;
+            switch (tok->token_type) {
+                case T_BANG:    op = UnaryExpr::LOGIC_NOT; break;
+                case T_MINUS:   op = UnaryExpr::MINUS; break;
+            }
+            return new UnaryExpr({tok->line, tok->col}, op, right);
         }
-
         return call();
     }
 
     Expr* call() {
         Expr* expr = nullptr;
         if (match(T_IDENT)) {
-            Token* name = previous();
-            expr = new VariableExpr(name);
+            Token* tok = previous();
             if (match(T_LPAREN)) {
-                expr = finish_call(name);
+                expr = finish_call(tok);
+            } else {
+                expr = new VariableExpr({tok->line, tok->col}, tok->text);
             }
         } else {
             expr = primary();
@@ -217,17 +296,19 @@ private:
 
         eat(T_RPAREN, "Expected ')' after argument list");
 
-        return new CallExpr(callee, args);
+        return new CallExpr({callee->line, callee->col}, callee->text, args);
     }
 
     Expr* primary() {
-        if (match(T_NUMBER)) return new IntLiteralExpr(std::stoi(previous()->text));
+        if (match(T_NUMBER))
+            return new IntLiteralExpr({previous()->line, previous()->col}, std::stoi(previous()->text));
+        if (match(T_STRING))
+            return new StrLiteralExpr({previous()->line, previous()->col}, previous()->text);
         if (match(T_LPAREN)) {
             Expr* expr = expression();
             eat(T_RPAREN, "Expected ')' after expression");
             return expr;
         }
-        
         error(peek(), "Invalid expression");
         return nullptr;
     }

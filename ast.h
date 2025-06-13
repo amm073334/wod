@@ -5,81 +5,87 @@
 #include "visitor.h"
 #include "environment.h"
 
-struct Stmt { virtual void accept(Visitor* v) = 0; };
-struct Expr { virtual void accept(Visitor* v) = 0; WodType type; };
+struct Position {
+    size_t line;
+    size_t col;
+};
+
+struct Node {
+    Node(Position pos) : pos(pos) {}
+    virtual void accept(Visitor* v) = 0;
+    Position pos;
+};
+
+struct Stmt : public Node {
+    Stmt(Position pos) : Node(pos) {}
+};
+
+struct Expr : public Node {
+    Expr(Position pos) : Node(pos) {}
+    WodType type;
+    bool assignable;
+};
 
 // statements
 struct FunctionStmt : public Stmt {
     struct ParamDecl {
-        Token* type;
-        Token* name;
+        WodType type;
+        std::string name;
     };
-    FunctionStmt(Token* return_type, Token* name, std::vector<ParamDecl> params, std::vector<Stmt*> body)
-        : return_type(return_type), name(name), params(params), body(body) {}
+    FunctionStmt(Position pos, WodType return_type, std::string name, std::vector<ParamDecl> params, std::vector<Stmt*> body)
+        : Stmt(pos), return_type(return_type), name(name), params(params), body(body) {}
     void accept(Visitor* v) override { v->visit_FunctionStmt(this); }
-    Token* return_type;
-    Token* name;
+    WodType return_type;
+    std::string name;
     std::vector<ParamDecl> params;
     std::vector<Stmt*> body;
     Symbol* sym;
 };
 
 struct BlockStmt : public Stmt {
-    BlockStmt(std::vector<Stmt*> stmts)
-        : stmts(stmts) {}
+    BlockStmt(Position pos, std::vector<Stmt*> stmts)
+        : Stmt(pos), stmts(stmts) {}
     void accept(Visitor* v) override { v->visit_BlockStmt(this); }
     std::vector<Stmt*> stmts;
 };
 
 struct ReturnStmt : public Stmt {
-    ReturnStmt(Token* keyword, Expr* expr)
-        : keyword(keyword), expr(expr) {}
+    ReturnStmt(Position pos, Expr* expr)
+        : Stmt(pos), expr(expr) {}
     void accept(Visitor* v) override { v->visit_ReturnStmt(this); }
-    Token* keyword;
     Expr* expr;
 };
 
 struct VarStmt : public Stmt {
-    VarStmt(std::vector<Token*> qualifiers, Token* name, Expr* initializer)
-        : qualifiers(qualifiers), name(name), initializer(initializer) {}
+    VarStmt(Position pos, WodType type, std::string name, Expr* initializer)
+        : Stmt(pos), type(type), name(name), initializer(initializer) {}
     void accept(Visitor* v) override { v->visit_VarStmt(this); }
-    std::vector<Token*> qualifiers;
-    Token* name;
+    WodType type;
+    std::string name;
     Expr* initializer;
     Symbol* sym;
 };
 
-struct AssignStmt : public Stmt {
-    AssignStmt(Token* name, Expr* expr)
-        : name(name), expr(expr) {}
-    void accept(Visitor* v) override { v->visit_AssignStmt(this); }
-    Token* name;
-    Expr* expr;
-    Environment* env;
-};
-
 struct ExprStmt : public Stmt {
-    ExprStmt(Expr* expr)
-        : expr(expr) {}
+    ExprStmt(Position pos, Expr* expr)
+        : Stmt(pos), expr(expr) {}
     void accept(Visitor* v) override { v->visit_ExprStmt(this); }
     Expr* expr;
 };
 
 struct IfStmt : public Stmt {
-    IfStmt(Token* keyword, Expr* condition, Stmt* then_branch, Stmt* else_branch)
-        : keyword(keyword), condition(condition), then_branch(then_branch), else_branch(else_branch) {}
+    IfStmt(Position pos, Expr* condition, Stmt* then_branch, Stmt* else_branch)
+        : Stmt(pos), condition(condition), then_branch(then_branch), else_branch(else_branch) {}
     void accept(Visitor* v) override { v->visit_IfStmt(this); }
-    Token* keyword;
     Expr* condition;
     Stmt* then_branch;
     Stmt* else_branch;
 };
 
 struct LoopStmt : public Stmt {
-    LoopStmt(Token* keyword, Expr* count, Stmt* body)
-        : keyword(keyword), count(count), body(body) {}
+    LoopStmt(Position pos, Expr* count, Stmt* body)
+        : Stmt(pos), count(count), body(body) {}
     void accept(Visitor* v) override { v->visit_LoopStmt(this); }
-    Token* keyword;
     Expr* count;
     Stmt* body;
 };
@@ -87,58 +93,78 @@ struct LoopStmt : public Stmt {
 
 // expressions
 struct AssignExpr : public Expr {
-    AssignExpr(Token* name, Expr* expr)
-        : name(name), expr(expr) {}
+    AssignExpr(Position pos, Expr* lhs, Expr* rhs)
+        : Expr(pos), lhs(lhs), rhs(rhs) {}
     void accept(Visitor* v) override { v->visit_AssignExpr(this); }
-    Token* name;
-    Expr* expr;
+    Expr* lhs;
+    Expr* rhs;
     Environment* env;
 };
 
 struct VariableExpr : public Expr {
-    VariableExpr(Token* name)
-        : name(name) {}
+    VariableExpr(Position pos, std::string name)
+        : Expr(pos), name(name) {}
     void accept(Visitor* v) override { v->visit_VariableExpr(this); }
-    Token* name;
+    std::string name;
     Environment* env;
 };
 
 struct BinaryExpr : public Expr {
-    BinaryExpr(Expr* left, Token* op, Expr* right)
-        : left(left), op(op), right(right) {}
+    enum BinaryOp {
+        LOGIC_AND,
+        LOGIC_OR,
+        BIT_AND,
+        BIT_OR,
+        GT,
+        GTE,
+        LT,
+        LTE,
+        LSHIFT,
+        RSHIFT,
+        ADD,
+        SUB,
+        MUL,
+        DIV,
+    };
+    BinaryExpr(Position pos, Expr* left, BinaryOp op, Expr* right)
+        : Expr(pos), left(left), op(op), right(right) {}
     void accept(Visitor* v) override { v->visit_BinaryExpr(this); }
     Expr* left;
-    Token* op;
+    BinaryOp op;
     Expr* right;
 };
 
 struct UnaryExpr : public Expr {
-    UnaryExpr(Token* op, Expr* right)
-        : op(op), right(right) {}
+    enum UnaryOp {
+        LOGIC_NOT,
+        MINUS
+    };
+    UnaryExpr(Position pos, UnaryOp op, Expr* right)
+        : Expr(pos), op(op), right(right) {}
     void accept(Visitor* v) override { v->visit_UnaryExpr(this); }
-    Token* op;
+    UnaryOp op;
     Expr* right;
 };
 
 struct CallExpr : public Expr {
-    CallExpr(Token* name, std::vector<Expr*> args)
-        : name(name), args(args) {}
+    CallExpr(Position pos, std::string name, std::vector<Expr*> args)
+        : Expr(pos), name(name), args(args) {}
     void accept(Visitor* v) override { v->visit_CallExpr(this); }
-    Token* name;
+    std::string name;
     std::vector<Expr*> args;
     Environment* env;
 };
 
 struct IntLiteralExpr : public Expr {
-    IntLiteralExpr(int32_t value)
-        : value(value) {}
+    IntLiteralExpr(Position pos, int32_t value)
+        : Expr(pos), value(value) {}
     void accept(Visitor* v) override { v->visit_IntLiteralExpr(this); }
     int32_t value;
 };
 
 struct StrLiteralExpr : public Expr {
-    StrLiteralExpr(std::string value)
-        : value(value) {}
+    StrLiteralExpr(Position pos, std::string value)
+        : Expr(pos), value(value) {}
     void accept(Visitor* v) override { v->visit_StrLiteralExpr(this); }
     std::string value;
 };
