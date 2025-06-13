@@ -14,6 +14,8 @@ struct VariableExpr;
 struct BinaryExpr;
 struct UnaryExpr;
 struct CallExpr;
+struct IntLiteralExpr;
+struct StrLiteralExpr;
 
 class Visitor {
 public:
@@ -28,9 +30,10 @@ public:
     virtual void visit_LoopStmt(LoopStmt* stmt) = 0;
 
     // expressions
-    virtual void visit_LiteralExpr(LiteralExpr* expr) = 0;
     virtual void visit_VariableExpr(VariableExpr* expr) = 0;
     virtual void visit_BinaryExpr(BinaryExpr* expr) = 0;
     virtual void visit_UnaryExpr(UnaryExpr* expr) = 0;
     virtual void visit_CallExpr(CallExpr* expr) = 0;
+    virtual void visit_IntLiteralExpr(IntLiteralExpr* expr) = 0;
+    virtual void visit_StrLiteralExpr(StrLiteralExpr* expr) = 0;
 };

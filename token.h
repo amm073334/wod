@@ -1,7 +1,5 @@
 #pragma once
 
-#include "types.h"
-
 enum TokenType {
     // one character
     T_LBRACE, T_RBRACE,
@@ -31,18 +29,12 @@ enum TokenType {
 };
 
 struct Token {
-    Token(TokenType token_type, std::string text, int32_t n, size_t line) 
-    : token_type(token_type), text(text), lit(n), line(line) {}
-    Token(TokenType token_type, std::string text, std::string s, size_t line) 
-    : token_type(token_type), text(text), lit(s), line(line) {}
     Token(TokenType token_type, std::string text, size_t line) 
     : token_type(token_type), text(text), line(line) {}
 
     const TokenType token_type;
     const std::string text;
-    const LitVal lit;
     const size_t line;
-    Type type;
 
     std::string to_string() {
         return "(" + std::to_string(token_type) + " " + text + ")";

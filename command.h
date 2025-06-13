@@ -3,21 +3,55 @@
 #include <cstdint>
 
 enum CommandId : int32_t {
-    CMD_EMPTY = 0,
-    CMD_ARITH = 121,
-    CMD_RETURN = 172,
-    CMD_CALLNAME = 300
+    CMD_EMPTY           = 0,
+    CMD_IF_INT          = 111,
+    CMD_IF_STR          = 112,
+    CMD_ARITH           = 121,
+    CMD_STRING          = 122,
+    CMD_LOOP            = 170,
+    CMD_RETURN          = 172,
+    CMD_LOOP_COUNT      = 179,
+    CMD_CALL_ID         = 210,
+    CMD_CALL_RESERVE    = 211,
+    CMD_CALL_NAME       = 300,
+    CMD_BRANCH          = 401,
+    CMD_BRANCH_ELSE     = 420,
+    CMD_LOOP_END        = 498,
+    CMD_IF_END          = 499,
 };
 
-enum ArithFlags : int32_t {
+enum IfFlag : int32_t {
+    IF_HAS_ELSE = 0x10,
+};
+
+enum IfIntBranchFlag : int32_t {
+    IF_INT_OP_GT,
+    IF_INT_OP_GTE,
+    IF_INT_OP_EQ,
+    IF_INT_OP_LTE,
+    IF_INT_OP_LT,
+    IF_INT_OP_NEQ,
+    IF_INT_OP_AND,
+    IF_INT_BRANCH_SUPPRESS = 0x10
+};
+
+enum IfStrBranchFlag : int32_t {
+    IF_STR_OP_EQ            = 0x00000000,
+    IF_STR_OP_NEQ           = 0x10000000,
+    IF_STR_OP_CONTAINS      = 0x20000000,
+    IF_STR_OP_STARTSWITH    = 0x30000000,
+    IF_STR_BRANCH_REF       =  0x1000000
+};
+
+enum ArithFlag : int32_t {
     // miscellaneous flags
-    ARITH_FLAG_LIMIT           = 0x01,
-    ARITH_FLAG_REAL            = 0x02,
-    ARITH_FLAG_SUPPRESS_RHS_0  = 0x04,
-    ARITH_FLAG_SUPPRESS_RHS_1  = 0x08,
-    ARITH_FLAG_DEREF_LHS       = 0x10,
-    ARITH_FLAG_DEREF_RHS_0     = 0x20,
-    ARITH_FLAG_DEREF_RHS_1     = 0x40,
+    ARITH_LIMIT           = 0x01,
+    ARITH_REAL            = 0x02,
+    ARITH_SUPPRESS_RHS_0  = 0x04,
+    ARITH_SUPPRESS_RHS_1  = 0x08,
+    ARITH_DEREF_LHS       = 0x10,
+    ARITH_DEREF_RHS_0     = 0x20,
+    ARITH_DEREF_RHS_1     = 0x40,
 
     // assignment operators
     ARITH_ASSIGN_EQ          = 0x000,
@@ -29,7 +63,7 @@ enum ArithFlags : int32_t {
     ARITH_ASSIGN_LOW_BOUND   = 0x600,
     ARITH_ASSIGN_HIGH_BOUND  = 0x700,
     ARITH_ASSIGN_ABS         = 0x800,
-    ARITH_ASSIGN_ATAN        = 0xf900, // for whatever reason, atan seems to have an extra F
+    ARITH_ASSIGN_ATAN        = 0xf900, // for whatever reason, atan needs to have an extra F
     ARITH_ASSIGN_SIN         = 0xa00,
     ARITH_ASSIGN_COS         = 0xb00,
     ARITH_ASSIGN_SQRT        = 0xc00,
@@ -40,7 +74,29 @@ enum ArithFlags : int32_t {
     ARITH_OP_TIMES    = 0x2000,
     ARITH_OP_DIV      = 0x3000,
     ARITH_OP_MOD      = 0x4000,
-    ARITH_OP_BITAND   = 0x5000
+    ARITH_OP_AND      = 0x5000,
+    ARITH_OP_RAND     = 0x6000,
+    ARITH_OP_OR       = 0x7000,
+    ARITH_OP_XOR      = 0x8000,
+    ARITH_OP_LSHIFT   = 0x9000,
+};
+
+enum StringFlag {
+    STRING_RHS_LIT          =    0x0,
+    STRING_RHS_REF          =    0x1,
+    STRING_RHS_KB           =    0x2,
+    STRING_RHS_DEREF        =    0x3,
+    STRING_DEREF_LHS        =   0x10,
+    STRING_KB_CANCELABLE    = 0x1000,
+    STRING_KB_INITIALIZE    = 0x2000,
+
+    STRING_ASSIGN_EQ        =   0x0,
+    STRING_ASSIGN_PLUS_EQ   = 0x100,
+};
+
+enum CallFlag {
+    CALL_EVAL_NAME      =     0x100,
+    CALL_STORES_RETURN  = 0x1000000,
 };
 
 struct Command {

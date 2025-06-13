@@ -28,26 +28,34 @@ private:
     // statements
     Stmt* global_stmt() {
         try {
-            if (match({T_VOID, T_INT})) return function_decl();
+            if (match({T_VOID, T_INT, T_STR})) return function_decl();
             error(peek(), "Invalid statement");
         } catch (std::runtime_error e) {
             synchronize();
-            std::cout << tokens.at(pos).line << std::endl;
             return nullptr;
         }
         return nullptr;
     }
 
     Stmt* function_decl() {
+        Token* type = previous();
         Token* name = eat(T_IDENT, "Expected function name");
         eat(T_LPAREN, "Expected '(' after function name");
-        std::vector<Token*> params;
-        
-        eat(T_RPAREN, "args not yet implemented");
+        std::vector<FunctionStmt::ParamDecl> params;
+        size_t n_int_args = 0;
+        size_t n_str_args = 0;
+        if (!check(T_RPAREN)) do {
+            if (n_int_args > 5 || n_str_args > 5)
+                error(peek(), "Too many parameters (max: 5)");
+            if (match({T_INT, T_STR})) {
+                params.push_back({previous(), eat(T_IDENT, "Expected parameter name")});
+                previous()->token_type == T_INT ? n_int_args++ : n_str_args++;
+            }
+        } while (match(T_COMMA));
 
+        eat(T_RPAREN, "Expected ')' after function parameters");
         eat(T_LBRACE, "Expected '{' before function body");
-        
-        return new FunctionStmt(name, params, block());
+        return new FunctionStmt(type, name, params, block());
     }
 
     std::vector<Stmt*> block() {
@@ -64,48 +72,52 @@ private:
         if (match(T_IF)) return if_stmt();
         if (match(T_LOOP)) return loop_stmt();
         if (match(T_RETURN)) return return_stmt();
-        if (match(T_INT)) return var_decl();
+        if (match(T_INT)) return var_stmt();
         if (match(T_LBRACE)) return new BlockStmt(block());
         if (match(T_IDENT)) return assign_stmt();
 
         return expr_stmt();
     }
 
-    Stmt* var_decl() {
+    Stmt* var_stmt() {
+        std::vector<Token*> qualifiers = {previous()};
         Token* name = eat(T_IDENT, "Expected variable name");
 
         Expr* initializer = nullptr;
         if (match(T_EQUAL)) initializer = expression();
 
         eat(T_SEMICOLON, "Expected ';' after variable declaration.");
-        return new VarStmt(name, initializer);
+        return new VarStmt(qualifiers, name, initializer);
     }
 
     Stmt* if_stmt() {
+        Token* keyword = previous();
         eat(T_LPAREN, "Expected '(' after 'if'");
         Expr* condition = expression();
         eat(T_RPAREN, "Expected ')' after if condition");
         Stmt* then_branch = statement();
         Stmt* else_branch = nullptr;
         if (match(T_ELSE)) else_branch = statement();
-        return new IfStmt(condition, then_branch, else_branch);
+        return new IfStmt(keyword, condition, then_branch, else_branch);
     }
 
     Stmt* loop_stmt() {
+        Token* keyword = previous();
         Expr* count = nullptr;
         if (match(T_LPAREN)) {
             count = expression();
             eat(T_RPAREN, "Expected ')' after loop count");
         }
         Stmt* body = statement();
-        return new LoopStmt(count, body);
+        return new LoopStmt(keyword, count, body);
     }
 
     Stmt* return_stmt() {
+        Token* keyword = previous();
         Expr* expr = nullptr;
         if (!check(T_SEMICOLON)) expr = expression();
         eat(T_SEMICOLON, "Expected ';' after return statement");
-        return new ReturnStmt(expr);
+        return new ReturnStmt(keyword, expr);
     }
 
     Stmt* assign_stmt() {
@@ -199,8 +211,7 @@ private:
     Expr* finish_call(Token* callee) {
         std::vector<Expr*> args;
         
-        if (!check(T_RPAREN))
-        do {
+        if (!check(T_RPAREN)) do {
             args.push_back(expression());
         } while (match(T_COMMA));
 
@@ -210,7 +221,7 @@ private:
     }
 
     Expr* primary() {
-        if (match(T_NUMBER)) return new LiteralExpr(previous()->lit);
+        if (match(T_NUMBER)) return new IntLiteralExpr(std::stoi(previous()->text));
         if (match(T_LPAREN)) {
             Expr* expr = expression();
             eat(T_RPAREN, "Expected ')' after expression");

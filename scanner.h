@@ -102,7 +102,7 @@ private:
 
     void try_number() {
         while (std::isdigit(peek())) pos++;
-        add_token(T_NUMBER, std::stoi(source.substr(token_start, pos - token_start)));
+        add_token(T_NUMBER);
     }
 
     void try_identifier() {
@@ -111,7 +111,7 @@ private:
         if (keywords.count(text)) {
             add_token(keywords.at(text));
         } else {
-            add_token(T_IDENT, text);
+            add_token(T_IDENT);
         }
     }
 
@@ -136,14 +136,6 @@ private:
         return pos >= source.size();
     }
     
-    void add_token(TokenType token_type, std::string s) {
-        tokens.push_back(Token(token_type, source.substr(token_start, pos - token_start), s, line));
-    }
-
-    void add_token(TokenType token_type, int32_t n) {
-        tokens.push_back(Token(token_type, source.substr(token_start, pos - token_start), n, line));
-    }
-
     void add_token(TokenType token_type) {
         tokens.push_back(Token(token_type, source.substr(token_start, pos - token_start), line));
     }

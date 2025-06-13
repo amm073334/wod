@@ -2,6 +2,7 @@
 #include "scanner.h"
 #include "parser.h"
 #include "printer.h"
+#include "typechecker.h"
 #include "codegen.h"
 
 int main(int argc, const char* argv[]) {
@@ -21,8 +22,12 @@ int main(int argc, const char* argv[]) {
     // Printer printer;
     // printer.print(statements);
 
-    // Codegen codegen;
-    // std::cout << codegen.gen(statements);
+    Typechecker typechecker;
+    typechecker.typecheck(statements);
+    if (typechecker.failed()) exit(1);
+
+    Codegen codegen;
+    std::cout << codegen.gen(statements);
 
     return 0;
 }
