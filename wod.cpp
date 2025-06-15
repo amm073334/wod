@@ -23,11 +23,12 @@ int main(int argc, const char* argv[]) {
     // printer.print(statements);
 
     Typechecker typechecker;
-    Environment env = typechecker.typecheck(statements);
+    Environment* env = typechecker.typecheck(statements);
     if (typechecker.failed()) exit(1);
 
     Codegen codegen;
     std::cout << codegen.gen(statements);
 
+    delete env;
     return 0;
 }

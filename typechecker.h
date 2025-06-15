@@ -10,11 +10,13 @@
 
 class Typechecker : public Visitor {
 public:
-    Environment typecheck(std::vector<Stmt*> &program) {
+    Environment* typecheck(std::vector<Stmt*> &program) {
+        global_env = new Environment;
+        current_env = global_env;
         for (Stmt* s : program) s->accept(this);
         globals_visited = true;
         for (Stmt* s : program) s->accept(this);
-        assert(&global_env == current_env);
+        assert(global_env == current_env);
         return global_env;
     }
 
@@ -319,8 +321,8 @@ private:
     int32_t current_cev_ref = CEV_THRESHOLD;
     int32_t current_cint_ref = CSELF_THRESHOLD + 10;
 
-    Environment global_env;
-    Environment* current_env = &global_env;
+    Environment* global_env;
+    Environment* current_env;
     void open_scope() { current_env = new Environment(current_env); }
     void close_scope() { current_env = current_env->parent(); assert(current_env); }
 

@@ -36,9 +36,8 @@ public:
             s->accept(this);
         }
 
-        if (current_cev->COMMAND_NUM == 0) {
-            current_cev->add_cmd(CMD_EMPTY);
-        }
+        // for text file common events, if the last line is not an empty line then loading will fail
+        current_cev->add_cmd(CMD_EMPTY);
 
         end_frame();
     }
@@ -57,27 +56,27 @@ public:
             return;
         }
         
+        begin_frame();
         WolfValue v = eval(stmt->expr);
-        switch (stmt->expr->type) {
-            case TYPE_INT:
-                if (current_cev->RETURN_VAL_TARGET == -1)
-                    current_cev->RETURN_VAL_TARGET = int_sp - CSELF_THRESHOLD;
-                else
+        if (current_cev->RETURN_VAL_TARGET == -1)
+            current_cev->RETURN_VAL_TARGET = v.v - CSELF_THRESHOLD;
+        else {
+            switch (stmt->expr->type) {
+                case TYPE_INT:
                     cmd_arith(WolfValue{WT_NUMREF, CSELF_THRESHOLD + current_cev->RETURN_VAL_TARGET}, v);
-                break;
-            case TYPE_STR:
-                if (current_cev->RETURN_VAL_TARGET == -1)
-                    current_cev->RETURN_VAL_TARGET = str_sp - CSELF_THRESHOLD;
-                else 
+                    break;
+                case TYPE_STR:
                     cmd_string(WolfValue{WT_STRREF, CSELF_THRESHOLD + current_cev->RETURN_VAL_TARGET}, v);
-                break;
+                    break;
+            }
         }
         current_cev->add_cmd(CMD_RETURN);
+        end_frame();
     }
 
     void visit_ExprStmt(ExprStmt* stmt) override {
         begin_frame();
-        stmt->expr->accept(this);
+        eval(stmt->expr);
         end_frame();
     }
 
@@ -113,10 +112,12 @@ public:
         stmt->then_branch->accept(this);
         end_frame();
         if (stmt->else_branch) {
+            cmd_else();
             begin_frame();
             stmt->else_branch->accept(this);
             end_frame();
         }
+        cmd_end_if();
     }
 
     void visit_LoopStmt(LoopStmt* stmt) override {
@@ -186,6 +187,8 @@ public:
             case BinaryExpr::GTE:
             case BinaryExpr::LT:
             case BinaryExpr::LTE:
+            case BinaryExpr::EQ:
+            case BinaryExpr::NEQ:
                 binary_comp_expr(expr);
                 break;
             default:
@@ -393,16 +396,14 @@ private:
     std::vector<CommonEvent> cevs;
     CommonEvent* current_cev = nullptr;
     int32_t int_sp = CSELF_THRESHOLD + 10 - 1; // start pointers at one less than the minimum value
-    int32_t int_bp = CSELF_THRESHOLD + 10 - 1; // because a push operation will start by incrementing them to the minimum
-    int32_t str_sp = CSELF_THRESHOLD + 5  - 1;
-    int32_t str_bp = CSELF_THRESHOLD + 5  - 1;
+    int32_t str_sp = CSELF_THRESHOLD + 5  - 1; // because a push operation will start by incrementing them to the minimum
 
     struct VarScope {
         const int32_t int_bp;
         const int32_t str_bp;
     };
     std::stack<VarScope> scopes;
-    void begin_frame() { scopes.push({int_bp, str_bp}); };
+    void begin_frame() { scopes.push({int_sp, str_sp}); };
     void end_frame() { int_sp = scopes.top().int_bp; str_sp = scopes.top().str_bp; scopes.pop(); };
     WolfValue int_top() { return WolfValue{WT_NUMREF, int_sp}; }
     WolfValue str_top() { return WolfValue{WT_STRREF, str_sp}; }

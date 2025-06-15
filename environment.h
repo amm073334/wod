@@ -51,20 +51,20 @@ public:
         return enclosing;
     }
 
-    // void print() {
-    //     std::cout << "{ ";
-    //     for (auto p : symbols) {
-    //         std::cout << p.first << " ";
-    //     }
-    //     std::cout << std::endl;
-    //     for (Environment* c : children) {
-    //         c->print();
-    //     }
-    //     std::cout << "}" << std::endl;
-    // }
+    void print() {
+        std::cout << "{ ";
+        for (auto p : symbols) {
+            std::cout << p.first << " ";
+        }
+        std::cout << std::endl;
+        for (Environment* c : children) {
+            c->print();
+        }
+        std::cout << "}" << std::endl;
+    }
 
 private:
     Environment* enclosing;
-    std::vector<Environment*> children;
+    std::list<Environment*> children;
     std::unordered_map<std::string, Symbol> symbols;
 };
