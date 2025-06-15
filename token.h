@@ -4,6 +4,7 @@ enum TokenType {
     // one character
     T_LBRACE, T_RBRACE,
     T_LPAREN, T_RPAREN,
+    T_LBRACK, T_RBRACK,
     T_COMMA, T_DOT,
     T_PLUS, T_MINUS,
     T_SLASH, T_STAR, T_PERCENT,
@@ -18,8 +19,9 @@ enum TokenType {
     T_PIPE, T_PIPE_PIPE,
 
     // keywords
-    T_VOID, T_INT, T_STR, T_RETURN,
-    T_IF, T_ELSE, T_LOOP,
+    T_VOID, T_INT, T_STR, T_CONST, T_INLINE,
+    T_IF, T_ELSE, T_LOOP, T_RETURN,
+    T_CMD,
 
     // literals
     T_IDENT, T_NUMBER, T_STRING,

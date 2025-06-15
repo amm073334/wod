@@ -50,10 +50,13 @@ private:
         {"void", T_VOID},
         {"int", T_INT},
         {"str", T_STR},
-        {"return", T_RETURN},
+        {"const", T_CONST},
+        {"inline", T_INLINE},
         {"if", T_IF},
         {"else", T_ELSE},
-        {"loop", T_LOOP}
+        {"loop", T_LOOP},
+        {"return", T_RETURN},
+        {"cmd", T_CMD},
     };
 
     void scan_token() {
@@ -63,6 +66,8 @@ private:
             case '}': add_token(T_RBRACE); break;
             case '(': add_token(T_LPAREN); break;
             case ')': add_token(T_RPAREN); break;
+            case '[': add_token(T_LBRACK); break;
+            case ']': add_token(T_RBRACK); break;
             case ',': add_token(T_COMMA); break;
             case '.': add_token(T_DOT); break;
             case '+': add_token(T_PLUS); break;

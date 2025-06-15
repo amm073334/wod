@@ -7,6 +7,7 @@ struct ExprStmt;
 struct VarStmt;
 struct IfStmt;
 struct LoopStmt;
+struct CmdStmt;
 
 struct AssignExpr;
 struct LiteralExpr;
@@ -27,6 +28,7 @@ public:
     virtual void visit_VarStmt(VarStmt* stmt) = 0;
     virtual void visit_IfStmt(IfStmt* stmt) = 0;
     virtual void visit_LoopStmt(LoopStmt* stmt) = 0;
+    virtual void visit_CmdStmt(CmdStmt* stmt) = 0;
 
     // expressions
     virtual void visit_AssignExpr(AssignExpr* expr) = 0;

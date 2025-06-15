@@ -29,6 +29,7 @@ private:
     Stmt* global_stmt() {
         try {
             if (match({T_VOID, T_INT, T_STR})) return function_decl();
+            if (match(T_CONST)) return var_stmt();
             error(peek(), "Invalid statement");
         } catch (std::runtime_error e) {
             synchronize();
@@ -59,7 +60,10 @@ private:
                     case T_STR: arg_type = TYPE_STR; break;
                 }
                 params.push_back({arg_type, eat(T_IDENT, "Expected parameter name")->text});
-                previous()->token_type == T_INT ? n_int_args++ : n_str_args++;
+                if (arg_type == TYPE_INT) n_int_args++;
+                else n_str_args++;
+            } else {
+                error(peek(), "Invalid parameter type");
             }
         } while (match(T_COMMA));
 
@@ -82,13 +86,44 @@ private:
         if (match(T_IF)) return if_stmt();
         if (match(T_LOOP)) return loop_stmt();
         if (match(T_RETURN)) return return_stmt();
-        if (match({T_INT, T_STR})) return var_stmt();
+        if (match({T_INT, T_STR, T_CONST})) return var_stmt();
+        if (match(T_CMD)) return cmd_stmt();
         if (match(T_LBRACE)) return new BlockStmt({previous()->line, previous()->col}, block());
 
         return expr_stmt();
     }
 
+    Stmt* cmd_stmt() {
+        Token* tok = previous();
+
+        eat(T_LBRACK, "Expected '[' after 'cmd'");
+        Expr* cmd_id = expression();
+        eat(T_RBRACK, "Expected ']' after cmd id");
+
+        eat(T_LPAREN, "Expected '(' before cmd integer arguments");
+        std::vector<Expr*> int_fields;
+        if (!check(T_RPAREN)) do {
+            int_fields.push_back(expression());
+        } while (match(T_COMMA));
+        eat(T_RPAREN, "Expected ')' after cmd integer arguments");
+        
+        eat(T_LPAREN, "Expected '(' before cmd string arguments");
+        std::vector<Expr*> str_fields;
+        if (!check(T_RPAREN)) do {
+            str_fields.push_back(expression());
+        } while (match(T_COMMA));
+        eat(T_RPAREN, "Expected ')' after cmd string arguments");
+        eat(T_SEMICOLON, "Expected ';' after cmd statement");
+        
+        return new CmdStmt({tok->line, tok->col}, cmd_id, int_fields, str_fields);
+    }
+
     Stmt* var_stmt() {
+        bool is_const = false;
+        if (previous()->token_type == T_CONST) {
+            is_const = true;
+            advance();
+        }
         WodType type;
         switch (previous()->token_type) {
             case T_INT: type = TYPE_INT; break;
@@ -99,8 +134,8 @@ private:
         Expr* initializer = nullptr;
         if (match(T_EQUAL)) initializer = expression();
 
-        eat(T_SEMICOLON, "Expected ';' after variable declaration.");
-        return new VarStmt({tok->line, tok->col}, type, tok->text, initializer);
+        eat(T_SEMICOLON, "Expected ';' after variable declaration");
+        return new VarStmt({tok->line, tok->col}, is_const, type, tok->text, initializer);
     }
 
     Stmt* if_stmt() {
@@ -186,11 +221,26 @@ private:
     }
 
     Expr* bit_and() {
-        Expr* expr = comparison();
+        Expr* expr = equality();
         while (match(T_AMP)) {
             Token* tok = previous();
-            Expr* right = comparison();
+            Expr* right = equality();
             expr = new BinaryExpr({tok->line, tok->col}, expr, BinaryExpr::BIT_AND, right);
+        }
+        return expr;
+    }
+
+    Expr* equality() {
+        Expr* expr = comparison();
+        while (match({T_EQUAL_EQUAL, T_BANG_EQUAL})) {
+            Token* tok = previous();
+            Expr* right = comparison();
+            BinaryExpr::BinaryOp op;
+            switch (tok->token_type) {
+                case T_EQUAL_EQUAL: op = BinaryExpr::EQ; break;
+                case T_BANG_EQUAL:  op = BinaryExpr::NEQ; break;
+            }
+            expr = new BinaryExpr({tok->line, tok->col}, expr, op, right);
         }
         return expr;
     }

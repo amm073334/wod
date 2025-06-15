@@ -24,6 +24,9 @@ struct Expr : public Node {
     Expr(Position pos) : Node(pos) {}
     WodType type;
     bool assignable;
+    bool is_const;
+    int32_t const_int;
+    std::string const_str;
 };
 
 // statements
@@ -57,9 +60,10 @@ struct ReturnStmt : public Stmt {
 };
 
 struct VarStmt : public Stmt {
-    VarStmt(Position pos, WodType type, std::string name, Expr* initializer)
-        : Stmt(pos), type(type), name(name), initializer(initializer) {}
+    VarStmt(Position pos, bool is_const, WodType type, std::string name, Expr* initializer)
+        : Stmt(pos), is_const(is_const), type(type), name(name), initializer(initializer) {}
     void accept(Visitor* v) override { v->visit_VarStmt(this); }
+    bool is_const;
     WodType type;
     std::string name;
     Expr* initializer;
@@ -90,6 +94,15 @@ struct LoopStmt : public Stmt {
     Stmt* body;
 };
 
+struct CmdStmt : public Stmt {
+    CmdStmt(Position pos, Expr* cmd_id, std::vector<Expr*> int_fields, std::vector<Expr*> str_fields)
+        : Stmt(pos), cmd_id(cmd_id), int_fields(int_fields), str_fields(str_fields) {}
+    void accept(Visitor* v) override { v->visit_CmdStmt(this); }
+    Expr* cmd_id;
+    std::vector<Expr*> int_fields;
+    std::vector<Expr*> str_fields;
+};
+
 
 // expressions
 struct AssignExpr : public Expr {
@@ -115,6 +128,8 @@ struct BinaryExpr : public Expr {
         LOGIC_OR,
         BIT_AND,
         BIT_OR,
+        EQ,
+        NEQ,
         GT,
         GTE,
         LT,

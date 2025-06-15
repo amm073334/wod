@@ -5,9 +5,12 @@
 #include "common.h"
 
 struct Symbol {
+    bool is_const;
     WodType type;
-    int32_t ref;
+    int32_t ref; // used as const value if variable is a const int
     std::vector<WodType> arg_types;
+    std::string const_string;
+    bool initialized = false;
 };
 
 class Environment {
@@ -20,12 +23,22 @@ public:
 
     Symbol* define(std::string name, WodType type) {
         if (symbols.count(name)) return nullptr;
-        return &symbols.insert({name, Symbol({type})}).first->second;
+        return &symbols.insert({name, Symbol({false, type})}).first->second;
+    }
+
+    Symbol* define_const_int(std::string name, int32_t int_val) {
+        if (symbols.count(name)) return nullptr;
+        return &symbols.insert({name, Symbol({true, TYPE_INT, int_val})}).first->second;
+    }
+
+    Symbol* define_const_str(std::string name, std::string str_val) {
+        if (symbols.count(name)) return nullptr;
+        return &symbols.insert({name, Symbol({true, TYPE_STR, 0, {}, str_val})}).first->second;
     }
     
     Symbol* define_function(std::string name, int32_t ref, WodType type, std::vector<WodType> arg_types) {
         if (symbols.count(name)) return nullptr;
-        return &symbols.insert({name, Symbol({type, ref, arg_types})}).first->second;
+        return &symbols.insert({name, Symbol({false, type, ref, arg_types})}).first->second;
     }
 
     Symbol* get(std::string name) {
@@ -37,6 +50,18 @@ public:
     Environment* parent() {
         return enclosing;
     }
+
+    // void print() {
+    //     std::cout << "{ ";
+    //     for (auto p : symbols) {
+    //         std::cout << p.first << " ";
+    //     }
+    //     std::cout << std::endl;
+    //     for (Environment* c : children) {
+    //         c->print();
+    //     }
+    //     std::cout << "}" << std::endl;
+    // }
 
 private:
     Environment* enclosing;

@@ -23,7 +23,7 @@ int main(int argc, const char* argv[]) {
     // printer.print(statements);
 
     Typechecker typechecker;
-    typechecker.typecheck(statements);
+    Environment env = typechecker.typecheck(statements);
     if (typechecker.failed()) exit(1);
 
     Codegen codegen;

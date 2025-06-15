@@ -42,9 +42,12 @@ public:
         int32_t int_param_ref = CSELF_THRESHOLD;
         int32_t str_param_ref = CSELF_THRESHOLD + 5;
         for (FunctionStmt::ParamDecl param : stmt->params) {
+            Symbol* sym;
+            sym = current_env->define(param.name, param.type);
+            sym->initialized = true;
             switch (param.type) {
-                case T_INT: current_env->define(param.name, TYPE_INT)->ref = int_param_ref++; break;
-                case T_STR: current_env->define(param.name, TYPE_STR)->ref = str_param_ref++; break;
+                case TYPE_INT: sym->ref = int_param_ref++; break;
+                case TYPE_STR: sym->ref = str_param_ref++; break;
             }
         }
         for (Stmt* s : stmt->body) s->accept(this);
@@ -58,8 +61,13 @@ public:
     }
 
     void visit_ReturnStmt(ReturnStmt* stmt) override {
-        stmt->expr->accept(this);
-        if (stmt->expr->type != current_return_type)
+        WodType ret_expr_type;
+        if (!stmt->expr) ret_expr_type = TYPE_VOID;
+        else {
+            stmt->expr->accept(this);
+            ret_expr_type = stmt->expr->type;
+        }
+        if (ret_expr_type != current_return_type)
             error(stmt->pos, "Return type mismatch");
     }
 
@@ -68,12 +76,26 @@ public:
     }
 
     void visit_VarStmt(VarStmt* stmt) override {
-        stmt->initializer->accept(this);
-        // only one qualifier for now
-        if (stmt->initializer->type != stmt->type)
-            error(stmt->pos, "Declaration type mismatch");
+        if (!globals_visited) return;
 
-        stmt->sym = current_env->define(stmt->name, stmt->type);
+        if (!stmt->initializer) {
+            stmt->sym = current_env->define(stmt->name, stmt->type);
+            stmt->sym->initialized = false;
+        } else {
+            stmt->initializer->accept(this);
+            if (stmt->initializer->type != stmt->type)
+                error(stmt->pos, "Declaration type mismatch");
+            if (stmt->is_const) {
+                if (!stmt->initializer->is_const)
+                    error(stmt->pos, "Attempted to assign non-const expression to const variable");
+                if (stmt->initializer->type == TYPE_INT)
+                    stmt->sym = current_env->define_const_int(stmt->name, stmt->initializer->const_int);
+                if (stmt->initializer->type == TYPE_STR)
+                    stmt->sym = current_env->define_const_str(stmt->name, stmt->initializer->const_str);
+            } else stmt->sym = current_env->define(stmt->name, stmt->type);
+            stmt->sym->initialized = true;
+        }
+        if (!stmt->sym) error(stmt->pos, "Variable redeclaration");
     }
 
     void visit_IfStmt(IfStmt* stmt) override {
@@ -101,44 +123,161 @@ public:
         close_scope();
     }
 
+    void visit_CmdStmt(CmdStmt* stmt) override {
+        stmt->cmd_id->accept(this);
+        if (!stmt->cmd_id->is_const) {
+            error(stmt->pos, "cmd id must be a constant expression");
+        }
+        for (Expr* e : stmt->int_fields) {
+            e->accept(this);
+            if (e->type != TYPE_INT)
+                error(e->pos, "Expected argument of integer type");
+        }
+        for (Expr* e : stmt->str_fields) {
+            e->accept(this);
+            if (e->type != TYPE_STR)
+                error(e->pos, "Expected argument of string type");
+            if (!e->is_const)
+                error(e->pos, "cmd string field must be a constant expression");
+        }
+    }
+
     // expressions
     void visit_AssignExpr(AssignExpr* expr) override {
         expr->env = current_env;
-        expr->lhs->accept(this);
         expr->rhs->accept(this);
 
+        visiting_assign_lhs = true;
+        expr->lhs->accept(this);
+        visiting_assign_lhs = false;
+
+        if (expr->lhs->is_const)
+            error(expr->pos, "Attempted to assign to const variable");
         if (!expr->lhs->assignable)
             error(expr->pos, "Attempted to assign to non-variable expression");
         if (expr->lhs->type != expr->rhs->type)
             error(expr->pos, "Assignment type mismatch");
-        expr->type = expr->lhs->type;
+        
+        expr->type = TYPE_VOID;
         expr->assignable = false;
+        expr->is_const = false;
     }
 
     void visit_VariableExpr(VariableExpr* expr) override {
         expr->env = current_env;
         Symbol* sym = current_env->get(expr->name);
         if (!sym) error(expr->pos, "Variable not declared");
+        
+        if (visiting_assign_lhs)
+            sym->initialized = true;
+        else if (!sym->initialized)
+            error(expr->pos, "Accessed uninitialized variable");
+        
         expr->type = sym->type;
-        expr->assignable = true;
+        expr->assignable = !sym->is_const;
+        expr->is_const = sym->is_const;
+        if (expr->is_const) {
+            if (expr->type == TYPE_INT) 
+                expr->const_int = sym->ref;
+            else
+                expr->const_str = sym->const_string;
+        }
     }
 
     void visit_BinaryExpr(BinaryExpr* expr) override {
         expr->left->accept(this);
         expr->right->accept(this);
 
-        if (expr->left->type != TYPE_INT || expr->right->type != TYPE_INT)
+        if (expr->left->type != expr->right->type)
+            error(expr->pos, "Type mismatch in binary expression");
+        else if (expr->left->type == TYPE_STR && expr->right->type == TYPE_STR){
+            if (expr->op != BinaryExpr::EQ && expr->op != BinaryExpr::NEQ) {
+                error(expr->pos, "Only comparison is supported between strings");
+            }
+        } else if (expr->left->type != TYPE_INT || expr->right->type != TYPE_INT)
             error(expr->pos, "Integer arguments expected");
+        
         expr->type = TYPE_INT;
         expr->assignable = false;
+        expr->is_const = expr->left->is_const && expr->right->is_const;
+        if (expr->is_const) {
+            switch (expr->op) {
+                case BinaryExpr::LOGIC_AND:
+                    expr->const_int = expr->left->const_int && expr->right->const_int;
+                    break;
+                case BinaryExpr::LOGIC_OR:
+                    expr->const_int = expr->left->const_int || expr->right->const_int;
+                    break;
+                case BinaryExpr::BIT_AND:
+                    expr->const_int = expr->left->const_int & expr->right->const_int;
+                    break;
+                case BinaryExpr::BIT_OR:
+                    expr->const_int = expr->left->const_int | expr->right->const_int;
+                    break;
+                case BinaryExpr::GT:
+                    expr->const_int = expr->left->const_int > expr->right->const_int;
+                    break;
+                case BinaryExpr::GTE:
+                    expr->const_int = expr->left->const_int >= expr->right->const_int;
+                    break;
+                case BinaryExpr::LT:
+                    expr->const_int = expr->left->const_int < expr->right->const_int;
+                    break;
+                case BinaryExpr::LTE:
+                    expr->const_int = expr->left->const_int <= expr->right->const_int;
+                    break;
+                case BinaryExpr::LSHIFT:
+                    expr->const_int = expr->left->const_int << expr->right->const_int;
+                    break;
+                case BinaryExpr::RSHIFT:
+                    expr->const_int = expr->left->const_int >> expr->right->const_int;
+                    break;
+                case BinaryExpr::ADD:
+                    expr->const_int = expr->left->const_int + expr->right->const_int;
+                    break;
+                case BinaryExpr::SUB:
+                    expr->const_int = expr->left->const_int - expr->right->const_int;
+                    break;
+                case BinaryExpr::MUL:
+                    expr->const_int = expr->left->const_int * expr->right->const_int;
+                    break;
+                case BinaryExpr::DIV:
+                    expr->const_int = expr->left->const_int / expr->right->const_int;
+                    break;
+                case BinaryExpr::EQ:
+                    if (expr->left->type == TYPE_INT)
+                        expr->const_int = expr->left->const_int == expr->right->const_int;
+                    else
+                        expr->const_int = expr->left->const_str == expr->right->const_str;
+                    break;
+                case BinaryExpr::NEQ:
+                    if (expr->left->type == TYPE_INT)
+                        expr->const_int = expr->left->const_int != expr->right->const_int;
+                    else
+                        expr->const_int = expr->left->const_str != expr->right->const_str;
+                    break;
+            }
+        }
     }
 
     void visit_UnaryExpr(UnaryExpr* expr) override {
         expr->right->accept(this);
         if (expr->right->type != TYPE_INT)
             error(expr->pos, "Integer argument expected");
+        
         expr->type = TYPE_INT;
         expr->assignable = false;
+        expr->is_const = expr->right->is_const;
+        if (expr->is_const) {
+            switch (expr->op) {
+                case UnaryExpr::LOGIC_NOT:
+                    expr->const_int = !expr->right->const_int;
+                    break;
+                case UnaryExpr::MINUS:
+                    expr->const_int = -expr->right->const_int;
+                    break;
+            }
+        }
     }
 
     void visit_CallExpr(CallExpr* expr) override {
@@ -150,32 +289,39 @@ public:
         for (size_t i = 0; i < sym->arg_types.size(); i++) {
             expr->args.at(i)->accept(this);
             if (expr->args.at(i)->type != sym->arg_types.at(i))
-                error(expr->pos, "Type mismatch in argument list");
+                error(expr->args.at(i)->pos, "Type mismatch in argument list");
         }
+        
         expr->type = sym->type;
         expr->assignable = false;
+        expr->is_const = false;
     }
     
     void visit_IntLiteralExpr(IntLiteralExpr* expr) override {
         expr->type = TYPE_INT;
         expr->assignable = false;
+        expr->is_const = true;
+        expr->const_int = expr->value;
     }
 
     void visit_StrLiteralExpr(StrLiteralExpr* expr) override {
         expr->type = TYPE_STR;
         expr->assignable = false;
+        expr->is_const = true;
+        expr->const_str = expr->value;
     }
 
 private:
     bool had_error = false;
     bool globals_visited = false;
+    bool visiting_assign_lhs = false;
 
     int32_t current_cev_ref = CEV_THRESHOLD;
     int32_t current_cint_ref = CSELF_THRESHOLD + 10;
 
     Environment global_env;
     Environment* current_env = &global_env;
-    void open_scope() { current_env = new Environment; }
+    void open_scope() { current_env = new Environment(current_env); }
     void close_scope() { current_env = current_env->parent(); assert(current_env); }
 
     WodType current_return_type;
