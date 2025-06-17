@@ -7,6 +7,8 @@ struct ExprStmt;
 struct VarStmt;
 struct IfStmt;
 struct LoopStmt;
+struct ContinueStmt;
+struct BreakStmt;
 struct CmdStmt;
 
 struct AssignExpr;
@@ -17,6 +19,7 @@ struct UnaryExpr;
 struct CallExpr;
 struct IntLiteralExpr;
 struct StrLiteralExpr;
+struct FStringExpr;
 
 class Visitor {
 public:
@@ -28,6 +31,8 @@ public:
     virtual void visit_VarStmt(VarStmt* stmt) = 0;
     virtual void visit_IfStmt(IfStmt* stmt) = 0;
     virtual void visit_LoopStmt(LoopStmt* stmt) = 0;
+    virtual void visit_ContinueStmt(ContinueStmt* stmt) = 0;
+    virtual void visit_BreakStmt(BreakStmt* stmt) = 0;
     virtual void visit_CmdStmt(CmdStmt* stmt) = 0;
 
     // expressions
@@ -38,4 +43,5 @@ public:
     virtual void visit_CallExpr(CallExpr* expr) = 0;
     virtual void visit_IntLiteralExpr(IntLiteralExpr* expr) = 0;
     virtual void visit_StrLiteralExpr(StrLiteralExpr* expr) = 0;
+    virtual void visit_FStringExpr(FStringExpr* expr) = 0;
 };

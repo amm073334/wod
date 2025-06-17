@@ -1,0 +1,26 @@
+const int ARITH = 121;
+const int ARITH_SQRT = 0xC00;
+
+inline int sqrt_inline(int x) {
+    int out;
+    cmd [ARITH](out, x, 0, ARITH_SQRT)();
+    return out;
+}
+
+int sqrt(int x) {
+    int out;
+    cmd [ARITH](out, x, 0, ARITH_SQRT)();
+    return out;
+}
+
+void f() {
+    str test = "abcd";
+    str test2 = f"abcde{}";
+    const int TIMES = 500000;
+    loop (TIMES) {
+        sqrt_inline(123456);
+    }
+    loop (TIMES) {
+        sqrt(123456);
+    }
+}

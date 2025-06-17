@@ -31,18 +31,15 @@ struct Expr : public Node {
 
 // statements
 struct FunctionStmt : public Stmt {
-    struct ParamDecl {
-        WodType type;
-        std::string name;
-    };
-    FunctionStmt(Position pos, WodType return_type, std::string name, std::vector<ParamDecl> params, std::vector<Stmt*> body)
-        : Stmt(pos), return_type(return_type), name(name), params(params), body(body) {}
+    FunctionStmt(Position pos, WodType return_type, std::string name, std::vector<VarStmt*> params, std::vector<Stmt*> body, bool is_inline)
+        : Stmt(pos), return_type(return_type), name(name), params(params), body(body), is_inline(is_inline) {}
     void accept(Visitor* v) override { v->visit_FunctionStmt(this); }
     WodType return_type;
     std::string name;
-    std::vector<ParamDecl> params;
+    std::vector<VarStmt*> params;
     std::vector<Stmt*> body;
     Symbol* sym;
+    bool is_inline;
 };
 
 struct BlockStmt : public Stmt {
@@ -94,6 +91,18 @@ struct LoopStmt : public Stmt {
     Stmt* body;
 };
 
+struct ContinueStmt : public Stmt {
+    ContinueStmt(Position pos)
+        : Stmt(pos) {}
+    void accept(Visitor* v) override { v->visit_ContinueStmt(this); }
+};
+
+struct BreakStmt : public Stmt {
+    BreakStmt(Position pos)
+        : Stmt(pos) {}
+    void accept(Visitor* v) override { v->visit_BreakStmt(this); }
+};
+
 struct CmdStmt : public Stmt {
     CmdStmt(Position pos, Expr* cmd_id, std::vector<Expr*> int_fields, std::vector<Expr*> str_fields)
         : Stmt(pos), cmd_id(cmd_id), int_fields(int_fields), str_fields(str_fields) {}
@@ -111,7 +120,6 @@ struct AssignExpr : public Expr {
     void accept(Visitor* v) override { v->visit_AssignExpr(this); }
     Expr* lhs;
     Expr* rhs;
-    Environment* env;
 };
 
 struct VariableExpr : public Expr {
@@ -119,7 +127,7 @@ struct VariableExpr : public Expr {
         : Expr(pos), name(name) {}
     void accept(Visitor* v) override { v->visit_VariableExpr(this); }
     std::string name;
-    Environment* env;
+    Symbol* sym;
 };
 
 struct BinaryExpr : public Expr {
@@ -128,6 +136,7 @@ struct BinaryExpr : public Expr {
         LOGIC_OR,
         BIT_AND,
         BIT_OR,
+        BIT_XOR,
         EQ,
         NEQ,
         GT,
@@ -140,6 +149,7 @@ struct BinaryExpr : public Expr {
         SUB,
         MUL,
         DIV,
+        MODULO
     };
     BinaryExpr(Position pos, Expr* left, BinaryOp op, Expr* right)
         : Expr(pos), left(left), op(op), right(right) {}
@@ -167,7 +177,7 @@ struct CallExpr : public Expr {
     void accept(Visitor* v) override { v->visit_CallExpr(this); }
     std::string name;
     std::vector<Expr*> args;
-    Environment* env;
+    Symbol* sym;
 };
 
 struct IntLiteralExpr : public Expr {
@@ -181,5 +191,12 @@ struct StrLiteralExpr : public Expr {
     StrLiteralExpr(Position pos, std::string value)
         : Expr(pos), value(value) {}
     void accept(Visitor* v) override { v->visit_StrLiteralExpr(this); }
+    std::string value;
+};
+
+struct FStringExpr : public Expr {
+    FStringExpr(Position pos, std::string value)
+        : Expr(pos), value(value) {}
+    void accept(Visitor* v) override { v->visit_FStringExpr(this); }
     std::string value;
 };

@@ -10,7 +10,8 @@ struct Symbol {
     int32_t ref; // used as const value if variable is a const int
     std::vector<WodType> arg_types;
     std::string const_string;
-    bool initialized = false;
+    bool initialized_var = false;
+    FunctionStmt* inline_function = nullptr;
 };
 
 class Environment {
@@ -39,6 +40,11 @@ public:
     Symbol* define_function(std::string name, int32_t ref, WodType type, std::vector<WodType> arg_types) {
         if (symbols.count(name)) return nullptr;
         return &symbols.insert({name, Symbol({false, type, ref, arg_types})}).first->second;
+    }
+
+    Symbol* define_inline_function(std::string name, FunctionStmt* inline_function, WodType type, std::vector<WodType> arg_types) {
+        if (symbols.count(name)) return nullptr;
+        return &symbols.insert({name, Symbol({false, type, 0, arg_types, "", false, inline_function})}).first->second;
     }
 
     Symbol* get(std::string name) {

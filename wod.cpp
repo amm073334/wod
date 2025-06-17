@@ -19,9 +19,6 @@ int main(int argc, const char* argv[]) {
     std::vector<Stmt*> statements = parser.parse();
     if (parser.failed()) exit(1);
 
-    // Printer printer;
-    // printer.print(statements);
-
     Typechecker typechecker;
     Environment* env = typechecker.typecheck(statements);
     if (typechecker.failed()) exit(1);

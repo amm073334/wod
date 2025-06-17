@@ -27,6 +27,12 @@ public:
 
     // statements
     void visit_FunctionStmt(FunctionStmt* stmt) override {
+        if (stmt->is_inline) return;
+
+        str_sp = CSELF_THRESHOLD + 5;
+        for (WodType t : stmt->sym->arg_types)
+            if (t == TYPE_STR) str_sp++;
+
         begin_frame();
 
         cevs.push_back(CommonEvent());
@@ -51,6 +57,11 @@ public:
     }
 
     void visit_ReturnStmt(ReturnStmt* stmt) override {
+        if (current_inline_function) inline_return(stmt);
+        else normal_return(stmt);
+    }
+
+    void normal_return(ReturnStmt* stmt) {
         if (!stmt->expr) {
             current_cev->add_cmd(CMD_RETURN);
             return;
@@ -59,18 +70,35 @@ public:
         begin_frame();
         WolfValue v = eval(stmt->expr);
         if (current_cev->RETURN_VAL_TARGET == -1)
-            current_cev->RETURN_VAL_TARGET = v.v - CSELF_THRESHOLD;
-        else {
-            switch (stmt->expr->type) {
-                case TYPE_INT:
-                    cmd_arith(WolfValue{WT_NUMREF, CSELF_THRESHOLD + current_cev->RETURN_VAL_TARGET}, v);
-                    break;
-                case TYPE_STR:
-                    cmd_string(WolfValue{WT_STRREF, CSELF_THRESHOLD + current_cev->RETURN_VAL_TARGET}, v);
-                    break;
-            }
+            current_cev->RETURN_VAL_TARGET = 99;
+        switch (stmt->expr->type) {
+            case TYPE_INT:
+                cmd_arith(WolfValue{WT_NUMREF, CSELF_THRESHOLD + current_cev->RETURN_VAL_TARGET}, v);
+                break;
+            case TYPE_STR:
+                cmd_string(WolfValue{WT_STRREF, CSELF_THRESHOLD + current_cev->RETURN_VAL_TARGET}, v);
+                break;
         }
         current_cev->add_cmd(CMD_RETURN);
+        end_frame();
+    }
+
+    void inline_return(ReturnStmt* stmt) {
+        if (!stmt->expr) {
+            current_cev->add_cmd(CMD_BREAK);
+            return;
+        }
+        begin_frame();
+        WolfValue v = eval(stmt->expr);
+        switch (stmt->expr->type) {
+            case TYPE_INT:
+                cmd_arith(inline_retval, v);
+                break;
+            case TYPE_STR:
+                cmd_string(inline_retval, v);
+                break;
+        }
+        current_cev->add_cmd(CMD_BREAK);
         end_frame();
     }
 
@@ -81,6 +109,8 @@ public:
     }
 
     void visit_VarStmt(VarStmt* stmt) override {
+        if (stmt->is_const) return;
+
         WolfValue lhs;
         if (stmt->sym->type == TYPE_INT)
             lhs = push_int();
@@ -139,6 +169,14 @@ public:
         current_cev->add_cmd(CMD_LOOP_END, {}, {});
     }
 
+    void visit_ContinueStmt(ContinueStmt* stmt) override {
+        current_cev->add_cmd(CMD_CONTINUE);
+    }
+
+    void visit_BreakStmt(BreakStmt* stmt) override {
+        current_cev->add_cmd(CMD_BREAK);
+    }
+
     void visit_CmdStmt(CmdStmt* stmt) override {
         std::vector<int32_t> int_fields;
         std::vector<std::string> str_fields;
@@ -167,12 +205,26 @@ public:
 
     void visit_VariableExpr(VariableExpr* expr) override {
         if (try_const(expr)) return;
+        if (current_inline_function) inline_var(expr);
+        else normal_var(expr);
+    }
 
-        Symbol* sym = expr->env->get(expr->name);
+    void normal_var(VariableExpr* expr) {
+        Symbol* sym = expr->sym;
         if (sym->type == TYPE_INT)
             expr_return = WolfValue{WT_NUMREF, sym->ref};
         else
             expr_return = WolfValue{WT_STRREF, sym->ref};
+    }
+
+    void inline_var(VariableExpr* expr) {
+        for (size_t i = 0; i < current_inline_function->params.size(); i++) {
+            if (current_inline_function->params.at(i)->sym == expr->sym) {
+                expr_return = inline_args.at(i);
+                return;
+            }
+        }
+        normal_var(expr);
     }
 
     void visit_BinaryExpr(BinaryExpr* expr) override {
@@ -278,8 +330,10 @@ public:
             case BinaryExpr::SUB:       op = ARITH_OP_MINUS; break;
             case BinaryExpr::MUL:       op = ARITH_OP_TIMES; break;
             case BinaryExpr::DIV:       op = ARITH_OP_DIV; break;
+            case BinaryExpr::MODULO:    op = ARITH_OP_MOD; break;
             case BinaryExpr::BIT_OR:    op = ARITH_OP_OR; break;
             case BinaryExpr::BIT_AND:   op = ARITH_OP_AND; break;
+            case BinaryExpr::BIT_XOR:   op = ARITH_OP_XOR; break;
             case BinaryExpr::LSHIFT:    op = ARITH_OP_LSHIFT; break;
             case BinaryExpr::RSHIFT:
                 op = ARITH_OP_LSHIFT;
@@ -318,10 +372,38 @@ public:
     }
 
     void visit_CallExpr(CallExpr* expr) override {
+        if (expr->sym->inline_function) inline_call(expr);
+        else normal_call(expr);
+    }
+    
+    void inline_call(CallExpr* expr) {
+        inline_retval = push_int();
+
+        begin_frame();
+        int32_t cev_ref = expr->sym->ref;
+        for (Expr* arg : expr->args) {
+            inline_args.push_back(eval(arg));
+        }
+
+        current_cev->add_cmd(CMD_LOOP_COUNT, {1}, {});
+        current_cev->indent();
+        current_inline_function = expr->sym->inline_function;
+        for (Stmt* s : expr->sym->inline_function->body) {
+            s->accept(this);
+        }
+        current_inline_function = nullptr;
+        current_cev->outdent();
+        current_cev->add_cmd(CMD_LOOP_END);
+        end_frame();
+
+        expr_return = inline_retval;
+    }
+
+    void normal_call(CallExpr* expr) {
         WolfValue temp = push_int();
 
         begin_frame();
-        int32_t cev_ref = expr->env->get(expr->name)->ref;
+        int32_t cev_ref = expr->sym->ref;
         std::vector<int32_t> int_args;
         std::vector<int32_t> strref_args;
         std::vector<std::string> str_args = {""};
@@ -377,6 +459,7 @@ public:
 
 private:
     bool had_error = false;
+    FunctionStmt* current_inline_function = nullptr;
     
     enum WolfType {
         WT_NUM,
@@ -392,6 +475,8 @@ private:
         bool is_ref() { return wt == WT_NUMREF || wt == WT_STRREF; }
         bool do_suppress() { return wt == WT_NUM && v >= VAR_THRESHOLD; }
     };
+    WolfValue inline_retval;
+    std::vector<WolfValue> inline_args;
 
     std::vector<CommonEvent> cevs;
     CommonEvent* current_cev = nullptr;

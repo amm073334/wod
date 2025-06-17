@@ -30,30 +30,38 @@ public:
 
     void define_function(FunctionStmt* stmt) {
         std::vector<WodType> arg_types;
-        for (FunctionStmt::ParamDecl param : stmt->params) {
-            arg_types.push_back(param.type);
+        for (VarStmt* param : stmt->params) {
+            arg_types.push_back(param->type);
         }
-        if (current_cev_ref > MAX_CEV_REF) error(stmt->pos, "Maximum number of functions exceeded");
-        stmt->sym = current_env->define_function(stmt->name, current_cev_ref, stmt->return_type, arg_types);
+        if (stmt->is_inline) {
+            stmt->sym = current_env->define_inline_function(stmt->name, stmt, stmt->return_type, arg_types);
+        } else {
+            if (current_cev_ref > MAX_CEV_REF) error(stmt->pos, "Maximum number of functions exceeded");
+            stmt->sym = current_env->define_function(stmt->name, current_cev_ref++, stmt->return_type, arg_types);
+        }
         if (!stmt->sym) error(stmt->pos, "Function redeclaration");
     }
 
     void function_block(FunctionStmt* stmt) {
         current_return_type = current_env->get(stmt->name)->type;
+        if (stmt->is_inline) visiting_inline_function = true;
         open_scope();
         int32_t int_param_ref = CSELF_THRESHOLD;
         int32_t str_param_ref = CSELF_THRESHOLD + 5;
-        for (FunctionStmt::ParamDecl param : stmt->params) {
+        for (VarStmt* param : stmt->params) {
             Symbol* sym;
-            sym = current_env->define(param.name, param.type);
-            sym->initialized = true;
-            switch (param.type) {
+            sym = current_env->define(param->name, param->type);
+            if (!sym) error(stmt->pos, "Redeclaration of parameter");
+            sym->initialized_var = true;
+            switch (param->type) {
                 case TYPE_INT: sym->ref = int_param_ref++; break;
                 case TYPE_STR: sym->ref = str_param_ref++; break;
             }
+            param->sym = sym;
         }
         for (Stmt* s : stmt->body) s->accept(this);
         close_scope();
+        visiting_inline_function = false;
     }
 
     void visit_BlockStmt(BlockStmt* stmt) override {
@@ -82,7 +90,7 @@ public:
 
         if (!stmt->initializer) {
             stmt->sym = current_env->define(stmt->name, stmt->type);
-            stmt->sym->initialized = false;
+            stmt->sym->initialized_var = false;
         } else {
             stmt->initializer->accept(this);
             if (stmt->initializer->type != stmt->type)
@@ -95,7 +103,7 @@ public:
                 if (stmt->initializer->type == TYPE_STR)
                     stmt->sym = current_env->define_const_str(stmt->name, stmt->initializer->const_str);
             } else stmt->sym = current_env->define(stmt->name, stmt->type);
-            stmt->sym->initialized = true;
+            stmt->sym->initialized_var = true;
         }
         if (!stmt->sym) error(stmt->pos, "Variable redeclaration");
     }
@@ -121,8 +129,18 @@ public:
                 error(stmt->pos, "Loop count is not an integer");
         }
         open_scope();
+        in_a_loop = true;
         stmt->body->accept(this);
+        in_a_loop = false;
         close_scope();
+    }
+
+    void visit_ContinueStmt(ContinueStmt* stmt) override {
+        if (!in_a_loop) error(stmt->pos, "Used continue statement outside of loop");
+    }
+
+    void visit_BreakStmt(BreakStmt* stmt) override {
+        if (!in_a_loop) error(stmt->pos, "Used break statement outside of loop");
     }
 
     void visit_CmdStmt(CmdStmt* stmt) override {
@@ -146,9 +164,10 @@ public:
 
     // expressions
     void visit_AssignExpr(AssignExpr* expr) override {
-        expr->env = current_env;
         expr->rhs->accept(this);
 
+        if (visiting_assign_lhs)
+            error(expr->pos, "Attempted to assign to non-variable expression");
         visiting_assign_lhs = true;
         expr->lhs->accept(this);
         visiting_assign_lhs = false;
@@ -166,14 +185,14 @@ public:
     }
 
     void visit_VariableExpr(VariableExpr* expr) override {
-        expr->env = current_env;
         Symbol* sym = current_env->get(expr->name);
         if (!sym) error(expr->pos, "Variable not declared");
-        
+        expr->sym = sym;
+
         if (visiting_assign_lhs)
-            sym->initialized = true;
-        else if (!sym->initialized)
-            error(expr->pos, "Accessed uninitialized variable");
+            sym->initialized_var = true;
+        // else if (!sym->initialized_var)
+        //     error(expr->pos, "Accessed uninitialized variable");
         
         expr->type = sym->type;
         expr->assignable = !sym->is_const;
@@ -216,6 +235,9 @@ public:
                 case BinaryExpr::BIT_OR:
                     expr->const_int = expr->left->const_int | expr->right->const_int;
                     break;
+                case BinaryExpr::BIT_XOR:
+                    expr->const_int = expr->left->const_int ^ expr->right->const_int;
+                    break;
                 case BinaryExpr::GT:
                     expr->const_int = expr->left->const_int > expr->right->const_int;
                     break;
@@ -245,6 +267,9 @@ public:
                     break;
                 case BinaryExpr::DIV:
                     expr->const_int = expr->left->const_int / expr->right->const_int;
+                    break;
+                case BinaryExpr::MODULO:
+                    expr->const_int = expr->left->const_int % expr->right->const_int;
                     break;
                 case BinaryExpr::EQ:
                     if (expr->left->type == TYPE_INT)
@@ -283,9 +308,11 @@ public:
     }
 
     void visit_CallExpr(CallExpr* expr) override {
-        expr->env = current_env;
         Symbol* sym = current_env->get(expr->name);
+        if (visiting_inline_function && expr->sym->inline_function)
+            error(expr->pos, "Calling an inline function from an inline function is currently unsupported");
         if (!sym) error(expr->pos, "Function not declared");
+        expr->sym = sym;
         if (expr->args.size() != sym->arg_types.size())
             error(expr->pos, "Wrong number of arguments");
         for (size_t i = 0; i < sym->arg_types.size(); i++) {
@@ -317,6 +344,8 @@ private:
     bool had_error = false;
     bool globals_visited = false;
     bool visiting_assign_lhs = false;
+    bool in_a_loop = false;
+    bool visiting_inline_function = false;
 
     int32_t current_cev_ref = CEV_THRESHOLD;
     int32_t current_cint_ref = CSELF_THRESHOLD + 10;

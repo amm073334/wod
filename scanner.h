@@ -18,6 +18,9 @@ public:
             return {};
         }
 
+        const size_t slash_pos = src_file.find_last_of("\\/");
+        if (slash_pos != std::string::npos) base_dir = src_file.substr(0, slash_pos+1);
+
         // for some reason, doing a .reserve() on the member string and reading into that
         // causes 0 characters to be read, so using another string here is a bandaid
         size_t file_size = in.tellg();
@@ -38,6 +41,7 @@ public:
     bool failed() { return had_error; }
 
 private:
+    std::string base_dir;
     std::vector<Token> tokens;
     std::string source;
     size_t token_start = 0;
@@ -45,6 +49,8 @@ private:
     size_t line = 1;
     size_t col = 1;
     bool had_error = false;
+    bool finished_imports = false;
+    bool scanned_import = false;
 
     const std::unordered_map<std::string, TokenType> keywords = {
         {"void", T_VOID},
@@ -56,7 +62,10 @@ private:
         {"else", T_ELSE},
         {"loop", T_LOOP},
         {"return", T_RETURN},
+        {"continue", T_CONTINUE},
+        {"break", T_BREAK},
         {"cmd", T_CMD},
+        {"import", T_IMPORT},
     };
 
     void scan_token() {
@@ -73,6 +82,7 @@ private:
             case '+': add_token(T_PLUS); break;
             case '-': add_token(T_MINUS); break;
             case '*': add_token(T_STAR); break;
+            case '^': add_token(T_CARET); break;
             case '%': add_token(T_PERCENT); break;
             case ';': add_token(T_SEMICOLON); break;
             case '!': add_token(match('=') ? T_BANG_EQUAL : T_BANG); break;
@@ -99,16 +109,35 @@ private:
                 break;
             case '\n': line++; col = 1; break;
             case '"': try_string(); break;
+            case '0': try_hex(); break;
+            case 'f': if (match('"')) try_fstring(); else try_identifier(); break;
             default:
-                if (std::isdigit(c)) try_number();
+                if (std::isdigit(c)) try_decimal();
                 else if (is_alpha_under(c)) try_identifier();
                 else error("Unexpected character");
                 break;
         }
+        if (!scanned_import) finished_imports = true;
+        scanned_import = false;
     }
 
-    void try_number() {
+    void try_decimal() {
         while (std::isdigit(peek())) advance();
+        add_token(T_NUMBER);
+    }
+
+    void try_hex() {
+        if (!match('x')) {
+            if (std::isdigit(peek())) {
+                error("Numeric literals cannot start with 0");
+                while (std::isdigit(peek())) advance();
+            }
+        } else {
+            if (!std::isxdigit(peek())) {
+                error("Invalid hex literal");
+            }
+            while (std::isxdigit(peek())) advance();
+        }
         add_token(T_NUMBER);
     }
 
@@ -116,7 +145,35 @@ private:
         while (is_alpha_under(peek()) || std::isdigit(peek())) advance();
         std::string text = source.substr(token_start, index - token_start);
         if (keywords.count(text)) {
-            add_token(keywords.at(text));
+            if (keywords.at(text) != T_IMPORT) {
+                add_token(keywords.at(text));
+                return;
+            }
+
+            if (finished_imports)
+                error("Attempted to import after top of file");
+            scanned_import = true;
+
+            while (!is_at_end() && peek() == ' ') {
+                advance();
+            }
+
+            if (is_at_end() || advance() != '"')
+                error("Expected '\"' after import");
+            size_t name_start = index;
+            while (!is_at_end() && peek() != '"') {
+                if (peek() == '\n') error("Unterminated string");
+                advance();
+            }
+            if (is_at_end()) error("Unterminated string");
+            std::string file_name = base_dir + source.substr(name_start, index - name_start) + ".wod";
+            advance();
+            if (advance() != ';') error("Expected ';' after import statement");
+            
+            Scanner s;
+            std::vector<Token> imported = s.scan_source(file_name);
+            if (s.failed()) had_error = true;
+            tokens.insert(tokens.end(), std::make_move_iterator(imported.begin()), std::make_move_iterator(imported.end() - 1));
         } else {
             add_token(T_IDENT);
         }
@@ -124,12 +181,25 @@ private:
 
     void try_string() {
         while (peek() != '"' && !is_at_end()) {
+            if (peek() == '\n') error("Unterminated string");
             advance();
         }
-        if (is_at_end() || peek() == '\n') {
+        if (is_at_end()) {
             error("Unterminated string");
         }
-        tokens.push_back({T_STRING, source.substr(token_start + 1, index - token_start), line, col});
+        tokens.push_back({T_STRING, source.substr(token_start + 1, index - token_start - 1), line, col});
+        advance();
+    }
+
+    void try_fstring() {
+        while (peek() != '"' && !is_at_end()) {
+            if (peek() == '\n') error("Unterminated string");
+            advance();
+        }
+        if (is_at_end()) {
+            error("Unterminated string");
+        }
+        tokens.push_back({T_FSTRING, source.substr(token_start + 2, index - token_start - 2), line, col});
         advance();
     }
 
@@ -164,7 +234,7 @@ private:
     }
 
     void error(std::string error_msg) {
-        std::cout << "Scanning error at line " << line << ": " << error_msg << std::endl;
+        std::cout << "Scanning error at line " << line << " col " << col << ": " << error_msg << std::endl;
         had_error = true;
     }
 };

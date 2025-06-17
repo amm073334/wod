@@ -1,7 +1,5 @@
-CC=cl
-
 all:
-	$(CC) /EHsc wod.cpp
+	cl /EHsc wod.cpp
 
 debug:
-	$(CC) /EHsc /Zi wod.cpp
+	cl /EHsc /Zi wod.cpp

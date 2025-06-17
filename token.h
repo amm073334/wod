@@ -8,6 +8,7 @@ enum TokenType {
     T_COMMA, T_DOT,
     T_PLUS, T_MINUS,
     T_SLASH, T_STAR, T_PERCENT,
+    T_CARET,
     T_SEMICOLON,
 
     // one or two characters
@@ -19,22 +20,23 @@ enum TokenType {
     T_PIPE, T_PIPE_PIPE,
 
     // keywords
+    T_IMPORT,
     T_VOID, T_INT, T_STR, T_CONST, T_INLINE,
-    T_IF, T_ELSE, T_LOOP, T_RETURN,
+    T_IF, T_ELSE, T_LOOP, T_RETURN, T_CONTINUE, T_BREAK,
     T_CMD,
 
     // literals
-    T_IDENT, T_NUMBER, T_STRING,
+    T_IDENT, T_NUMBER, T_STRING, T_FSTRING,
 
     // eof
     T_EOF
 };
 
 struct Token {
-    const TokenType token_type;
-    const std::string text;
-    const size_t line;
-    const size_t col;
+    TokenType token_type;
+    std::string text;
+    size_t line;
+    size_t col;
 
     std::string to_string() {
         return "(" + std::to_string(token_type) + " " + text + ")";

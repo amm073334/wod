@@ -28,7 +28,7 @@ private:
     // statements
     Stmt* global_stmt() {
         try {
-            if (match({T_VOID, T_INT, T_STR})) return function_decl();
+            if (match({T_INLINE, T_VOID, T_INT, T_STR})) return function_decl();
             if (match(T_CONST)) return var_stmt();
             error(peek(), "Invalid statement");
         } catch (std::runtime_error e) {
@@ -39,15 +39,22 @@ private:
     }
 
     Stmt* function_decl() {
+        bool is_inline = false;
+        if (previous()->token_type == T_INLINE) {
+            is_inline = true;
+            advance();
+        }
+
         WodType type;
         switch (previous()->token_type) {
             case T_VOID: type = TYPE_VOID; break;
             case T_INT:  type = TYPE_INT; break;
             case T_STR:  type = TYPE_STR; break;
+            default: error(previous(), "Invalid function return type"); break;
         }
         Token* tok = eat(T_IDENT, "Expected function name");
         eat(T_LPAREN, "Expected '(' after function name");
-        std::vector<FunctionStmt::ParamDecl> params;
+        std::vector<VarStmt*> params;
         size_t n_int_args = 0;
         size_t n_str_args = 0;
         if (!check(T_RPAREN)) do {
@@ -59,7 +66,8 @@ private:
                     case T_INT: arg_type = TYPE_INT; break;
                     case T_STR: arg_type = TYPE_STR; break;
                 }
-                params.push_back({arg_type, eat(T_IDENT, "Expected parameter name")->text});
+                Token* ntok = eat(T_IDENT, "Expected parameter name");
+                params.push_back(new VarStmt{{ntok->line, ntok->col}, false, arg_type, ntok->text, nullptr});
                 if (arg_type == TYPE_INT) n_int_args++;
                 else n_str_args++;
             } else {
@@ -69,7 +77,7 @@ private:
 
         eat(T_RPAREN, "Expected ')' after function parameters");
         eat(T_LBRACE, "Expected '{' before function body");
-        return new FunctionStmt({tok->line, tok->col}, type, tok->text, params, block());
+        return new FunctionStmt({tok->line, tok->col}, type, tok->text, params, block(), is_inline);
     }
 
     std::vector<Stmt*> block() {
@@ -86,6 +94,8 @@ private:
         if (match(T_IF)) return if_stmt();
         if (match(T_LOOP)) return loop_stmt();
         if (match(T_RETURN)) return return_stmt();
+        if (match(T_CONTINUE)) return new ContinueStmt({previous()->line, previous()->col});
+        if (match(T_BREAK)) return new BreakStmt({previous()->line, previous()->col});
         if (match({T_INT, T_STR, T_CONST})) return var_stmt();
         if (match(T_CMD)) return cmd_stmt();
         if (match(T_LBRACE)) return new BlockStmt({previous()->line, previous()->col}, block());
@@ -211,11 +221,21 @@ private:
     }
 
     Expr* bit_or() {
-        Expr* expr = bit_and();
+        Expr* expr = bit_xor();
         while (match(T_PIPE)) {
             Token* tok = previous();
-            Expr* right = bit_and();
+            Expr* right = bit_xor();
             expr = new BinaryExpr({tok->line, tok->col}, expr, BinaryExpr::BIT_OR, right);
+        }
+        return expr;
+    }
+
+    Expr* bit_xor() {
+        Expr* expr = bit_and();
+        while (match(T_CARET)) {
+            Token* tok = previous();
+            Expr* right = bit_and();
+            expr = new BinaryExpr({tok->line, tok->col}, expr, BinaryExpr::BIT_XOR, right);
         }
         return expr;
     }
@@ -294,13 +314,14 @@ private:
 
     Expr* muldiv() {
         Expr* expr = unary();
-        while (match({T_STAR, T_SLASH})) {
+        while (match({T_STAR, T_SLASH, T_PERCENT})) {
             Token* tok = previous();
             Expr* right = unary();
             BinaryExpr::BinaryOp op;
             switch (tok->token_type) {
                 case T_STAR:    op = BinaryExpr::MUL; break;
                 case T_SLASH:   op = BinaryExpr::DIV; break;
+                case T_PERCENT:   op = BinaryExpr::MODULO; break;
             }
             expr = new BinaryExpr({tok->line, tok->col}, expr, op, right);
         }
@@ -351,9 +372,11 @@ private:
 
     Expr* primary() {
         if (match(T_NUMBER))
-            return new IntLiteralExpr({previous()->line, previous()->col}, std::stoi(previous()->text));
+            return new IntLiteralExpr({previous()->line, previous()->col}, std::stoi(previous()->text, nullptr, 0));
         if (match(T_STRING))
             return new StrLiteralExpr({previous()->line, previous()->col}, previous()->text);
+        if (match(T_FSTRING))
+            return new FStringExpr({previous()->line, previous()->col}, previous()->text);
         if (match(T_LPAREN)) {
             Expr* expr = expression();
             eat(T_RPAREN, "Expected ')' after expression");
