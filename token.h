@@ -25,6 +25,7 @@ enum TokenType {
     T_IMPORT,
     T_VOID, T_INT, T_STR, T_CONST, T_INLINE,
     T_IF, T_ELSE, T_LOOP, T_RETURN, T_CONTINUE, T_BREAK,
+    T_WHILE, T_FOR,
     T_CMD,
 
     // literals

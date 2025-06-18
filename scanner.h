@@ -62,6 +62,8 @@ private:
         {"if", T_IF},
         {"else", T_ELSE},
         {"loop", T_LOOP},
+        {"while", T_WHILE},
+        {"for", T_FOR},
         {"return", T_RETURN},
         {"continue", T_CONTINUE},
         {"break", T_BREAK},

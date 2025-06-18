@@ -93,6 +93,8 @@ private:
     Stmt* statement() {
         if (match(T_IF)) return if_stmt();
         if (match(T_LOOP)) return loop_stmt();
+        if (match(T_WHILE)) return while_stmt();
+        if (match(T_FOR)) return for_stmt();
         if (match(T_RETURN)) return return_stmt();
         if (match(T_CONTINUE)) return new ContinueStmt({previous()->line, previous()->col});
         if (match(T_BREAK)) return new BreakStmt({previous()->line, previous()->col});
@@ -101,6 +103,49 @@ private:
         if (match(T_LBRACE)) return new BlockStmt({previous()->line, previous()->col}, block());
 
         return expr_stmt();
+    }
+
+    Stmt* while_stmt() {
+        Token* tok = previous();
+        Position pos = {tok->line, tok->col};
+        eat(T_LPAREN, "Expected '(' after 'while'");
+        Expr* condition = expression();
+        eat(T_RPAREN, "Expected ')' after while condition");
+        Stmt* body = statement();
+        Stmt* if_wrapper = new IfStmt(pos, condition, body, new BreakStmt(pos));
+        return new LoopStmt(pos, nullptr, if_wrapper);
+    }
+
+    Stmt* for_stmt() {
+        Token* tok = previous();
+        Position pos = {tok->line, tok->col};
+        eat(T_LPAREN, "Expected '(' after 'for'");
+
+        Stmt* initializer;
+        if (match(T_SEMICOLON)) initializer = nullptr;
+        else if (match({T_INT, T_STR})) initializer = var_stmt();
+        else initializer = expr_stmt();
+
+        Expr* condition = nullptr;
+        if (!check(T_SEMICOLON)) {
+            condition = expression();
+        }
+        eat(T_SEMICOLON, "Expected ';' after loop condition");
+        
+        Expr* increment = nullptr;
+        if (!check(T_RPAREN)) {
+            increment = expression();
+        }
+        eat(T_RPAREN, "Expected ')' after for clause");
+        Stmt* body = statement();
+        
+        if (increment) body = new BlockStmt(pos, {body, new ExprStmt(pos, increment)});            
+        if (condition) body = new IfStmt(pos, condition, body, new BreakStmt(pos));
+        body = new LoopStmt(pos, nullptr, body);
+        
+        if (initializer) body = new BlockStmt(pos, {initializer, body});
+
+        return body;
     }
 
     Stmt* cmd_stmt() {
