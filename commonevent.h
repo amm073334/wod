@@ -178,7 +178,7 @@ struct CommonEvent {
             }
             out << ")(";
             for (size_t i = 0; i < cmd.str_fields.size(); i++) {
-                out << cmd.str_fields.at(i);
+                out << "\"" << cmd.str_fields.at(i) << "\"";
                 if (i < cmd.str_fields.size() - 1) out << ",";
             }
             out << ")\n";

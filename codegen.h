@@ -184,9 +184,14 @@ public:
         int32_t cmd_id = stmt->cmd_id->const_int;
         begin_frame();
         for (Expr* e: stmt->int_fields)
-            int_fields.push_back(try_suppress(eval(e)).v);
-        for (Expr* e: stmt->str_fields)
-            str_fields.push_back(e->const_str);
+            int_fields.push_back(eval(e).v);
+        for (Expr* e: stmt->str_fields) {
+            WolfValue v = eval(e);
+            if (v.wt == WT_STRREF)
+                str_fields.push_back("\\cself[" + std::to_string(v.v - CSELF_THRESHOLD) + "]");
+            else
+                str_fields.push_back(v.string_lit);
+        }
 
         current_cev->add_cmd(cmd_id, int_fields, str_fields);
         end_frame();
@@ -380,18 +385,32 @@ public:
         inline_retval = push_int();
 
         begin_frame();
-        int32_t cev_ref = expr->sym->ref;
-        for (Expr* arg : expr->args) {
-            inline_args.push_back(eval(arg));
-        }
-
         current_cev->add_cmd(CMD_LOOP_COUNT, {1}, {});
         current_cev->indent();
+
+        int32_t cev_ref = expr->sym->ref;
+        for (Expr* arg : expr->args) {
+            WolfValue v = eval(arg);
+            
+            // do a copy here to simulate copying of variables during a normal function call
+            if (v.wt == WT_NUMREF) {
+                WolfValue v2 = push_int();
+                cmd_arith(v2, v);
+                v = v2;
+            } else if (v.wt == WT_STRREF) {
+                WolfValue v2 = push_str();
+                cmd_string(v2, v);
+                v = v2;
+            }
+            inline_args.push_back(v);
+        }
+
         current_inline_function = expr->sym->inline_function;
         for (Stmt* s : expr->sym->inline_function->body) {
             s->accept(this);
         }
         current_inline_function = nullptr;
+        inline_args.clear();
         current_cev->outdent();
         current_cev->add_cmd(CMD_LOOP_END);
         end_frame();

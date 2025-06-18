@@ -157,8 +157,6 @@ public:
             e->accept(this);
             if (e->type != TYPE_STR)
                 error(e->pos, "Expected argument of string type");
-            if (!e->is_const)
-                error(e->pos, "cmd string field must be a constant expression");
         }
     }
 
