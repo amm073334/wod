@@ -195,8 +195,12 @@ struct StrLiteralExpr : public Expr {
 };
 
 struct FStringExpr : public Expr {
-    FStringExpr(Position pos, std::string value)
-        : Expr(pos), value(value) {}
+    struct Fragment {
+        std::string str;
+        Expr* expr;
+    };
+    FStringExpr(Position pos, std::vector<Fragment> frags)
+        : Expr(pos), frags(frags) {}
     void accept(Visitor* v) override { v->visit_FStringExpr(this); }
-    std::string value;
+    std::vector<Fragment> frags;
 };

@@ -375,8 +375,19 @@ private:
             return new IntLiteralExpr({previous()->line, previous()->col}, std::stoi(previous()->text, nullptr, 0));
         if (match(T_STRING))
             return new StrLiteralExpr({previous()->line, previous()->col}, previous()->text);
-        if (match(T_FSTRING))
-            return new FStringExpr({previous()->line, previous()->col}, previous()->text);
+        if (match(T_F_QUOTE)) {
+            std::vector<FStringExpr::Fragment> frags;
+            while (!is_at_end() && !check(T_F_QUOTE)) {
+                if (match(T_STRING)) frags.push_back({previous()->text, nullptr});
+                else if (match(T_LBRACE)) {
+                    frags.push_back({"", expression()});
+                    eat(T_RBRACE, "Expected '}' after f-string expression");
+                }
+                else error(peek(), "Unexpected token in f-string");
+            }
+            eat(T_F_QUOTE, "Expected ending quote after f-string");
+            return new FStringExpr({previous()->line, previous()->col}, frags);
+        }
         if (match(T_LPAREN)) {
             Expr* expr = expression();
             eat(T_RPAREN, "Expected ')' after expression");

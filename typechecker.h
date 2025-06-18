@@ -340,6 +340,15 @@ public:
         expr->const_str = expr->value;
     }
 
+    void visit_FStringExpr(FStringExpr* expr) override {
+        for (FStringExpr::Fragment &f : expr->frags) {
+            if (f.expr) f.expr->accept(this);
+        }
+        expr->type = TYPE_STR;
+        expr->assignable = false;
+        expr->is_const = false;
+    }
+
 private:
     bool had_error = false;
     bool globals_visited = false;

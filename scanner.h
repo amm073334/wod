@@ -51,6 +51,7 @@ private:
     bool had_error = false;
     bool finished_imports = false;
     bool scanned_import = false;
+    size_t fstring_counter = 0;
 
     const std::unordered_map<std::string, TokenType> keywords = {
         {"void", T_VOID},
@@ -72,7 +73,13 @@ private:
         char c = advance();
         switch (c) {
             case '{': add_token(T_LBRACE); break;
-            case '}': add_token(T_RBRACE); break;
+            case '}':
+                add_token(T_RBRACE);
+                if (fstring_counter > 0) {
+                    fstring_counter--;
+                    fstring();
+                }
+                break;
             case '(': add_token(T_LPAREN); break;
             case ')': add_token(T_RPAREN); break;
             case '[': add_token(T_LBRACK); break;
@@ -110,7 +117,12 @@ private:
             case '\n': line++; col = 1; break;
             case '"': try_string(); break;
             case '0': try_hex(); break;
-            case 'f': if (match('"')) try_fstring(); else try_identifier(); break;
+            case 'f':
+                if (match('"')) {
+                    add_token(T_F_QUOTE);
+                    fstring();
+                } else try_identifier();
+                break;
             default:
                 if (std::isdigit(c)) try_decimal();
                 else if (is_alpha_under(c)) try_identifier();
@@ -180,27 +192,32 @@ private:
     }
 
     void try_string() {
-        while (peek() != '"' && !is_at_end()) {
-            if (peek() == '\n') error("Unterminated string");
+        while (peek() != '"' && peek() != '\n' && !is_at_end()) {
             advance();
         }
-        if (is_at_end()) {
+        if (is_at_end() || peek() == '\n') {
             error("Unterminated string");
         }
         tokens.push_back({T_STRING, source.substr(token_start + 1, index - token_start - 1), line, col});
         advance();
     }
 
-    void try_fstring() {
-        while (peek() != '"' && !is_at_end()) {
-            if (peek() == '\n') error("Unterminated string");
+    void fstring() {
+        token_start = index;
+        while (peek() != '"' && peek() != '\n' && peek() != '{' && !is_at_end()) {
             advance();
         }
-        if (is_at_end()) {
+        if (is_at_end() || peek() == '\n') {
             error("Unterminated string");
         }
-        tokens.push_back({T_FSTRING, source.substr(token_start + 2, index - token_start - 2), line, col});
-        advance();
+        tokens.push_back({T_STRING, source.substr(token_start, index - token_start), line, col});
+        
+        token_start = index;
+        if (advance() == '{') {
+            add_token(T_LBRACE);
+            fstring_counter++;
+        } else if (fstring_counter == 0)
+            add_token(T_F_QUOTE);
     }
 
     // utility

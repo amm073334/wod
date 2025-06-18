@@ -19,6 +19,8 @@ enum TokenType {
     T_AMP, T_AMP_AMP,
     T_PIPE, T_PIPE_PIPE,
 
+    T_F_QUOTE,
+
     // keywords
     T_IMPORT,
     T_VOID, T_INT, T_STR, T_CONST, T_INLINE,
@@ -26,7 +28,7 @@ enum TokenType {
     T_CMD,
 
     // literals
-    T_IDENT, T_NUMBER, T_STRING, T_FSTRING,
+    T_IDENT, T_NUMBER, T_STRING,
 
     // eof
     T_EOF

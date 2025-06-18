@@ -29,7 +29,7 @@ public:
     void visit_FunctionStmt(FunctionStmt* stmt) override {
         if (stmt->is_inline) return;
 
-        str_sp = CSELF_THRESHOLD + 5;
+        str_sp = BASE_STR_SP;
         for (WodType t : stmt->sym->arg_types)
             if (t == TYPE_STR) str_sp++;
 
@@ -457,6 +457,28 @@ public:
         expr_return = WolfValue{WT_STRLIT, 0, expr->value};
     }
 
+    void visit_FStringExpr(FStringExpr* expr) override {
+        std::string out;
+        for (FStringExpr::Fragment& f : expr->frags) {
+            if (f.expr) {
+                WolfValue v = eval(f.expr);
+                switch (v.wt) {
+                    case WT_NUM:
+                        out += v.v;
+                        break;
+                    case WT_STRLIT:
+                        out += v.string_lit;
+                        break;
+                    case WT_NUMREF:
+                    case WT_STRREF:
+                        out += "\\cself[" + std::to_string(v.v - CSELF_THRESHOLD) + "]";
+                        break;
+                }
+            } else out += f.str;
+        }
+        expr_return = WolfValue{WT_STRLIT, 0, out};
+    }
+
 private:
     bool had_error = false;
     FunctionStmt* current_inline_function = nullptr;
@@ -480,8 +502,10 @@ private:
 
     std::vector<CommonEvent> cevs;
     CommonEvent* current_cev = nullptr;
-    int32_t int_sp = CSELF_THRESHOLD + 10 - 1; // start pointers at one less than the minimum value
-    int32_t str_sp = CSELF_THRESHOLD + 5  - 1; // because a push operation will start by incrementing them to the minimum
+    const int32_t BASE_INT_SP = CSELF_THRESHOLD + 10 - 1; // start pointers at one less than the minimum value
+    const int32_t BASE_STR_SP = CSELF_THRESHOLD + 5  - 1; // because a push operation will start by incrementing them to the minimum
+    int32_t int_sp = BASE_INT_SP;
+    int32_t str_sp = BASE_STR_SP;
 
     struct VarScope {
         const int32_t int_bp;
@@ -490,8 +514,6 @@ private:
     std::stack<VarScope> scopes;
     void begin_frame() { scopes.push({int_sp, str_sp}); };
     void end_frame() { int_sp = scopes.top().int_bp; str_sp = scopes.top().str_bp; scopes.pop(); };
-    WolfValue int_top() { return WolfValue{WT_NUMREF, int_sp}; }
-    WolfValue str_top() { return WolfValue{WT_STRREF, str_sp}; }
 
     WolfValue eval(Expr* expr) { expr->accept(this); return expr_return; }
     WolfValue expr_return;
@@ -514,7 +536,7 @@ private:
 
     WolfValue push_str() {
         if (++str_sp > CSELF_THRESHOLD + 9) error("String stack overflow");
-        return WolfValue{WT_STRREF, int_sp};
+        return WolfValue{WT_STRREF, str_sp};
     }
 
     WolfValue try_suppress(WolfValue v) {
@@ -543,7 +565,7 @@ private:
     void cmd_string(WolfValue lhs, WolfValue rhs) {
         assert(lhs.wt = WT_STRREF);
         if (rhs.wt == WT_STRLIT)
-            current_cev->add_cmd(CMD_STRING, {lhs.v, STRING_RHS_LIT | STRING_ASSIGN_EQ, 0}, {rhs.string_lit});
+            current_cev->add_cmd(CMD_STRING, {lhs.v, STRING_RHS_LIT | STRING_ASSIGN_EQ, 0}, {'"' + rhs.string_lit + '"'});
         else if (rhs.wt == WT_STRREF)
             current_cev->add_cmd(CMD_STRING, {lhs.v, STRING_RHS_REF | STRING_ASSIGN_EQ, rhs.v}, {});
         else assert(false);
