@@ -52,7 +52,6 @@ public:
             Symbol* sym;
             sym = current_env->define(param->name, param->type);
             if (!sym) error(stmt->pos, "Redeclaration of parameter");
-            sym->initialized_var = true;
             switch (param->type) {
                 case TYPE_INT: sym->ref = int_param_ref++; break;
                 case TYPE_STR: sym->ref = str_param_ref++; break;
@@ -90,20 +89,18 @@ public:
 
         if (!stmt->initializer) {
             stmt->sym = current_env->define(stmt->name, stmt->type);
-            stmt->sym->initialized_var = false;
         } else {
             stmt->initializer->accept(this);
             if (stmt->initializer->type != stmt->type)
                 error(stmt->pos, "Declaration type mismatch");
             if (stmt->is_const) {
                 if (!stmt->initializer->is_const)
-                    error(stmt->pos, "Attempted to assign non-const expression to const variable");
+                    error(stmt->pos, "Currently, only compile-time constant expressions can be assigned to const variables");
                 if (stmt->initializer->type == TYPE_INT)
                     stmt->sym = current_env->define_const_int(stmt->name, stmt->initializer->const_int);
                 if (stmt->initializer->type == TYPE_STR)
                     stmt->sym = current_env->define_const_str(stmt->name, stmt->initializer->const_str);
             } else stmt->sym = current_env->define(stmt->name, stmt->type);
-            stmt->sym->initialized_var = true;
         }
         if (!stmt->sym) error(stmt->pos, "Variable redeclaration");
     }
@@ -150,8 +147,8 @@ public:
         }
         for (Expr* e : stmt->int_fields) {
             e->accept(this);
-            if (e->type != TYPE_INT)
-                error(e->pos, "Expected argument of integer type");
+            if (e->type != TYPE_INTPTR && !e->is_const)
+                error(e->pos, "Expected compile-time constant or variable reference");
         }
         for (Expr* e : stmt->str_fields) {
             e->accept(this);
@@ -187,11 +184,6 @@ public:
         if (!sym) error(expr->pos, "Variable not declared");
         expr->sym = sym;
 
-        if (visiting_assign_lhs)
-            sym->initialized_var = true;
-        // else if (!sym->initialized_var)
-        //     error(expr->pos, "Accessed uninitialized variable");
-        
         expr->type = sym->type;
         expr->assignable = !sym->is_const;
         expr->is_const = sym->is_const;
@@ -287,9 +279,20 @@ public:
 
     void visit_UnaryExpr(UnaryExpr* expr) override {
         expr->right->accept(this);
+
+        if (expr->op == UnaryExpr::ADDRESS_OF) {
+            if (expr->right->is_const)
+                error(expr->pos, "Cannot get address of compile-time value");
+            if (!expr->right->assignable)
+                error(expr->pos, "Cannot get address of rvalue");
+            expr->type = TYPE_INTPTR;
+            expr->assignable = false;
+            expr->is_const = false;
+            return;
+        }
+
         if (expr->right->type != TYPE_INT)
             error(expr->pos, "Integer argument expected");
-        
         expr->type = TYPE_INT;
         expr->assignable = false;
         expr->is_const = expr->right->is_const;
@@ -367,7 +370,7 @@ private:
     // utility
     void error(Position pos, std::string error_msg) {
         had_error = true;
-        std::cout << "typecheck error: line " << pos.line << " col " << pos.col << " " << error_msg << std::endl;
+        std::cout << "typecheck error " << pos.file <<": line " << pos.line << " col " << pos.col << " " << error_msg << std::endl;
         throw std::runtime_error(error_msg);
     }
 };

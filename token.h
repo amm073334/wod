@@ -6,12 +6,15 @@ enum TokenType {
     T_LPAREN, T_RPAREN,
     T_LBRACK, T_RBRACK,
     T_COMMA, T_DOT,
-    T_PLUS, T_MINUS,
-    T_SLASH, T_STAR, T_PERCENT,
     T_CARET,
     T_SEMICOLON,
 
     // one or two characters
+    T_PLUS, T_PLUS_EQUAL,
+    T_MINUS, T_MINUS_EQUAL,
+    T_SLASH, T_SLASH_EQUAL,
+    T_STAR, T_STAR_EQUAL,
+    T_PERCENT, T_PERCENT_EQUAL,
     T_BANG, T_BANG_EQUAL,
     T_EQUAL, T_EQUAL_EQUAL,
     T_LESS, T_LESS_EQUAL, T_LESS_LESS,
@@ -27,6 +30,7 @@ enum TokenType {
     T_IF, T_ELSE, T_LOOP, T_RETURN, T_CONTINUE, T_BREAK,
     T_WHILE, T_FOR,
     T_CMD,
+    T_UDB, T_CDB, T_SYS,
 
     // literals
     T_IDENT, T_NUMBER, T_STRING,
@@ -40,6 +44,7 @@ struct Token {
     std::string text;
     size_t line;
     size_t col;
+    std::string file;
 
     std::string to_string() {
         return "(" + std::to_string(token_type) + " " + text + ")";

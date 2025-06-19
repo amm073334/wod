@@ -6,7 +6,7 @@ inline void print(str in) {
 
 inline int time() {
     int out;
-    cmd [121](out, 9000030, 0, 0)();
+    cmd [121](&out, 9000030, 0, 0)();
     return out;
 }
 

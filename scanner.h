@@ -18,6 +18,7 @@ public:
             return {};
         }
 
+        file = src_file;
         const size_t slash_pos = src_file.find_last_of("\\/");
         if (slash_pos != std::string::npos) base_dir = src_file.substr(0, slash_pos+1);
 
@@ -34,7 +35,7 @@ public:
             scan_token();
         }
 
-        tokens.push_back({T_EOF, "", line, col});
+        tokens.push_back({T_EOF, "", line, col, file});
         return tokens;
     }
 
@@ -44,6 +45,7 @@ private:
     std::string base_dir;
     std::vector<Token> tokens;
     std::string source;
+    std::string file;
     size_t token_start = 0;
     size_t index = 0;
     size_t line = 1;
@@ -200,7 +202,7 @@ private:
         if (is_at_end() || peek() == '\n') {
             error("Unterminated string");
         }
-        tokens.push_back({T_STRING, source.substr(token_start + 1, index - token_start - 1), line, col});
+        tokens.push_back({T_STRING, source.substr(token_start + 1, index - token_start - 1), line, col, file});
         advance();
     }
 
@@ -212,7 +214,7 @@ private:
         if (is_at_end() || peek() == '\n') {
             error("Unterminated string");
         }
-        tokens.push_back({T_STRING, source.substr(token_start, index - token_start), line, col});
+        tokens.push_back({T_STRING, source.substr(token_start, index - token_start), line, col, file});
         
         token_start = index;
         if (advance() == '{') {
@@ -249,7 +251,7 @@ private:
     }
     
     void add_token(TokenType token_type) {
-        tokens.push_back({token_type, source.substr(token_start, index - token_start), line, col});
+        tokens.push_back({token_type, source.substr(token_start, index - token_start), line, col, file});
     }
 
     void error(std::string error_msg) {

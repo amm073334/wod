@@ -12,4 +12,5 @@ enum WodType {
     TYPE_VOID,
     TYPE_INT,
     TYPE_STR,
+    TYPE_INTPTR
 };

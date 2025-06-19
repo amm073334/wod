@@ -370,6 +370,9 @@ public:
             case UnaryExpr::MINUS:
                 cmd_arith(temp, WolfValue{WT_NUM, 0}, right, ARITH_OP_MINUS);
                 break;
+            case UnaryExpr::ADDRESS_OF:
+                temp = right;
+                break;
         }
         end_frame();
 

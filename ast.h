@@ -8,6 +8,7 @@
 struct Position {
     size_t line;
     size_t col;
+    std::string file;
 };
 
 struct Node {
@@ -162,7 +163,8 @@ struct BinaryExpr : public Expr {
 struct UnaryExpr : public Expr {
     enum UnaryOp {
         LOGIC_NOT,
-        MINUS
+        MINUS,
+        ADDRESS_OF
     };
     UnaryExpr(Position pos, UnaryOp op, Expr* right)
         : Expr(pos), op(op), right(right) {}

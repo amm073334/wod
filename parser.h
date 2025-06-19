@@ -67,7 +67,7 @@ private:
                     case T_STR: arg_type = TYPE_STR; break;
                 }
                 Token* ntok = eat(T_IDENT, "Expected parameter name");
-                params.push_back(new VarStmt{{ntok->line, ntok->col}, false, arg_type, ntok->text, nullptr});
+                params.push_back(new VarStmt{{ntok->line, ntok->col, ntok->file}, false, arg_type, ntok->text, nullptr});
                 if (arg_type == TYPE_INT) n_int_args++;
                 else n_str_args++;
             } else {
@@ -96,18 +96,18 @@ private:
         if (match(T_WHILE)) return while_stmt();
         if (match(T_FOR)) return for_stmt();
         if (match(T_RETURN)) return return_stmt();
-        if (match(T_CONTINUE)) return new ContinueStmt({previous()->line, previous()->col});
-        if (match(T_BREAK)) return new BreakStmt({previous()->line, previous()->col});
+        if (match(T_CONTINUE)) return new ContinueStmt({previous()->line, previous()->col, previous()->file});
+        if (match(T_BREAK)) return new BreakStmt({previous()->line, previous()->col, previous()->file});
         if (match({T_INT, T_STR, T_CONST})) return var_stmt();
         if (match(T_CMD)) return cmd_stmt();
-        if (match(T_LBRACE)) return new BlockStmt({previous()->line, previous()->col}, block());
+        if (match(T_LBRACE)) return new BlockStmt({previous()->line, previous()->col, previous()->file}, block());
 
         return expr_stmt();
     }
 
     Stmt* while_stmt() {
         Token* tok = previous();
-        Position pos = {tok->line, tok->col};
+        Position pos = {tok->line, tok->col, tok->file};
         eat(T_LPAREN, "Expected '(' after 'while'");
         Expr* condition = expression();
         eat(T_RPAREN, "Expected ')' after while condition");
@@ -118,7 +118,7 @@ private:
 
     Stmt* for_stmt() {
         Token* tok = previous();
-        Position pos = {tok->line, tok->col};
+        Position pos = {tok->line, tok->col, tok->file};
         eat(T_LPAREN, "Expected '(' after 'for'");
 
         Stmt* initializer;
@@ -170,7 +170,7 @@ private:
         eat(T_RPAREN, "Expected ')' after cmd string arguments");
         eat(T_SEMICOLON, "Expected ';' after cmd statement");
         
-        return new CmdStmt({tok->line, tok->col}, cmd_id, int_fields, str_fields);
+        return new CmdStmt({tok->line, tok->col, tok->file}, cmd_id, int_fields, str_fields);
     }
 
     Stmt* var_stmt() {
@@ -190,7 +190,7 @@ private:
         if (match(T_EQUAL)) initializer = expression();
 
         eat(T_SEMICOLON, "Expected ';' after variable declaration");
-        return new VarStmt({tok->line, tok->col}, is_const, type, tok->text, initializer);
+        return new VarStmt({tok->line, tok->col, tok->file}, is_const, type, tok->text, initializer);
     }
 
     Stmt* if_stmt() {
@@ -201,7 +201,7 @@ private:
         Stmt* then_branch = statement();
         Stmt* else_branch = nullptr;
         if (match(T_ELSE)) else_branch = statement();
-        return new IfStmt({tok->line, tok->col}, condition, then_branch, else_branch);
+        return new IfStmt({tok->line, tok->col, tok->file}, condition, then_branch, else_branch);
     }
 
     Stmt* loop_stmt() {
@@ -212,7 +212,7 @@ private:
             eat(T_RPAREN, "Expected ')' after loop count");
         }
         Stmt* body = statement();
-        return new LoopStmt({tok->line, tok->col}, count, body);
+        return new LoopStmt({tok->line, tok->col, tok->file}, count, body);
     }
 
     Stmt* return_stmt() {
@@ -220,14 +220,14 @@ private:
         Expr* expr = nullptr;
         if (!check(T_SEMICOLON)) expr = expression();
         eat(T_SEMICOLON, "Expected ';' after return statement");
-        return new ReturnStmt({tok->line, tok->col}, expr);
+        return new ReturnStmt({tok->line, tok->col, tok->file}, expr);
     }
 
     Stmt* expr_stmt() {
         Token* tok = peek();
         Expr* expr = expression();
         eat(T_SEMICOLON, "Expected ';' after expression");
-        return new ExprStmt({tok->line, tok->col}, expr);
+        return new ExprStmt({tok->line, tok->col, tok->file}, expr);
     }
 
     // expressions
@@ -240,7 +240,7 @@ private:
         if (match(T_EQUAL)) {
             Token* tok = previous();
             Expr* value = or();
-            return new AssignExpr({tok->line, tok->col}, expr, value);
+            return new AssignExpr({tok->line, tok->col, tok->file}, expr, value);
         }
         return expr;
     }
@@ -250,7 +250,7 @@ private:
         while (match(T_PIPE_PIPE)) {
             Token* tok = previous();
             Expr* right = and();
-            expr = new BinaryExpr({tok->line, tok->col}, expr, BinaryExpr::LOGIC_OR, right);
+            expr = new BinaryExpr({tok->line, tok->col, tok->file}, expr, BinaryExpr::LOGIC_OR, right);
         }
         return expr;
     }
@@ -260,7 +260,7 @@ private:
         while (match(T_AMP_AMP)) {
             Token* tok = previous();
             Expr* right = bit_or();
-            expr = new BinaryExpr({tok->line, tok->col}, expr, BinaryExpr::LOGIC_AND, right);
+            expr = new BinaryExpr({tok->line, tok->col, tok->file}, expr, BinaryExpr::LOGIC_AND, right);
         }
         return expr;
     }
@@ -270,7 +270,7 @@ private:
         while (match(T_PIPE)) {
             Token* tok = previous();
             Expr* right = bit_xor();
-            expr = new BinaryExpr({tok->line, tok->col}, expr, BinaryExpr::BIT_OR, right);
+            expr = new BinaryExpr({tok->line, tok->col, tok->file}, expr, BinaryExpr::BIT_OR, right);
         }
         return expr;
     }
@@ -280,7 +280,7 @@ private:
         while (match(T_CARET)) {
             Token* tok = previous();
             Expr* right = bit_and();
-            expr = new BinaryExpr({tok->line, tok->col}, expr, BinaryExpr::BIT_XOR, right);
+            expr = new BinaryExpr({tok->line, tok->col, tok->file}, expr, BinaryExpr::BIT_XOR, right);
         }
         return expr;
     }
@@ -290,7 +290,7 @@ private:
         while (match(T_AMP)) {
             Token* tok = previous();
             Expr* right = equality();
-            expr = new BinaryExpr({tok->line, tok->col}, expr, BinaryExpr::BIT_AND, right);
+            expr = new BinaryExpr({tok->line, tok->col, tok->file}, expr, BinaryExpr::BIT_AND, right);
         }
         return expr;
     }
@@ -305,7 +305,7 @@ private:
                 case T_EQUAL_EQUAL: op = BinaryExpr::EQ; break;
                 case T_BANG_EQUAL:  op = BinaryExpr::NEQ; break;
             }
-            expr = new BinaryExpr({tok->line, tok->col}, expr, op, right);
+            expr = new BinaryExpr({tok->line, tok->col, tok->file}, expr, op, right);
         }
         return expr;
     }
@@ -322,7 +322,7 @@ private:
                 case T_LESS:            op = BinaryExpr::LT; break;
                 case T_LESS_EQUAL:      op = BinaryExpr::LTE; break;
             }
-            expr = new BinaryExpr({tok->line, tok->col}, expr, op, right);
+            expr = new BinaryExpr({tok->line, tok->col, tok->file}, expr, op, right);
         }
         return expr;
     }
@@ -337,7 +337,7 @@ private:
                 case T_LESS_LESS:         op = BinaryExpr::LSHIFT; break;
                 case T_GREATER_GREATER:   op = BinaryExpr::RSHIFT; break;
             }
-            expr = new BinaryExpr({tok->line, tok->col}, expr, op, right);
+            expr = new BinaryExpr({tok->line, tok->col, tok->file}, expr, op, right);
         }
         return expr;
     }
@@ -352,7 +352,7 @@ private:
                 case T_PLUS:    op = BinaryExpr::ADD; break;
                 case T_MINUS:   op = BinaryExpr::SUB; break;
             }
-            expr = new BinaryExpr({tok->line, tok->col}, expr, op, right);
+            expr = new BinaryExpr({tok->line, tok->col, tok->file}, expr, op, right);
         }
         return expr;
     }
@@ -368,21 +368,22 @@ private:
                 case T_SLASH:   op = BinaryExpr::DIV; break;
                 case T_PERCENT:   op = BinaryExpr::MODULO; break;
             }
-            expr = new BinaryExpr({tok->line, tok->col}, expr, op, right);
+            expr = new BinaryExpr({tok->line, tok->col, tok->file}, expr, op, right);
         }
         return expr;
     }
 
     Expr* unary() {
-        while (match({T_BANG, T_MINUS})) {
+        while (match({T_BANG, T_MINUS, T_AMP})) {
             Token* tok = previous();
             Expr* right = unary();
             UnaryExpr::UnaryOp op;
             switch (tok->token_type) {
                 case T_BANG:    op = UnaryExpr::LOGIC_NOT; break;
                 case T_MINUS:   op = UnaryExpr::MINUS; break;
+                case T_AMP:     op = UnaryExpr::ADDRESS_OF; break;
             }
-            return new UnaryExpr({tok->line, tok->col}, op, right);
+            return new UnaryExpr({tok->line, tok->col, tok->file}, op, right);
         }
         return call();
     }
@@ -394,7 +395,7 @@ private:
             if (match(T_LPAREN)) {
                 expr = finish_call(tok);
             } else {
-                expr = new VariableExpr({tok->line, tok->col}, tok->text);
+                expr = new VariableExpr({tok->line, tok->col, tok->file}, tok->text);
             }
         } else {
             expr = primary();
@@ -412,14 +413,14 @@ private:
 
         eat(T_RPAREN, "Expected ')' after argument list");
 
-        return new CallExpr({callee->line, callee->col}, callee->text, args);
+        return new CallExpr({callee->line, callee->col, callee->file}, callee->text, args);
     }
 
     Expr* primary() {
         if (match(T_NUMBER))
-            return new IntLiteralExpr({previous()->line, previous()->col}, std::stoi(previous()->text, nullptr, 0));
+            return new IntLiteralExpr({previous()->line, previous()->col, previous()->file}, std::stoi(previous()->text, nullptr, 0));
         if (match(T_STRING))
-            return new StrLiteralExpr({previous()->line, previous()->col}, previous()->text);
+            return new StrLiteralExpr({previous()->line, previous()->col, previous()->file}, previous()->text);
         if (match(T_F_QUOTE)) {
             std::vector<FStringExpr::Fragment> frags;
             while (!is_at_end() && !check(T_F_QUOTE)) {
@@ -431,7 +432,7 @@ private:
                 else error(peek(), "Unexpected token in f-string");
             }
             eat(T_F_QUOTE, "Expected ending quote after f-string");
-            return new FStringExpr({previous()->line, previous()->col}, frags);
+            return new FStringExpr({previous()->line, previous()->col, previous()->file}, frags);
         }
         if (match(T_LPAREN)) {
             Expr* expr = expression();
@@ -501,7 +502,7 @@ private:
 
     void error(Token* t, std::string error_msg) {
         had_error = true;
-        std::cout << "parse error: line " << t->line << " " << t->text << " " << error_msg << std::endl;
+        std::cout << "parse error " << t->file << ": line " << t->line << " " << t->text << " " << error_msg << std::endl;
         throw std::runtime_error(error_msg);
     }
 };

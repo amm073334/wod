@@ -1,0 +1,15 @@
+cdb verts {
+    int x;
+    int y;
+    int z;
+}
+
+inline void set_vert(int vert, int x, int y, int z) {
+    verts[vert].x = x;
+    verts[vert].y = y;
+    verts[vert].z = z;
+}
+
+void func() {
+    verts[2] = {1,2,3};
+}

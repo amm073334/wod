@@ -1,5 +1,5 @@
 all:
-	cl /EHsc wod.cpp
+	cl /EHsc wodc.cpp
 
 debug:
-	cl /EHsc /Zi wod.cpp
+	cl /EHsc /Zi wodc.cpp

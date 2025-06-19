@@ -3,12 +3,12 @@ const int ARITH_SQRT = 0xC00;
 
 inline int sqrt_inline(int x) {
     int out;
-    cmd [ARITH](out, x, 0, ARITH_SQRT)();
+    cmd [ARITH](&out, &x, 0, ARITH_SQRT)();
     return out;
 }
 
 int sqrt(int x) {
     int out;
-    cmd [ARITH](out, x, 0, ARITH_SQRT)();
+    cmd [ARITH](&out, &x, 0, ARITH_SQRT)();
     return out;
 }
