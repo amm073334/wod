@@ -6,7 +6,7 @@
 #include "codegen.h"
 
 int main(int argc, const char* argv[]) {
-    if (argc != 2) {
+    if (argc != 3) {
         std::cout << "wrong number of args" << std::endl;
         exit(1);
     }
@@ -24,7 +24,7 @@ int main(int argc, const char* argv[]) {
     if (typechecker.failed()) exit(1);
 
     Codegen codegen;
-    std::cout << codegen.gen(statements);
+    codegen.gen(statements, argv[2]);
 
     delete env;
     return 0;

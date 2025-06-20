@@ -15,6 +15,7 @@ enum CommandId : int32_t {
     CMD_LOOP_COUNT      = 179,
     CMD_CALL_ID         = 210,
     CMD_CALL_RESERVE    = 211,
+    CMD_DB              = 250,
     CMD_CALL_NAME       = 300,
     CMD_BRANCH          = 401,
     CMD_BRANCH_ELSE     = 420,
@@ -94,6 +95,30 @@ enum StringFlag {
 
     STRING_ASSIGN_EQ        =   0x0,
     STRING_ASSIGN_PLUS_EQ   = 0x100,
+};
+
+enum DBFlag {
+    DB_DEREF    = 0x1,
+    DB_STRLIT   = 0x2,
+
+    DB_ASSIGN_EQ            = 0x00,
+    DB_ASSIGN_PLUS_EQ       = 0x10,
+    DB_ASSIGN_MINUS_EQ      = 0x20,
+    DB_ASSIGN_TIMES_EQ      = 0x30,
+    DB_ASSIGN_DIV_EQ        = 0x40,
+    DB_ASSIGN_MOD_EQ        = 0x50,
+    DB_ASSIGN_LOW_BOUND     = 0x60,
+    DB_ASSIGN_HIGH_BOUND    = 0x70,
+
+    DB_TYPE_CDB = 0x000,
+    DB_TYPE_SDB = 0x100,
+    DB_TYPE_UDB = 0x200,
+
+    DB_ASSIGN_TO_VAR = 0x1000,
+
+    DB_STR_TYPE = 0x10000,
+    DB_STR_DATA = 0x20000,
+    DB_STR_PROP = 0x40000,
 };
 
 enum CallFlag {

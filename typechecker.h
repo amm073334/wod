@@ -52,9 +52,9 @@ public:
             Symbol* sym;
             sym = current_env->define(param->name, param->type);
             if (!sym) error(stmt->pos, "Redeclaration of parameter");
-            switch (param->type) {
-                case TYPE_INT: sym->ref = int_param_ref++; break;
-                case TYPE_STR: sym->ref = str_param_ref++; break;
+            switch (param->type.t) {
+                case WodType::TYPE_INT: sym->ref = int_param_ref++; break;
+                case WodType::TYPE_STR: sym->ref = str_param_ref++; break;
             }
             param->sym = sym;
         }
@@ -71,7 +71,7 @@ public:
 
     void visit_ReturnStmt(ReturnStmt* stmt) override {
         WodType ret_expr_type;
-        if (!stmt->expr) ret_expr_type = TYPE_VOID;
+        if (!stmt->expr) ret_expr_type.t = WodType::TYPE_VOID;
         else {
             stmt->expr->accept(this);
             ret_expr_type = stmt->expr->type;
@@ -96,9 +96,9 @@ public:
             if (stmt->is_const) {
                 if (!stmt->initializer->is_const)
                     error(stmt->pos, "Currently, only compile-time constant expressions can be assigned to const variables");
-                if (stmt->initializer->type == TYPE_INT)
+                if (stmt->initializer->type == WodType::TYPE_INT)
                     stmt->sym = current_env->define_const_int(stmt->name, stmt->initializer->const_int);
-                if (stmt->initializer->type == TYPE_STR)
+                if (stmt->initializer->type == WodType::TYPE_STR)
                     stmt->sym = current_env->define_const_str(stmt->name, stmt->initializer->const_str);
             } else stmt->sym = current_env->define(stmt->name, stmt->type);
         }
@@ -107,7 +107,7 @@ public:
 
     void visit_IfStmt(IfStmt* stmt) override {
         stmt->condition->accept(this);
-        if (stmt->condition->type != TYPE_INT)
+        if (stmt->condition->type != WodType::TYPE_INT)
             error(stmt->pos, "Branch condition is not an integer");
         open_scope();
         stmt->then_branch->accept(this);
@@ -122,7 +122,7 @@ public:
     void visit_LoopStmt(LoopStmt* stmt) override {
         if (stmt->count) {
             stmt->count->accept(this);
-            if (stmt->count->type != TYPE_INT)
+            if (stmt->count->type != WodType::TYPE_INT)
                 error(stmt->pos, "Loop count is not an integer");
         }
         open_scope();
@@ -147,14 +147,31 @@ public:
         }
         for (Expr* e : stmt->int_fields) {
             e->accept(this);
-            if (e->type != TYPE_INTPTR && !e->is_const)
+            if (e->type != WodType::TYPE_INTPTR && !e->is_const)
                 error(e->pos, "Expected compile-time constant or variable reference");
         }
         for (Expr* e : stmt->str_fields) {
             e->accept(this);
-            if (e->type != TYPE_STR)
+            if (e->type != WodType::TYPE_STR)
                 error(e->pos, "Expected argument of string type");
         }
+    }
+
+    void visit_CdbStmt(CdbStmt* stmt) override {
+        if (globals_visited) return;
+
+        Environment* cdb_fields = new Environment;
+        size_t field_index = 0;
+        for (VarStmt* field : stmt->fields) {
+            assert(!field->initializer);
+            Symbol* sym = cdb_fields->define(field->name, field->type);
+            if (!sym) error(field->pos, "Redeclaration of field");
+
+            sym->ref = field_index;
+            field_index++;
+        }
+        stmt->sym = current_env->define_cdb(stmt->name, cdb_fields);
+        stmt->sym->ref = current_cdb_index++;
     }
 
     // expressions
@@ -173,8 +190,10 @@ public:
             error(expr->pos, "Attempted to assign to non-variable expression");
         if (expr->lhs->type != expr->rhs->type)
             error(expr->pos, "Assignment type mismatch");
+        if (expr->lhs->type == WodType::TYPE_STR && expr->op != AssignExpr::EQUAL && expr->op != AssignExpr::PLUS_EQUAL)
+            error(expr->pos, "Invalid assignment operator used for string variable");
         
-        expr->type = TYPE_VOID;
+        expr->type.t = WodType::TYPE_VOID;
         expr->assignable = false;
         expr->is_const = false;
     }
@@ -188,11 +207,29 @@ public:
         expr->assignable = !sym->is_const;
         expr->is_const = sym->is_const;
         if (expr->is_const) {
-            if (expr->type == TYPE_INT) 
+            if (expr->type == WodType::TYPE_INT) 
                 expr->const_int = sym->ref;
             else
                 expr->const_str = sym->const_string;
         }
+    }
+
+    void visit_CdbExpr(CdbExpr* expr) override {
+        Symbol* cdb_sym = current_env->get(expr->name);
+        if (!cdb_sym) error(expr->pos, "CDB not declared");
+        // TODO: differentiate cdb, function, and variable symbols so that an existing variable/function wouldn't match this search
+        expr->sym = cdb_sym;
+
+        expr->index->accept(this);
+        if (expr->index->type != WodType::TYPE_INT)
+            error(expr->pos, "CDB access index must be of integer type");
+
+        Symbol* prop_sym = cdb_sym->cdb_fields->get(expr->property);
+        if (!prop_sym) error(expr->pos, "No such CDB property");
+
+        expr->type = prop_sym->type;
+        expr->assignable = true;
+        expr->is_const = false;
     }
 
     void visit_BinaryExpr(BinaryExpr* expr) override {
@@ -201,14 +238,14 @@ public:
 
         if (expr->left->type != expr->right->type)
             error(expr->pos, "Type mismatch in binary expression");
-        else if (expr->left->type == TYPE_STR && expr->right->type == TYPE_STR){
+        else if (expr->left->type == WodType::TYPE_STR && expr->right->type == WodType::TYPE_STR){
             if (expr->op != BinaryExpr::EQ && expr->op != BinaryExpr::NEQ) {
                 error(expr->pos, "Only comparison is supported between strings");
             }
-        } else if (expr->left->type != TYPE_INT || expr->right->type != TYPE_INT)
+        } else if (expr->left->type != WodType::TYPE_INT || expr->right->type != WodType::TYPE_INT)
             error(expr->pos, "Integer arguments expected");
         
-        expr->type = TYPE_INT;
+        expr->type.t = WodType::TYPE_INT;
         expr->assignable = false;
         expr->is_const = expr->left->is_const && expr->right->is_const;
         if (expr->is_const) {
@@ -262,13 +299,13 @@ public:
                     expr->const_int = expr->left->const_int % expr->right->const_int;
                     break;
                 case BinaryExpr::EQ:
-                    if (expr->left->type == TYPE_INT)
+                    if (expr->left->type == WodType::TYPE_INT)
                         expr->const_int = expr->left->const_int == expr->right->const_int;
                     else
                         expr->const_int = expr->left->const_str == expr->right->const_str;
                     break;
                 case BinaryExpr::NEQ:
-                    if (expr->left->type == TYPE_INT)
+                    if (expr->left->type == WodType::TYPE_INT)
                         expr->const_int = expr->left->const_int != expr->right->const_int;
                     else
                         expr->const_int = expr->left->const_str != expr->right->const_str;
@@ -285,15 +322,15 @@ public:
                 error(expr->pos, "Cannot get address of compile-time value");
             if (!expr->right->assignable)
                 error(expr->pos, "Cannot get address of rvalue");
-            expr->type = TYPE_INTPTR;
+            expr->type.t = WodType::TYPE_INTPTR;
             expr->assignable = false;
             expr->is_const = false;
             return;
         }
 
-        if (expr->right->type != TYPE_INT)
+        if (expr->right->type != WodType::TYPE_INT)
             error(expr->pos, "Integer argument expected");
-        expr->type = TYPE_INT;
+        expr->type.t = WodType::TYPE_INT;
         expr->assignable = false;
         expr->is_const = expr->right->is_const;
         if (expr->is_const) {
@@ -328,14 +365,14 @@ public:
     }
     
     void visit_IntLiteralExpr(IntLiteralExpr* expr) override {
-        expr->type = TYPE_INT;
+        expr->type.t = WodType::TYPE_INT;
         expr->assignable = false;
         expr->is_const = true;
         expr->const_int = expr->value;
     }
 
     void visit_StrLiteralExpr(StrLiteralExpr* expr) override {
-        expr->type = TYPE_STR;
+        expr->type.t = WodType::TYPE_STR;
         expr->assignable = false;
         expr->is_const = true;
         expr->const_str = expr->value;
@@ -345,7 +382,7 @@ public:
         for (FStringExpr::Fragment &f : expr->frags) {
             if (f.expr) f.expr->accept(this);
         }
-        expr->type = TYPE_STR;
+        expr->type.t = WodType::TYPE_STR;
         expr->assignable = false;
         expr->is_const = false;
     }
@@ -358,7 +395,7 @@ private:
     bool visiting_inline_function = false;
 
     int32_t current_cev_ref = CEV_THRESHOLD;
-    int32_t current_cint_ref = CSELF_THRESHOLD + 10;
+    int32_t current_cdb_index = 0;
 
     Environment* global_env;
     Environment* current_env;

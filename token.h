@@ -30,7 +30,7 @@ enum TokenType {
     T_IF, T_ELSE, T_LOOP, T_RETURN, T_CONTINUE, T_BREAK,
     T_WHILE, T_FOR,
     T_CMD,
-    T_UDB, T_CDB, T_SYS,
+    T_CDB,
 
     // literals
     T_IDENT, T_NUMBER, T_STRING,

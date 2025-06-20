@@ -113,13 +113,31 @@ struct CmdStmt : public Stmt {
     std::vector<Expr*> str_fields;
 };
 
+struct CdbStmt : public Stmt {
+    CdbStmt(Position pos, std::string name, std::vector<VarStmt*> fields)
+        : Stmt(pos), name(name), fields(fields) {}
+    void accept(Visitor* v) override { v->visit_CdbStmt(this); }
+    std::string name;
+    std::vector<VarStmt*> fields;
+    Symbol* sym;
+};
+
 
 // expressions
 struct AssignExpr : public Expr {
-    AssignExpr(Position pos, Expr* lhs, Expr* rhs)
-        : Expr(pos), lhs(lhs), rhs(rhs) {}
+    enum AssignOp {
+        EQUAL,
+        PLUS_EQUAL,
+        MINUS_EQUAL,
+        TIMES_EQUAL,
+        DIV_EQUAL,
+        MOD_EQUAL,
+    };
+    AssignExpr(Position pos, Expr* lhs, AssignOp op, Expr* rhs)
+        : Expr(pos), lhs(lhs), op(op), rhs(rhs) {}
     void accept(Visitor* v) override { v->visit_AssignExpr(this); }
     Expr* lhs;
+    AssignOp op;
     Expr* rhs;
 };
 
@@ -128,6 +146,16 @@ struct VariableExpr : public Expr {
         : Expr(pos), name(name) {}
     void accept(Visitor* v) override { v->visit_VariableExpr(this); }
     std::string name;
+    Symbol* sym;
+};
+
+struct CdbExpr : public Expr {
+    CdbExpr(Position pos, std::string name, Expr* index, std::string property)
+        : Expr(pos), name(name), index(index), property(property) {}
+    void accept(Visitor* v) override { v->visit_CdbExpr(this); }
+    std::string name;
+    Expr* index;
+    std::string property;
     Symbol* sym;
 };
 

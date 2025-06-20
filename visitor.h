@@ -10,10 +10,12 @@ struct LoopStmt;
 struct ContinueStmt;
 struct BreakStmt;
 struct CmdStmt;
+struct CdbStmt;
 
 struct AssignExpr;
 struct LiteralExpr;
 struct VariableExpr;
+struct CdbExpr;
 struct BinaryExpr;
 struct UnaryExpr;
 struct CallExpr;
@@ -34,10 +36,12 @@ public:
     virtual void visit_ContinueStmt(ContinueStmt* stmt) = 0;
     virtual void visit_BreakStmt(BreakStmt* stmt) = 0;
     virtual void visit_CmdStmt(CmdStmt* stmt) = 0;
+    virtual void visit_CdbStmt(CdbStmt* stmt) = 0;
 
     // expressions
     virtual void visit_AssignExpr(AssignExpr* expr) = 0;
     virtual void visit_VariableExpr(VariableExpr* expr) = 0;
+    virtual void visit_CdbExpr(CdbExpr* expr) = 0;
     virtual void visit_BinaryExpr(BinaryExpr* expr) = 0;
     virtual void visit_UnaryExpr(UnaryExpr* expr) = 0;
     virtual void visit_CallExpr(CallExpr* expr) = 0;

@@ -1,26 +1,55 @@
 #pragma once
 
 #include <iostream>
+#include <fstream>
 #include <stack>
 #include "visitor.h"
 #include "ast.h"
 #include "commonevent.h"
 #include "command.h"
+#include "db.h"
+
+#include <windows.h>
 
 class Codegen : public Visitor {
 public:
-    std::string gen(std::vector<Stmt*> &program) {
+    void gen(std::vector<Stmt*> &program, std::string outdir) {
         for (Stmt* s : program) {
             s->accept(this);
         }
 
-        std::string out =
-            "[COMMON_EVENT_TEXT_OUTPUT]\nCOMMON_EVENT_NUM=" + std::to_string(cevs.size()) + "\n";
-        for (CommonEvent &cev : cevs) {
-            out += "--------------------------\n";
-            out += cev.to_string();
+        if (!CreateDirectoryA(outdir.c_str(), NULL) && ERROR_ALREADY_EXISTS != GetLastError()) {
+            std::cout << "failed" << std::endl;
+            return;
         }
-        return out;
+
+        if (outdir.back() != '\\' && outdir.back() != '/')
+            outdir += '\\';
+
+        outdir += "BasicData\\";
+        if (!CreateDirectoryA(outdir.c_str(), NULL) && ERROR_ALREADY_EXISTS != GetLastError()) {
+            std::cout << "failed" << std::endl;
+            return;
+        }
+
+        std::ofstream of;
+        of.open(outdir + "CommonEvent.dat.Auto.txt");
+        of << "[COMMON_EVENT_TEXT_OUTPUT]" << std::endl;
+        of << "COMMON_EVENT_NUM=" << std::to_string(cevs.size()) << std::endl;
+        for (CommonEvent &cev : cevs) {
+            of << "--------------------------\n";
+            of << cev.to_string();
+        }
+        of.close();
+
+        of.open(outdir + "CDataBase.Auto.txt");
+        of << "[DATABASE_TEXT_OUTPUT]" << std::endl;
+        of << "TYPE_NUM=" << std::to_string(cdbs.size()) << std::endl;
+        for (DB &cdb : cdbs) {
+            of << "----\n";
+            of << cdb.to_string();
+        }
+        of.close();
     }
 
     bool failed() { return had_error; }
@@ -31,12 +60,13 @@ public:
 
         str_sp = BASE_STR_SP;
         for (WodType t : stmt->sym->arg_types)
-            if (t == TYPE_STR) str_sp++;
+            if (t == WodType::TYPE_STR) str_sp++;
 
         begin_frame();
 
         cevs.push_back(CommonEvent());
         current_cev = &cevs.back();
+        current_cev->COMMON_ID = cev_index++;
 
         for (Stmt* s : stmt->body) {
             s->accept(this);
@@ -71,11 +101,11 @@ public:
         WolfValue v = eval(stmt->expr);
         if (current_cev->RETURN_VAL_TARGET == -1)
             current_cev->RETURN_VAL_TARGET = 99;
-        switch (stmt->expr->type) {
-            case TYPE_INT:
+        switch (stmt->expr->type.t) {
+            case WodType::TYPE_INT:
                 cmd_arith(WolfValue{WT_NUMREF, CSELF_THRESHOLD + current_cev->RETURN_VAL_TARGET}, v);
                 break;
-            case TYPE_STR:
+            case WodType::TYPE_STR:
                 cmd_string(WolfValue{WT_STRREF, CSELF_THRESHOLD + current_cev->RETURN_VAL_TARGET}, v);
                 break;
         }
@@ -90,11 +120,11 @@ public:
         }
         begin_frame();
         WolfValue v = eval(stmt->expr);
-        switch (stmt->expr->type) {
-            case TYPE_INT:
+        switch (stmt->expr->type.t) {
+            case WodType::TYPE_INT:
                 cmd_arith(inline_retval, v);
                 break;
-            case TYPE_STR:
+            case WodType::TYPE_STR:
                 cmd_string(inline_retval, v);
                 break;
         }
@@ -112,7 +142,7 @@ public:
         if (stmt->is_const) return;
 
         WolfValue lhs;
-        if (stmt->sym->type == TYPE_INT)
+        if (stmt->sym->type == WodType::TYPE_INT)
             lhs = push_int();
         else
             lhs = push_str();
@@ -122,7 +152,7 @@ public:
 
         begin_frame();
         WolfValue initial = eval(stmt->initializer);
-        if (stmt->sym->type == TYPE_INT)
+        if (stmt->sym->type == WodType::TYPE_INT)
             cmd_arith(lhs, initial);
         else
             cmd_string(lhs, initial);
@@ -197,15 +227,49 @@ public:
         end_frame();
     }
 
+    void visit_CdbStmt(CdbStmt* stmt) override {
+        cdbs.push_back(DB());
+        for (VarStmt* vs : stmt->fields) {
+            DB::Property p;
+            if (vs->type == WodType::TYPE_INT)
+                p.type = DB::PROP_INT;
+            else
+                p.type = DB::PROP_STR;
+            cdbs.back().properties.push_back(p);
+        }
+        cdbs.back().TYPE_ID = cdb_index++;
+    }
+
     // expressions
     void visit_AssignExpr(AssignExpr* expr) override {
         WolfValue lhs = eval(expr->lhs);
         WolfValue rhs = eval(expr->rhs);
-        
-        if (lhs.wt == WT_NUMREF)
-            cmd_arith(lhs, rhs);
-        else
-            cmd_string(lhs, rhs);
+
+        if (lhs.wt == WT_NUMREF) {
+            ArithFlag assign;
+            switch (expr->op) {
+                case AssignExpr::EQUAL:         assign = ARITH_ASSIGN_EQ; break;
+                case AssignExpr::PLUS_EQUAL:    assign = ARITH_ASSIGN_PLUS_EQ; break;
+                case AssignExpr::MINUS_EQUAL:   assign = ARITH_ASSIGN_MINUS_EQ; break;
+                case AssignExpr::TIMES_EQUAL:   assign = ARITH_ASSIGN_TIMES_EQ; break;
+                case AssignExpr::DIV_EQUAL:     assign = ARITH_ASSIGN_DIV_EQ; break;
+                case AssignExpr::MOD_EQUAL:     assign = ARITH_ASSIGN_MOD_EQ; break;
+            }
+            if (lhs.is_db()) {
+                int32_t type, data, prop;
+                std::tie(type, data, prop) = get_db_parts(lhs.v);
+                cmd_cdb_put(type, data, prop, rhs);
+            } else {
+                cmd_arith(lhs, rhs, {WT_NUM, 0}, assign);
+            }
+        } else {
+            StringFlag assign;
+            if (expr->op == AssignExpr::PLUS_EQUAL)
+                assign = STRING_ASSIGN_PLUS_EQ;
+            else
+                assign = STRING_ASSIGN_EQ;
+            cmd_string(lhs, rhs, assign);
+        }
     }
 
     void visit_VariableExpr(VariableExpr* expr) override {
@@ -216,7 +280,7 @@ public:
 
     void normal_var(VariableExpr* expr) {
         Symbol* sym = expr->sym;
-        if (sym->type == TYPE_INT)
+        if (sym->type == WodType::TYPE_INT)
             expr_return = WolfValue{WT_NUMREF, sym->ref};
         else
             expr_return = WolfValue{WT_STRREF, sym->ref};
@@ -230,6 +294,33 @@ public:
             }
         }
         normal_var(expr);
+    }
+
+    void visit_CdbExpr(CdbExpr* expr) override {
+        WolfType wt;
+        if (expr->type == WodType::TYPE_INT)
+            wt = WT_NUMREF;
+        else
+            wt = WT_STRREF;
+
+        int32_t prop_index = expr->sym->cdb_fields->get(expr->property)->ref;
+        if (expr->index->is_const) {
+            expr_return =
+                WolfValue{wt,
+                    1100000000
+                    + 1000000 * expr->sym->ref
+                    + 100 * expr->index->const_int
+                    + prop_index};
+            return;
+        }
+
+        WolfValue index = eval(expr->index);
+        expr_return =
+            WolfValue{wt,
+                1100000000
+                + 1000000 * expr->sym->ref
+                + 100 * index.v
+                + prop_index};
     }
 
     void visit_BinaryExpr(BinaryExpr* expr) override {
@@ -504,7 +595,10 @@ public:
 private:
     bool had_error = false;
     FunctionStmt* current_inline_function = nullptr;
-    
+    int32_t cev_index = 0;
+    int32_t cdb_index = 0;
+    std::vector<DB> cdbs;
+
     enum WolfType {
         WT_NUM,
         WT_NUMREF,
@@ -518,6 +612,7 @@ private:
         std::string string_lit;
         bool is_ref() { return wt == WT_NUMREF || wt == WT_STRREF; }
         bool do_suppress() { return wt == WT_NUM && v >= VAR_THRESHOLD; }
+        bool is_db() { return is_ref() && v >= 1000000000; }
     };
     WolfValue inline_retval;
     std::vector<WolfValue> inline_args;
@@ -542,7 +637,7 @@ private:
 
     bool try_const(Expr* expr) {
         if (expr->is_const) {
-            if (expr->type == TYPE_INT)
+            if (expr->type == WodType::TYPE_INT)
                 expr_return = WolfValue{WT_NUM, expr->const_int};
             else
                 expr_return = WolfValue{WT_STRLIT, 0, expr->const_str};
@@ -585,12 +680,44 @@ private:
     }
 
     void cmd_string(WolfValue lhs, WolfValue rhs) {
+        cmd_string(lhs, rhs, STRING_ASSIGN_EQ);
+    }
+
+    void cmd_string(WolfValue lhs, WolfValue rhs, StringFlag flag) {
         assert(lhs.wt = WT_STRREF);
         if (rhs.wt == WT_STRLIT)
-            current_cev->add_cmd(CMD_STRING, {lhs.v, STRING_RHS_LIT | STRING_ASSIGN_EQ, 0}, {'"' + rhs.string_lit + '"'});
+            current_cev->add_cmd(CMD_STRING, {lhs.v, STRING_RHS_LIT | flag, 0}, {'"' + rhs.string_lit + '"'});
         else if (rhs.wt == WT_STRREF)
-            current_cev->add_cmd(CMD_STRING, {lhs.v, STRING_RHS_REF | STRING_ASSIGN_EQ, rhs.v}, {});
+            current_cev->add_cmd(CMD_STRING, {lhs.v, STRING_RHS_REF | flag, rhs.v}, {});
         else assert(false);
+    }
+
+    void cmd_cdb_get(WolfValue lhs, int32_t type_idx, int32_t data_idx, int32_t prop_idx) {
+        current_cev->add_cmd(CMD_DB, 
+            {type_idx, data_idx, prop_idx, 
+                DB_ASSIGN_EQ | DB_TYPE_CDB | DB_ASSIGN_TO_VAR, lhs.v}, 
+            {"", "", "", ""});
+    }
+
+    void cmd_cdb_put(int32_t type_idx, int32_t data_idx, int32_t prop_idx, WolfValue rhs) {
+        if (rhs.do_suppress()) {
+            begin_frame();
+            WolfValue temp_rhs = push_int();
+            end_frame();
+            cmd_arith(temp_rhs, rhs);
+            rhs = temp_rhs;
+        }
+        if (rhs.wt == WT_STRLIT) {
+            current_cev->add_cmd(CMD_DB, 
+                {type_idx, data_idx, prop_idx, 
+                    DB_ASSIGN_EQ | DB_TYPE_CDB | DB_STRLIT}, 
+                {rhs.string_lit, "", "", ""});
+        } else {
+            current_cev->add_cmd(CMD_DB, 
+                {type_idx, data_idx, prop_idx, 
+                    DB_ASSIGN_EQ | DB_TYPE_CDB, rhs.v}, 
+                {"", "", "", ""});
+        }
     }
 
     void cmd_int_if(bool has_else, WolfValue left, WolfValue right, IfIntBranchFlag op) {
@@ -647,6 +774,14 @@ private:
     void cmd_end_if() {
         current_cev->outdent();
         current_cev->add_cmd(CMD_IF_END);
+    }
+
+    std::tuple<int32_t, int32_t, int32_t> get_db_parts(int32_t ref) {
+        int32_t trunc = ref % 100000000;
+        int32_t type = trunc / 1000000;
+        int32_t data = trunc % 1000000 / 100;
+        int32_t prop = trunc % 100;
+        return {type, data, prop};
     }
 
     // error

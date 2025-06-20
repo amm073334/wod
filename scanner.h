@@ -56,6 +56,7 @@ private:
     size_t fstring_counter = 0;
 
     const std::unordered_map<std::string, TokenType> keywords = {
+        {"import", T_IMPORT},
         {"void", T_VOID},
         {"int", T_INT},
         {"str", T_STR},
@@ -70,7 +71,7 @@ private:
         {"continue", T_CONTINUE},
         {"break", T_BREAK},
         {"cmd", T_CMD},
-        {"import", T_IMPORT},
+        {"cdb", T_CDB},
     };
 
     void scan_token() {
@@ -90,11 +91,23 @@ private:
             case ']': add_token(T_RBRACK); break;
             case ',': add_token(T_COMMA); break;
             case '.': add_token(T_DOT); break;
-            case '+': add_token(T_PLUS); break;
-            case '-': add_token(T_MINUS); break;
-            case '*': add_token(T_STAR); break;
+            case '+':
+                if (match('=')) add_token(T_PLUS_EQUAL);
+                else add_token(T_PLUS);
+                break;
+            case '-':
+                if (match('=')) add_token(T_MINUS_EQUAL);
+                else add_token(T_PLUS);
+                break;
+            case '*':
+                if (match('=')) add_token(T_STAR_EQUAL);
+                else add_token(T_STAR);
+                break;
             case '^': add_token(T_CARET); break;
-            case '%': add_token(T_PERCENT); break;
+            case '%':
+                if (match('=')) add_token(T_PERCENT_EQUAL);
+                else add_token(T_PERCENT);
+                break;
             case ';': add_token(T_SEMICOLON); break;
             case '!': add_token(match('=') ? T_BANG_EQUAL : T_BANG); break;
             case '=': add_token(match('=') ? T_EQUAL_EQUAL : T_EQUAL); break;
@@ -112,6 +125,7 @@ private:
             case '|': add_token(match('|') ? T_PIPE_PIPE : T_PIPE); break;
             case '/':
                 if (match('/')) while (peek() != '\n' && !is_at_end()) advance();
+                else if (match('=')) add_token(T_SLASH_EQUAL);
                 else add_token(T_SLASH);
                 break;
             case ' ':

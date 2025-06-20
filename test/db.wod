@@ -10,6 +10,12 @@ inline void set_vert(int vert, int x, int y, int z) {
     verts[vert].z = z;
 }
 
-void func() {
-    verts[2] = {1,2,3};
+inline int dot(int a_idx, int b_idx) {
+    return verts[a_idx].x * verts[b_idx].x
+        + verts[a_idx].y * verts[b_idx].y
+        + verts[a_idx].z * verts[b_idx].z;
+}
+
+void main() {
+    int test = dot(1, 2);
 }
