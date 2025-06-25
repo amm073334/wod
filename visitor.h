@@ -15,6 +15,7 @@ struct CdbStmt;
 struct AssignExpr;
 struct LiteralExpr;
 struct VariableExpr;
+struct ArrayExpr;
 struct CdbExpr;
 struct BinaryExpr;
 struct UnaryExpr;
@@ -41,6 +42,7 @@ public:
     // expressions
     virtual void visit_AssignExpr(AssignExpr* expr) = 0;
     virtual void visit_VariableExpr(VariableExpr* expr) = 0;
+    virtual void visit_ArrayExpr(ArrayExpr* expr) = 0;
     virtual void visit_CdbExpr(CdbExpr* expr) = 0;
     virtual void visit_BinaryExpr(BinaryExpr* expr) = 0;
     virtual void visit_UnaryExpr(UnaryExpr* expr) = 0;

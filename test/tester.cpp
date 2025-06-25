@@ -9,7 +9,7 @@ void error(const char* helptext) {
 int main() {
     const size_t MAX_CHAR_COUNT = 2048;
     
-    HWND hwnd_debug = FindWindow("#32770", TEXT("デバッグウィンドウ"));
+    HWND hwnd_debug = FindWindow(TEXT("#32770"), TEXT("デバッグウィンドウ"));
     if (!hwnd_debug) error("couldn't find debug window");
     
     HWND hwnd_edit = FindWindowEx(hwnd_debug, NULL, NULL, NULL);
@@ -25,7 +25,7 @@ int main() {
     SendMessage(hwnd_edit, WM_GETTEXT, sizeof(log_buf)/sizeof(log_buf[0]), LPARAM(log_buf));
     // LRESULT res = SendMessage(hwnd_button, BM_CLICK, 0, 0);
 
-    printf(log_buf);
+    wprintf(log_buf);
 
     return 0;
 }

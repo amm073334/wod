@@ -29,14 +29,30 @@ public:
     }
 
     void define_function(FunctionStmt* stmt) {
+        size_t n_int_args = 0;
+        size_t n_str_args = 0;
+        bool has_arr_param = false;
         std::vector<WodType> arg_types;
         for (VarStmt* param : stmt->params) {
+            if (param->type == TYPE_INT) n_int_args++;
+            else if (param->type == TYPE_STR) n_str_args++;
+            else {
+                has_arr_param = true;
+                if (param->arr_len) {
+                    param->arr_len->accept(this);
+                    if (param->arr_len->type != TYPE_INT || !param->arr_len->is_const)
+                        error(stmt->pos, "Array parameter must have length of constant integer expression");
+                    param->type.i = param->arr_len->const_int;
+                }
+            }
             arg_types.push_back(param->type);
         }
         if (stmt->is_inline) {
             stmt->sym = current_env->define_inline_function(stmt->name, stmt, stmt->return_type, arg_types);
         } else {
             if (current_cev_ref > MAX_CEV_REF) error(stmt->pos, "Maximum number of functions exceeded");
+            if (n_int_args > 5 || n_str_args > 5) error(stmt->pos, "Too many parameters of a type (max: 5)");
+            if (has_arr_param) error(stmt->pos, "Array parameters are only allowed for inline functions");
             stmt->sym = current_env->define_function(stmt->name, current_cev_ref++, stmt->return_type, arg_types);
         }
         if (!stmt->sym) error(stmt->pos, "Function redeclaration");
@@ -52,9 +68,9 @@ public:
             Symbol* sym;
             sym = current_env->define(param->name, param->type);
             if (!sym) error(stmt->pos, "Redeclaration of parameter");
-            switch (param->type.t) {
-                case WodType::TYPE_INT: sym->ref = int_param_ref++; break;
-                case WodType::TYPE_STR: sym->ref = str_param_ref++; break;
+            switch (param->type.ty) {
+                case TYPE_INT: sym->ref = int_param_ref++; break;
+                case TYPE_STR: sym->ref = str_param_ref++; break;
             }
             param->sym = sym;
         }
@@ -71,7 +87,7 @@ public:
 
     void visit_ReturnStmt(ReturnStmt* stmt) override {
         WodType ret_expr_type;
-        if (!stmt->expr) ret_expr_type.t = WodType::TYPE_VOID;
+        if (!stmt->expr) ret_expr_type = WodType(TYPE_VOID);
         else {
             stmt->expr->accept(this);
             ret_expr_type = stmt->expr->type;
@@ -88,6 +104,16 @@ public:
         if (!globals_visited) return;
 
         if (!stmt->initializer) {
+            if (stmt->is_const)
+                error(stmt->pos, "const declarations must have an initializer");
+            if (stmt->arr_len) {
+                stmt->arr_len->accept(this);
+                if (!stmt->arr_len->is_const || stmt->arr_len->type != TYPE_INT)
+                    error(stmt->pos, "Array length must be constant integer expression");
+                if (stmt->arr_len->const_int <= 0)
+                    error(stmt->pos, "Array length must be positive");
+                stmt->type.i = stmt->arr_len->const_int;
+            }
             stmt->sym = current_env->define(stmt->name, stmt->type);
         } else {
             stmt->initializer->accept(this);
@@ -96,9 +122,9 @@ public:
             if (stmt->is_const) {
                 if (!stmt->initializer->is_const)
                     error(stmt->pos, "Currently, only compile-time constant expressions can be assigned to const variables");
-                if (stmt->initializer->type == WodType::TYPE_INT)
+                if (stmt->initializer->type == TYPE_INT)
                     stmt->sym = current_env->define_const_int(stmt->name, stmt->initializer->const_int);
-                if (stmt->initializer->type == WodType::TYPE_STR)
+                if (stmt->initializer->type == TYPE_STR)
                     stmt->sym = current_env->define_const_str(stmt->name, stmt->initializer->const_str);
             } else stmt->sym = current_env->define(stmt->name, stmt->type);
         }
@@ -107,7 +133,7 @@ public:
 
     void visit_IfStmt(IfStmt* stmt) override {
         stmt->condition->accept(this);
-        if (stmt->condition->type != WodType::TYPE_INT)
+        if (stmt->condition->type != TYPE_INT)
             error(stmt->pos, "Branch condition is not an integer");
         open_scope();
         stmt->then_branch->accept(this);
@@ -122,7 +148,7 @@ public:
     void visit_LoopStmt(LoopStmt* stmt) override {
         if (stmt->count) {
             stmt->count->accept(this);
-            if (stmt->count->type != WodType::TYPE_INT)
+            if (stmt->count->type != TYPE_INT)
                 error(stmt->pos, "Loop count is not an integer");
         }
         open_scope();
@@ -147,12 +173,12 @@ public:
         }
         for (Expr* e : stmt->int_fields) {
             e->accept(this);
-            if (e->type != WodType::TYPE_INTPTR && !e->is_const)
-                error(e->pos, "Expected compile-time constant or variable reference");
+            if (e->type != TYPE_INT)
+                error(e->pos, "Expected argument of integer type");
         }
         for (Expr* e : stmt->str_fields) {
             e->accept(this);
-            if (e->type != WodType::TYPE_STR)
+            if (e->type != TYPE_STR)
                 error(e->pos, "Expected argument of string type");
         }
     }
@@ -190,10 +216,10 @@ public:
             error(expr->pos, "Attempted to assign to non-variable expression");
         if (expr->lhs->type != expr->rhs->type)
             error(expr->pos, "Assignment type mismatch");
-        if (expr->lhs->type == WodType::TYPE_STR && expr->op != AssignExpr::EQUAL && expr->op != AssignExpr::PLUS_EQUAL)
+        if (expr->lhs->type == TYPE_STR && expr->op != AssignExpr::EQUAL && expr->op != AssignExpr::PLUS_EQUAL)
             error(expr->pos, "Invalid assignment operator used for string variable");
         
-        expr->type.t = WodType::TYPE_VOID;
+        expr->type = WodType(TYPE_VOID);
         expr->assignable = false;
         expr->is_const = false;
     }
@@ -207,11 +233,27 @@ public:
         expr->assignable = !sym->is_const;
         expr->is_const = sym->is_const;
         if (expr->is_const) {
-            if (expr->type == WodType::TYPE_INT) 
+            if (expr->type == TYPE_INT) 
                 expr->const_int = sym->ref;
             else
                 expr->const_str = sym->const_string;
         }
+    }
+
+    void visit_ArrayExpr(ArrayExpr* expr) override {
+        Symbol* sym = current_env->get(expr->name);
+        if (!sym) error(expr->pos, "Variable not declared");
+        expr->sym = sym;
+
+        expr->index->accept(this);
+        if (!expr->index->is_const || expr->index->type != TYPE_INT)
+            error(expr->pos, "Array access index must be constant integer expression");
+        if (expr->index->const_int < 0 || expr->index->const_int >= sym->type.i)
+            error(expr->pos, "Array index out of bounds");
+        
+        expr->type = TYPE_INT; // currently only integer arrays are supported
+        expr->assignable = !sym->is_const;
+        expr->is_const = false;
     }
 
     void visit_CdbExpr(CdbExpr* expr) override {
@@ -221,7 +263,7 @@ public:
         expr->sym = cdb_sym;
 
         expr->index->accept(this);
-        if (expr->index->type != WodType::TYPE_INT)
+        if (expr->index->type != TYPE_INT)
             error(expr->pos, "CDB access index must be of integer type");
 
         Symbol* prop_sym = cdb_sym->cdb_fields->get(expr->property);
@@ -238,14 +280,14 @@ public:
 
         if (expr->left->type != expr->right->type)
             error(expr->pos, "Type mismatch in binary expression");
-        else if (expr->left->type == WodType::TYPE_STR && expr->right->type == WodType::TYPE_STR){
+        else if (expr->left->type == TYPE_STR && expr->right->type == TYPE_STR){
             if (expr->op != BinaryExpr::EQ && expr->op != BinaryExpr::NEQ) {
                 error(expr->pos, "Only comparison is supported between strings");
             }
-        } else if (expr->left->type != WodType::TYPE_INT || expr->right->type != WodType::TYPE_INT)
+        } else if (expr->left->type != TYPE_INT || expr->right->type != TYPE_INT)
             error(expr->pos, "Integer arguments expected");
         
-        expr->type.t = WodType::TYPE_INT;
+        expr->type = WodType(TYPE_INT);
         expr->assignable = false;
         expr->is_const = expr->left->is_const && expr->right->is_const;
         if (expr->is_const) {
@@ -299,13 +341,13 @@ public:
                     expr->const_int = expr->left->const_int % expr->right->const_int;
                     break;
                 case BinaryExpr::EQ:
-                    if (expr->left->type == WodType::TYPE_INT)
+                    if (expr->left->type == TYPE_INT)
                         expr->const_int = expr->left->const_int == expr->right->const_int;
                     else
                         expr->const_int = expr->left->const_str == expr->right->const_str;
                     break;
                 case BinaryExpr::NEQ:
-                    if (expr->left->type == WodType::TYPE_INT)
+                    if (expr->left->type == TYPE_INT)
                         expr->const_int = expr->left->const_int != expr->right->const_int;
                     else
                         expr->const_int = expr->left->const_str != expr->right->const_str;
@@ -317,20 +359,20 @@ public:
     void visit_UnaryExpr(UnaryExpr* expr) override {
         expr->right->accept(this);
 
-        if (expr->op == UnaryExpr::ADDRESS_OF) {
-            if (expr->right->is_const)
-                error(expr->pos, "Cannot get address of compile-time value");
-            if (!expr->right->assignable)
-                error(expr->pos, "Cannot get address of rvalue");
-            expr->type.t = WodType::TYPE_INTPTR;
-            expr->assignable = false;
-            expr->is_const = false;
-            return;
-        }
+        // if (expr->op == UnaryExpr::ADDRESS_OF) {
+        //     if (expr->right->is_const)
+        //         error(expr->pos, "Cannot get address of compile-time value");
+        //     if (!expr->right->assignable)
+        //         error(expr->pos, "Cannot get address of rvalue");
+        //     expr->type.t = WodType::TYPE_INTPTR;
+        //     expr->assignable = false;
+        //     expr->is_const = false;
+        //     return;
+        // }
 
-        if (expr->right->type != WodType::TYPE_INT)
+        if (expr->right->type != TYPE_INT)
             error(expr->pos, "Integer argument expected");
-        expr->type.t = WodType::TYPE_INT;
+        expr->type = WodType(TYPE_INT);
         expr->assignable = false;
         expr->is_const = expr->right->is_const;
         if (expr->is_const) {
@@ -347,8 +389,8 @@ public:
 
     void visit_CallExpr(CallExpr* expr) override {
         Symbol* sym = current_env->get(expr->name);
-        if (visiting_inline_function && expr->sym->inline_function)
-            error(expr->pos, "Calling an inline function from an inline function is currently unsupported");
+        // if (visiting_inline_function && expr->sym->inline_function)
+        //     error(expr->pos, "Calling an inline function from an inline function is currently unsupported");
         if (!sym) error(expr->pos, "Function not declared");
         expr->sym = sym;
         if (expr->args.size() != sym->arg_types.size())
@@ -365,14 +407,14 @@ public:
     }
     
     void visit_IntLiteralExpr(IntLiteralExpr* expr) override {
-        expr->type.t = WodType::TYPE_INT;
+        expr->type = WodType(TYPE_INT);
         expr->assignable = false;
         expr->is_const = true;
         expr->const_int = expr->value;
     }
 
     void visit_StrLiteralExpr(StrLiteralExpr* expr) override {
-        expr->type.t = WodType::TYPE_STR;
+        expr->type = WodType(TYPE_STR);
         expr->assignable = false;
         expr->is_const = true;
         expr->const_str = expr->value;
@@ -382,7 +424,7 @@ public:
         for (FStringExpr::Fragment &f : expr->frags) {
             if (f.expr) f.expr->accept(this);
         }
-        expr->type.t = WodType::TYPE_STR;
+        expr->type = WodType(TYPE_STR);
         expr->assignable = false;
         expr->is_const = false;
     }
@@ -405,9 +447,9 @@ private:
     WodType current_return_type;
 
     // utility
-    void error(Position pos, std::string error_msg) {
+    void error(Token* pos, std::string error_msg) {
         had_error = true;
-        std::cout << "typecheck error " << pos.file <<": line " << pos.line << " col " << pos.col << " " << error_msg << std::endl;
+        std::cout << "typecheck error " << pos->file <<": line " << pos->line << " col " << pos->col << " " << error_msg << std::endl;
         throw std::runtime_error(error_msg);
     }
 };

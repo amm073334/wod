@@ -1,0 +1,14 @@
+const int THREE = 3;
+
+inline void modify_array(int[3] a) {
+    a[2] = 9999;
+    int test = a[1];
+}
+
+void main() {
+    int[THREE] arr;
+    arr[2] = 1234;
+    arr[0] = 5;
+    arr[1 + 0] = 2;
+    modify_array(arr);
+}

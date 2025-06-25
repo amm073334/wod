@@ -1,6 +1,6 @@
 #pragma once
 
-enum TokenType {
+enum TokType {
     // one character
     T_LBRACE, T_RBRACE,
     T_LPAREN, T_RPAREN,
@@ -30,7 +30,7 @@ enum TokenType {
     T_IF, T_ELSE, T_LOOP, T_RETURN, T_CONTINUE, T_BREAK,
     T_WHILE, T_FOR,
     T_CMD,
-    T_CDB,
+    T_CDB, T_TYPEDEF,
 
     // literals
     T_IDENT, T_NUMBER, T_STRING,
@@ -40,7 +40,7 @@ enum TokenType {
 };
 
 struct Token {
-    TokenType token_type;
+    TokType token_type;
     std::string text;
     size_t line;
     size_t col;

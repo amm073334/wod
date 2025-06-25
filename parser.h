@@ -29,7 +29,7 @@ private:
     Stmt* global_stmt() {
         try {
             if (match({T_INLINE, T_VOID, T_INT, T_STR})) return function_decl();
-            if (match(T_CONST)) return var_stmt();
+            if (match(T_CONST)) return var_decl();
             if (match(T_CDB)) return cdb_stmt();
             error(peek(), "Invalid statement");
         } catch (std::runtime_error e) {
@@ -47,8 +47,8 @@ private:
         while (match({T_INT, T_STR})) {
             WodType field_type;
             switch(previous()->token_type) {
-                case T_INT: field_type = WodType{WodType::TYPE_INT}; break;
-                case T_STR: field_type = WodType{WodType::TYPE_STR}; break;
+                case T_INT: field_type = WodType(TYPE_INT); break;
+                case T_STR: field_type = WodType(TYPE_STR); break;
             }
             Token* ntok = eat(T_IDENT, "Expected field name");
             
@@ -57,14 +57,13 @@ private:
                 initializer = expression();
                 error(ntok, "CDB field initializers are not yet supported");
             }
-            fields.push_back(
-                new VarStmt{{ntok->line, ntok->col, ntok->file},
-                false, field_type, ntok->text, initializer});
+            fields.push_back(new VarStmt(ntok,
+                false, field_type, nullptr, ntok->text, initializer));
             eat(T_SEMICOLON, "Expected ';' after cdb field");
         }
         eat(T_RBRACE, "Expected '}' at end of cdb declaration");
 
-        return new CdbStmt({tok->line, tok->col, tok->file}, tok->text, fields);
+        return new CdbStmt(tok, tok->text, fields);
     }
 
     Stmt* function_decl() {
@@ -76,29 +75,29 @@ private:
 
         WodType type;
         switch (previous()->token_type) {
-            case T_VOID: type = WodType{WodType::TYPE_VOID}; break;
-            case T_INT:  type = WodType{WodType::TYPE_INT}; break;
-            case T_STR:  type = WodType{WodType::TYPE_STR}; break;
+            case T_VOID: type = WodType(TYPE_VOID); break;
+            case T_INT:  type = WodType(TYPE_INT); break;
+            case T_STR:  type = WodType(TYPE_STR); break;
             default: error(previous(), "Invalid function return type"); break;
         }
         Token* tok = eat(T_IDENT, "Expected function name");
         eat(T_LPAREN, "Expected '(' after function name");
         std::vector<VarStmt*> params;
-        size_t n_int_args = 0;
-        size_t n_str_args = 0;
         if (!check(T_RPAREN)) do {
-            if (n_int_args > 5 || n_str_args > 5)
-                error(peek(), "Too many parameters (max: 5)");
             if (match({T_INT, T_STR})) {
                 WodType param_type;
                 switch(previous()->token_type) {
-                    case T_INT: param_type = WodType{WodType::TYPE_INT}; break;
-                    case T_STR: param_type = WodType{WodType::TYPE_STR}; break;
+                    case T_INT: param_type = TYPE_INT; break;
+                    case T_STR: param_type = TYPE_STR; break;
+                }
+                Expr* arr_length = nullptr;
+                if (match(T_LBRACK)) {
+                    arr_length = expression();
+                    eat(T_RBRACK, "Expected ']' after array length");
+                    param_type = WodType(TYPE_INTARR);
                 }
                 Token* ntok = eat(T_IDENT, "Expected parameter name");
-                params.push_back(new VarStmt{{ntok->line, ntok->col, ntok->file}, false, param_type, ntok->text, nullptr});
-                if (param_type == WodType{WodType::TYPE_INT}) n_int_args++;
-                else n_str_args++;
+                params.push_back(new VarStmt{ntok, false, param_type, arr_length, ntok->text, nullptr});
             } else {
                 error(peek(), "Invalid parameter type");
             }
@@ -106,7 +105,7 @@ private:
 
         eat(T_RPAREN, "Expected ')' after function parameters");
         eat(T_LBRACE, "Expected '{' before function body");
-        return new FunctionStmt({tok->line, tok->col}, type, tok->text, params, block(), is_inline);
+        return new FunctionStmt(tok, type, tok->text, params, block(), is_inline);
     }
 
     std::vector<Stmt*> block() {
@@ -125,34 +124,38 @@ private:
         if (match(T_WHILE)) return while_stmt();
         if (match(T_FOR)) return for_stmt();
         if (match(T_RETURN)) return return_stmt();
-        if (match(T_CONTINUE)) return new ContinueStmt({previous()->line, previous()->col, previous()->file});
-        if (match(T_BREAK)) return new BreakStmt({previous()->line, previous()->col, previous()->file});
-        if (match({T_INT, T_STR, T_CONST})) return var_stmt();
+        if (match(T_CONTINUE)) {
+            eat(T_SEMICOLON, "Expected ';' after 'continue'");
+            return new ContinueStmt(previous());
+        }
+        if (match(T_BREAK)) {
+            eat(T_SEMICOLON, "Expected ';' after 'break'");
+            return new BreakStmt(previous());
+        }
+        if (match({T_INT, T_STR, T_CONST})) return var_decl();
         if (match(T_CMD)) return cmd_stmt();
-        if (match(T_LBRACE)) return new BlockStmt({previous()->line, previous()->col, previous()->file}, block());
+        if (match(T_LBRACE)) return new BlockStmt(previous(), block());
 
         return expr_stmt();
     }
 
     Stmt* while_stmt() {
         Token* tok = previous();
-        Position pos = {tok->line, tok->col, tok->file};
         eat(T_LPAREN, "Expected '(' after 'while'");
         Expr* condition = expression();
         eat(T_RPAREN, "Expected ')' after while condition");
         Stmt* body = statement();
-        Stmt* if_wrapper = new IfStmt(pos, condition, body, new BreakStmt(pos));
-        return new LoopStmt(pos, nullptr, if_wrapper);
+        Stmt* if_wrapper = new IfStmt(tok, condition, body, new BreakStmt(tok));
+        return new LoopStmt(tok, nullptr, if_wrapper);
     }
 
     Stmt* for_stmt() {
         Token* tok = previous();
-        Position pos = {tok->line, tok->col, tok->file};
         eat(T_LPAREN, "Expected '(' after 'for'");
 
         Stmt* initializer;
         if (match(T_SEMICOLON)) initializer = nullptr;
-        else if (match({T_INT, T_STR})) initializer = var_stmt();
+        else if (match({T_INT, T_STR})) initializer = var_decl();
         else initializer = expr_stmt();
 
         Expr* condition = nullptr;
@@ -168,11 +171,11 @@ private:
         eat(T_RPAREN, "Expected ')' after for clause");
         Stmt* body = statement();
         
-        if (increment) body = new BlockStmt(pos, {body, new ExprStmt(pos, increment)});            
-        if (condition) body = new IfStmt(pos, condition, body, new BreakStmt(pos));
-        body = new LoopStmt(pos, nullptr, body);
+        if (increment) body = new BlockStmt(tok, {body, new ExprStmt(tok, increment)});            
+        if (condition) body = new IfStmt(tok, condition, body, new BreakStmt(tok));
+        body = new LoopStmt(tok, nullptr, body);
         
-        if (initializer) body = new BlockStmt(pos, {initializer, body});
+        if (initializer) body = new BlockStmt(tok, {initializer, body});
 
         return body;
     }
@@ -199,10 +202,10 @@ private:
         eat(T_RPAREN, "Expected ')' after cmd string arguments");
         eat(T_SEMICOLON, "Expected ';' after cmd statement");
         
-        return new CmdStmt({tok->line, tok->col, tok->file}, cmd_id, int_fields, str_fields);
+        return new CmdStmt(tok, cmd_id, int_fields, str_fields);
     }
 
-    Stmt* var_stmt() {
+    Stmt* var_decl() {
         bool is_const = false;
         if (previous()->token_type == T_CONST) {
             is_const = true;
@@ -210,16 +213,23 @@ private:
         }
         WodType type;
         switch (previous()->token_type) {
-            case T_INT: type = WodType{WodType::TYPE_INT}; break;
-            case T_STR: type = WodType{WodType::TYPE_STR}; break;
+            case T_INT: type = WodType(TYPE_INT); break;
+            case T_STR: type = WodType(TYPE_STR); break;
+        }
+        Expr* arr_length = nullptr;
+        if (match(T_LBRACK)) {
+            arr_length = expression();
+            eat(T_RBRACK, "Expected ']' after array length");
+            type = WodType(TYPE_INTARR);
         }
         Token* tok = eat(T_IDENT, "Expected variable name");
 
         Expr* initializer = nullptr;
-        if (match(T_EQUAL)) initializer = expression();
-
+        if (!arr_length) { // currently no support for initializing arrays
+            if (match(T_EQUAL)) initializer = expression();
+        }
         eat(T_SEMICOLON, "Expected ';' after variable declaration");
-        return new VarStmt({tok->line, tok->col, tok->file}, is_const, type, tok->text, initializer);
+        return new VarStmt(tok, is_const, type, arr_length, tok->text, initializer);
     }
 
     Stmt* if_stmt() {
@@ -230,7 +240,7 @@ private:
         Stmt* then_branch = statement();
         Stmt* else_branch = nullptr;
         if (match(T_ELSE)) else_branch = statement();
-        return new IfStmt({tok->line, tok->col, tok->file}, condition, then_branch, else_branch);
+        return new IfStmt(tok, condition, then_branch, else_branch);
     }
 
     Stmt* loop_stmt() {
@@ -241,7 +251,7 @@ private:
             eat(T_RPAREN, "Expected ')' after loop count");
         }
         Stmt* body = statement();
-        return new LoopStmt({tok->line, tok->col, tok->file}, count, body);
+        return new LoopStmt(tok, count, body);
     }
 
     Stmt* return_stmt() {
@@ -249,14 +259,14 @@ private:
         Expr* expr = nullptr;
         if (!check(T_SEMICOLON)) expr = expression();
         eat(T_SEMICOLON, "Expected ';' after return statement");
-        return new ReturnStmt({tok->line, tok->col, tok->file}, expr);
+        return new ReturnStmt(tok, expr);
     }
 
     Stmt* expr_stmt() {
         Token* tok = peek();
         Expr* expr = expression();
         eat(T_SEMICOLON, "Expected ';' after expression");
-        return new ExprStmt({tok->line, tok->col, tok->file}, expr);
+        return new ExprStmt(tok, expr);
     }
 
     // expressions
@@ -278,7 +288,7 @@ private:
                 case T_SLASH_EQUAL:     op = AssignExpr::DIV_EQUAL; break;
                 case T_PERCENT_EQUAL:   op = AssignExpr::MOD_EQUAL; break;
             }
-            return new AssignExpr({tok->line, tok->col, tok->file}, expr, op, value);
+            return new AssignExpr(tok, expr, op, value);
         }
         return expr;
     }
@@ -288,7 +298,7 @@ private:
         while (match(T_PIPE_PIPE)) {
             Token* tok = previous();
             Expr* right = and();
-            expr = new BinaryExpr({tok->line, tok->col, tok->file}, expr, BinaryExpr::LOGIC_OR, right);
+            expr = new BinaryExpr(tok, expr, BinaryExpr::LOGIC_OR, right);
         }
         return expr;
     }
@@ -298,7 +308,7 @@ private:
         while (match(T_AMP_AMP)) {
             Token* tok = previous();
             Expr* right = bit_or();
-            expr = new BinaryExpr({tok->line, tok->col, tok->file}, expr, BinaryExpr::LOGIC_AND, right);
+            expr = new BinaryExpr(tok, expr, BinaryExpr::LOGIC_AND, right);
         }
         return expr;
     }
@@ -308,7 +318,7 @@ private:
         while (match(T_PIPE)) {
             Token* tok = previous();
             Expr* right = bit_xor();
-            expr = new BinaryExpr({tok->line, tok->col, tok->file}, expr, BinaryExpr::BIT_OR, right);
+            expr = new BinaryExpr(tok, expr, BinaryExpr::BIT_OR, right);
         }
         return expr;
     }
@@ -318,7 +328,7 @@ private:
         while (match(T_CARET)) {
             Token* tok = previous();
             Expr* right = bit_and();
-            expr = new BinaryExpr({tok->line, tok->col, tok->file}, expr, BinaryExpr::BIT_XOR, right);
+            expr = new BinaryExpr(tok, expr, BinaryExpr::BIT_XOR, right);
         }
         return expr;
     }
@@ -328,7 +338,7 @@ private:
         while (match(T_AMP)) {
             Token* tok = previous();
             Expr* right = equality();
-            expr = new BinaryExpr({tok->line, tok->col, tok->file}, expr, BinaryExpr::BIT_AND, right);
+            expr = new BinaryExpr(tok, expr, BinaryExpr::BIT_AND, right);
         }
         return expr;
     }
@@ -343,7 +353,7 @@ private:
                 case T_EQUAL_EQUAL: op = BinaryExpr::EQ; break;
                 case T_BANG_EQUAL:  op = BinaryExpr::NEQ; break;
             }
-            expr = new BinaryExpr({tok->line, tok->col, tok->file}, expr, op, right);
+            expr = new BinaryExpr(tok, expr, op, right);
         }
         return expr;
     }
@@ -360,7 +370,7 @@ private:
                 case T_LESS:            op = BinaryExpr::LT; break;
                 case T_LESS_EQUAL:      op = BinaryExpr::LTE; break;
             }
-            expr = new BinaryExpr({tok->line, tok->col, tok->file}, expr, op, right);
+            expr = new BinaryExpr(tok, expr, op, right);
         }
         return expr;
     }
@@ -375,7 +385,7 @@ private:
                 case T_LESS_LESS:         op = BinaryExpr::LSHIFT; break;
                 case T_GREATER_GREATER:   op = BinaryExpr::RSHIFT; break;
             }
-            expr = new BinaryExpr({tok->line, tok->col, tok->file}, expr, op, right);
+            expr = new BinaryExpr(tok, expr, op, right);
         }
         return expr;
     }
@@ -390,7 +400,7 @@ private:
                 case T_PLUS:    op = BinaryExpr::ADD; break;
                 case T_MINUS:   op = BinaryExpr::SUB; break;
             }
-            expr = new BinaryExpr({tok->line, tok->col, tok->file}, expr, op, right);
+            expr = new BinaryExpr(tok, expr, op, right);
         }
         return expr;
     }
@@ -406,7 +416,7 @@ private:
                 case T_SLASH:   op = BinaryExpr::DIV; break;
                 case T_PERCENT:   op = BinaryExpr::MODULO; break;
             }
-            expr = new BinaryExpr({tok->line, tok->col, tok->file}, expr, op, right);
+            expr = new BinaryExpr(tok, expr, op, right);
         }
         return expr;
     }
@@ -419,9 +429,12 @@ private:
             switch (tok->token_type) {
                 case T_BANG:    op = UnaryExpr::LOGIC_NOT; break;
                 case T_MINUS:   op = UnaryExpr::MINUS; break;
-                case T_AMP:     op = UnaryExpr::ADDRESS_OF; break;
+                case T_AMP:
+                    op = UnaryExpr::ADDRESS_OF;
+                    error(tok, "address-of op unsupported");
+                    break;
             }
-            return new UnaryExpr({tok->line, tok->col, tok->file}, op, right);
+            return new UnaryExpr(tok, op, right);
         }
         return call();
     }
@@ -434,13 +447,16 @@ private:
                 expr = finish_call(tok);
             } else if (match(T_LBRACK)) {
                 Expr* data_index = expression();
-                eat(T_RBRACK, "Expected ']' after cdb data index");
-                eat(T_DOT, "Expected '.' after ']'");
-                Token* prop_tok = eat(T_IDENT, "Expected property name after '.'");
-                expr = new CdbExpr({tok->line, tok->col, tok->file},
-                    tok->text, data_index, prop_tok->text);
+                eat(T_RBRACK, "Expected ']' after array index");
+                if (match(T_DOT)) {
+                    Token* prop_tok = eat(T_IDENT, "Expected property name after '.'");
+                    expr = new CdbExpr(tok,
+                        tok->text, data_index, prop_tok->text);
+                } else {
+                    expr = new ArrayExpr(tok, tok->text, data_index);
+                }
             } else {
-                expr = new VariableExpr({tok->line, tok->col, tok->file}, tok->text);
+                expr = new VariableExpr(tok, tok->text);
             }
         } else {
             expr = primary();
@@ -458,14 +474,14 @@ private:
 
         eat(T_RPAREN, "Expected ')' after argument list");
 
-        return new CallExpr({callee->line, callee->col, callee->file}, callee->text, args);
+        return new CallExpr(callee, callee->text, args);
     }
 
     Expr* primary() {
         if (match(T_NUMBER))
-            return new IntLiteralExpr({previous()->line, previous()->col, previous()->file}, std::stoi(previous()->text, nullptr, 0));
+            return new IntLiteralExpr(previous(), std::stoi(previous()->text, nullptr, 0));
         if (match(T_STRING))
-            return new StrLiteralExpr({previous()->line, previous()->col, previous()->file}, previous()->text);
+            return new StrLiteralExpr(previous(), previous()->text);
         if (match(T_F_QUOTE)) {
             std::vector<FStringExpr::Fragment> frags;
             while (!is_at_end() && !check(T_F_QUOTE)) {
@@ -477,7 +493,7 @@ private:
                 else error(peek(), "Unexpected token in f-string");
             }
             eat(T_F_QUOTE, "Expected ending quote after f-string");
-            return new FStringExpr({previous()->line, previous()->col, previous()->file}, frags);
+            return new FStringExpr(previous(), frags);
         }
         if (match(T_LPAREN)) {
             Expr* expr = expression();
@@ -493,11 +509,11 @@ private:
         return peek()->token_type == T_EOF;
     }
 
-    bool check(TokenType t) {
+    bool check(TokType t) {
         return peek()->token_type == t;
     }
 
-    Token* eat(TokenType t, std::string error_msg) {
+    Token* eat(TokType t, std::string error_msg) {
         if (check(t)) {
             return advance();
         }
@@ -505,7 +521,7 @@ private:
         return nullptr;
     }
 
-    bool match(TokenType t) {
+    bool match(TokType t) {
         if (check(t)) {
             advance();
             return true;
@@ -513,8 +529,8 @@ private:
         return false; 
     }
 
-    bool match(std::initializer_list<TokenType> t_list) {
-        for (const TokenType &t : t_list) {
+    bool match(std::initializer_list<TokType> t_list) {
+        for (const TokType &t : t_list) {
             if (check(t)) {
                 advance();
                 return true;

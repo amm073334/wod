@@ -18,6 +18,11 @@ public:
             s->accept(this);
         }
 
+        // editor will crash if there are 0 dbs
+        if (cdbs.size() == 0) {
+            cdbs.push_back(DB());
+        }
+
         if (!CreateDirectoryA(outdir.c_str(), NULL) && ERROR_ALREADY_EXISTS != GetLastError()) {
             std::cout << "failed" << std::endl;
             return;
@@ -60,7 +65,7 @@ public:
 
         str_sp = BASE_STR_SP;
         for (WodType t : stmt->sym->arg_types)
-            if (t == WodType::TYPE_STR) str_sp++;
+            if (t == TYPE_STR) str_sp++;
 
         begin_frame();
 
@@ -101,11 +106,11 @@ public:
         WolfValue v = eval(stmt->expr);
         if (current_cev->RETURN_VAL_TARGET == -1)
             current_cev->RETURN_VAL_TARGET = 99;
-        switch (stmt->expr->type.t) {
-            case WodType::TYPE_INT:
+        switch (stmt->expr->type.ty) {
+            case TYPE_INT:
                 cmd_arith(WolfValue{WT_NUMREF, CSELF_THRESHOLD + current_cev->RETURN_VAL_TARGET}, v);
                 break;
-            case WodType::TYPE_STR:
+            case TYPE_STR:
                 cmd_string(WolfValue{WT_STRREF, CSELF_THRESHOLD + current_cev->RETURN_VAL_TARGET}, v);
                 break;
         }
@@ -120,11 +125,11 @@ public:
         }
         begin_frame();
         WolfValue v = eval(stmt->expr);
-        switch (stmt->expr->type.t) {
-            case WodType::TYPE_INT:
+        switch (stmt->expr->type.ty) {
+            case TYPE_INT:
                 cmd_arith(inline_retval, v);
                 break;
-            case WodType::TYPE_STR:
+            case TYPE_STR:
                 cmd_string(inline_retval, v);
                 break;
         }
@@ -141,8 +146,16 @@ public:
     void visit_VarStmt(VarStmt* stmt) override {
         if (stmt->is_const) return;
 
+        if (stmt->sym->type == TYPE_INTARR) {
+            WolfValue base = push_int();
+            stmt->sym->ref = base.v;
+            for (size_t i = 1; i < stmt->sym->type.i; i++)
+                push_int();
+            return;
+        }
+
         WolfValue lhs;
-        if (stmt->sym->type == WodType::TYPE_INT)
+        if (stmt->sym->type == TYPE_INT)
             lhs = push_int();
         else
             lhs = push_str();
@@ -152,7 +165,7 @@ public:
 
         begin_frame();
         WolfValue initial = eval(stmt->initializer);
-        if (stmt->sym->type == WodType::TYPE_INT)
+        if (stmt->sym->type == TYPE_INT)
             cmd_arith(lhs, initial);
         else
             cmd_string(lhs, initial);
@@ -231,7 +244,7 @@ public:
         cdbs.push_back(DB());
         for (VarStmt* vs : stmt->fields) {
             DB::Property p;
-            if (vs->type == WodType::TYPE_INT)
+            if (vs->type == TYPE_INT)
                 p.type = DB::PROP_INT;
             else
                 p.type = DB::PROP_STR;
@@ -242,26 +255,33 @@ public:
 
     // expressions
     void visit_AssignExpr(AssignExpr* expr) override {
+        visiting_assign_lhs = true;
         WolfValue lhs = eval(expr->lhs);
+        visiting_assign_lhs = false;
         WolfValue rhs = eval(expr->rhs);
-
-        if (lhs.wt == WT_NUMREF) {
-            ArithFlag assign;
+        
+        if (lhs.wt == WT_DB) {
+            DBFlag db_assign;
             switch (expr->op) {
-                case AssignExpr::EQUAL:         assign = ARITH_ASSIGN_EQ; break;
-                case AssignExpr::PLUS_EQUAL:    assign = ARITH_ASSIGN_PLUS_EQ; break;
-                case AssignExpr::MINUS_EQUAL:   assign = ARITH_ASSIGN_MINUS_EQ; break;
-                case AssignExpr::TIMES_EQUAL:   assign = ARITH_ASSIGN_TIMES_EQ; break;
-                case AssignExpr::DIV_EQUAL:     assign = ARITH_ASSIGN_DIV_EQ; break;
-                case AssignExpr::MOD_EQUAL:     assign = ARITH_ASSIGN_MOD_EQ; break;
+                case AssignExpr::EQUAL:         db_assign = DB_ASSIGN_EQ; break;
+                case AssignExpr::PLUS_EQUAL:    db_assign = DB_ASSIGN_PLUS_EQ; break;
+                case AssignExpr::MINUS_EQUAL:   db_assign = DB_ASSIGN_MINUS_EQ; break;
+                case AssignExpr::TIMES_EQUAL:   db_assign = DB_ASSIGN_TIMES_EQ; break;
+                case AssignExpr::DIV_EQUAL:     db_assign = DB_ASSIGN_DIV_EQ; break;
+                case AssignExpr::MOD_EQUAL:     db_assign = DB_ASSIGN_MOD_EQ; break;
             }
-            if (lhs.is_db()) {
-                int32_t type, data, prop;
-                std::tie(type, data, prop) = get_db_parts(lhs.v);
-                cmd_cdb_put(type, data, prop, rhs);
-            } else {
-                cmd_arith(lhs, rhs, {WT_NUM, 0}, assign);
+            cmd_cdb_put(lhs.db_type, lhs.db_data, lhs.db_prop, rhs, db_assign);
+        } else if (lhs.wt == WT_NUMREF) {
+            ArithFlag arith_assign;
+            switch (expr->op) {
+                case AssignExpr::EQUAL:         arith_assign = ARITH_ASSIGN_EQ; break;
+                case AssignExpr::PLUS_EQUAL:    arith_assign = ARITH_ASSIGN_PLUS_EQ; break;
+                case AssignExpr::MINUS_EQUAL:   arith_assign = ARITH_ASSIGN_MINUS_EQ; break;
+                case AssignExpr::TIMES_EQUAL:   arith_assign = ARITH_ASSIGN_TIMES_EQ; break;
+                case AssignExpr::DIV_EQUAL:     arith_assign = ARITH_ASSIGN_DIV_EQ; break;
+                case AssignExpr::MOD_EQUAL:     arith_assign = ARITH_ASSIGN_MOD_EQ; break;
             }
+            cmd_arith(lhs, rhs, {WT_NUM, 0}, arith_assign);
         } else {
             StringFlag assign;
             if (expr->op == AssignExpr::PLUS_EQUAL)
@@ -280,7 +300,7 @@ public:
 
     void normal_var(VariableExpr* expr) {
         Symbol* sym = expr->sym;
-        if (sym->type == WodType::TYPE_INT)
+        if (sym->type == TYPE_INT || sym->type == TYPE_INTARR)
             expr_return = WolfValue{WT_NUMREF, sym->ref};
         else
             expr_return = WolfValue{WT_STRREF, sym->ref};
@@ -296,31 +316,65 @@ public:
         normal_var(expr);
     }
 
-    void visit_CdbExpr(CdbExpr* expr) override {
-        WolfType wt;
-        if (expr->type == WodType::TYPE_INT)
-            wt = WT_NUMREF;
-        else
-            wt = WT_STRREF;
+    void visit_ArrayExpr(ArrayExpr* expr) override {
+        if (current_inline_function) {
+            for (size_t i = 0; i < current_inline_function->params.size(); i++) {
+                if (current_inline_function->params.at(i)->sym == expr->sym) {
+                    expr_return = WolfValue{WT_NUMREF, inline_args.at(i).v + expr->index->const_int};
+                    return;
+                }
+            }
+        } else {
+            expr_return = WolfValue{WT_NUMREF, expr->sym->ref + expr->index->const_int};
+        }
+    }
 
+    void visit_CdbExpr(CdbExpr* expr) override {
         int32_t prop_index = expr->sym->cdb_fields->get(expr->property)->ref;
-        if (expr->index->is_const) {
+        if (visiting_assign_lhs) {
+            WolfType wt;
+            if (expr->type == TYPE_INT)
+                wt = WT_NUMREF;
+            else
+                wt = WT_STRREF;
+            if (expr->index->is_const) {
+                expr_return =
+                    WolfValue{WT_DB, 0, "",
+                    expr->sym->ref,
+                    expr->index->const_int,
+                    prop_index};;
+                return;
+            }
+            begin_frame();
+            WolfValue index = eval(expr->index);
+            end_frame();
             expr_return =
-                WolfValue{wt,
-                    1100000000
-                    + 1000000 * expr->sym->ref
-                    + 100 * expr->index->const_int
-                    + prop_index};
+            WolfValue{WT_DB, 0, "",
+                expr->sym->ref,
+                index.v,
+                prop_index};
+
             return;
         }
 
+        // else if part of rhs expression
+        WolfValue temp;
+        if (expr->type == TYPE_INT)
+            temp = push_int();
+        else 
+            temp = push_str();
+
+        if (expr->index->is_const) {
+            cmd_cdb_get(temp, expr->sym->ref, expr->index->const_int, prop_index);
+            expr_return = temp;
+            return;
+        }
+
+        begin_frame();
         WolfValue index = eval(expr->index);
-        expr_return =
-            WolfValue{wt,
-                1100000000
-                + 1000000 * expr->sym->ref
-                + 100 * index.v
-                + prop_index};
+        end_frame();
+        cmd_cdb_get(temp, expr->sym->ref, index.v, prop_index);
+        expr_return = temp;
     }
 
     void visit_BinaryExpr(BinaryExpr* expr) override {
@@ -482,19 +536,21 @@ public:
         current_cev->add_cmd(CMD_LOOP_COUNT, {1}, {});
         current_cev->indent();
 
-        int32_t cev_ref = expr->sym->ref;
         for (Expr* arg : expr->args) {
             WolfValue v = eval(arg);
             
-            // do a copy here to simulate copying of variables during a normal function call
-            if (v.wt == WT_NUMREF) {
-                WolfValue v2 = push_int();
-                cmd_arith(v2, v);
-                v = v2;
-            } else if (v.wt == WT_STRREF) {
-                WolfValue v2 = push_str();
-                cmd_string(v2, v);
-                v = v2;
+            if (arg->type != TYPE_INTARR) {
+                // for variables passed by value, do a copy here to
+                // simulate copying of variables during a normal function call
+                if (v.wt == WT_NUMREF) {
+                    WolfValue v2 = push_int();
+                    cmd_arith(v2, v);
+                    v = v2;
+                } else if (v.wt == WT_STRREF) {
+                    WolfValue v2 = push_str();
+                    cmd_string(v2, v);
+                    v = v2;
+                }
             }
             inline_args.push_back(v);
         }
@@ -594,6 +650,7 @@ public:
 
 private:
     bool had_error = false;
+    bool visiting_assign_lhs = false;
     FunctionStmt* current_inline_function = nullptr;
     int32_t cev_index = 0;
     int32_t cdb_index = 0;
@@ -603,16 +660,19 @@ private:
         WT_NUM,
         WT_NUMREF,
         WT_STRREF,
-        WT_STRLIT
+        WT_STRLIT,
+        WT_DB
     };
 
     struct WolfValue {
         WolfType wt;
         int32_t v;
         std::string string_lit;
+        int32_t db_type;
+        int32_t db_data;
+        int32_t db_prop;
         bool is_ref() { return wt == WT_NUMREF || wt == WT_STRREF; }
         bool do_suppress() { return wt == WT_NUM && v >= VAR_THRESHOLD; }
-        bool is_db() { return is_ref() && v >= 1000000000; }
     };
     WolfValue inline_retval;
     std::vector<WolfValue> inline_args;
@@ -637,7 +697,7 @@ private:
 
     bool try_const(Expr* expr) {
         if (expr->is_const) {
-            if (expr->type == WodType::TYPE_INT)
+            if (expr->type == TYPE_INT)
                 expr_return = WolfValue{WT_NUM, expr->const_int};
             else
                 expr_return = WolfValue{WT_STRLIT, 0, expr->const_str};
@@ -699,7 +759,7 @@ private:
             {"", "", "", ""});
     }
 
-    void cmd_cdb_put(int32_t type_idx, int32_t data_idx, int32_t prop_idx, WolfValue rhs) {
+    void cmd_cdb_put(int32_t type_idx, int32_t data_idx, int32_t prop_idx, WolfValue rhs, DBFlag flags) {
         if (rhs.do_suppress()) {
             begin_frame();
             WolfValue temp_rhs = push_int();
@@ -710,12 +770,12 @@ private:
         if (rhs.wt == WT_STRLIT) {
             current_cev->add_cmd(CMD_DB, 
                 {type_idx, data_idx, prop_idx, 
-                    DB_ASSIGN_EQ | DB_TYPE_CDB | DB_STRLIT}, 
+                    DB_TYPE_CDB | DB_STRLIT | flags}, 
                 {rhs.string_lit, "", "", ""});
         } else {
             current_cev->add_cmd(CMD_DB, 
                 {type_idx, data_idx, prop_idx, 
-                    DB_ASSIGN_EQ | DB_TYPE_CDB, rhs.v}, 
+                    DB_TYPE_CDB | flags, rhs.v}, 
                 {"", "", "", ""});
         }
     }

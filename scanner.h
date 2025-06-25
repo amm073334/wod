@@ -55,7 +55,7 @@ private:
     bool scanned_import = false;
     size_t fstring_counter = 0;
 
-    const std::unordered_map<std::string, TokenType> keywords = {
+    const std::unordered_map<std::string, TokType> keywords = {
         {"import", T_IMPORT},
         {"void", T_VOID},
         {"int", T_INT},
@@ -72,6 +72,7 @@ private:
         {"break", T_BREAK},
         {"cmd", T_CMD},
         {"cdb", T_CDB},
+        {"typedef", T_TYPEDEF},
     };
 
     void scan_token() {
@@ -97,7 +98,7 @@ private:
                 break;
             case '-':
                 if (match('=')) add_token(T_MINUS_EQUAL);
-                else add_token(T_PLUS);
+                else add_token(T_MINUS);
                 break;
             case '*':
                 if (match('=')) add_token(T_STAR_EQUAL);
@@ -264,7 +265,7 @@ private:
         return index >= source.size();
     }
     
-    void add_token(TokenType token_type) {
+    void add_token(TokType token_type) {
         tokens.push_back({token_type, source.substr(token_start, index - token_start), line, col, file});
     }
 

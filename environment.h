@@ -8,7 +8,7 @@ class Environment;
 
 struct Symbol {
     bool is_const = false;
-    WodType type = {};
+    WodType type;
     int32_t ref = 0; // used as const value if variable is a const int
     std::vector<WodType> arg_types;
     std::string const_string;
@@ -32,12 +32,12 @@ public:
 
     Symbol* define_const_int(std::string name, int32_t int_val) {
         if (symbols.count(name)) return nullptr;
-        return &symbols.insert({name, {true, WodType::TYPE_INT, int_val}}).first->second;
+        return &symbols.insert({name, {true, WodType(TYPE_INT), int_val}}).first->second;
     }
 
     Symbol* define_const_str(std::string name, std::string str_val) {
         if (symbols.count(name)) return nullptr;
-        return &symbols.insert({name, {true, {WodType::TYPE_STR}, 0, {}, str_val}}).first->second;
+        return &symbols.insert({name, {true, WodType(TYPE_STR), 0, {}, str_val}}).first->second;
     }
     
     Symbol* define_function(std::string name, int32_t ref, WodType type, std::vector<WodType> arg_types) {
@@ -60,7 +60,7 @@ public:
 
     Symbol* define_cdb(std::string name, Environment* fields) {
         if (symbols.count(name)) return nullptr;
-        return &symbols.insert({name, {false, {WodType::TYPE_CDB}, 0, {}, "", nullptr, fields}}).first->second;
+        return &symbols.insert({name, {false, WodType(TYPE_VOID), 0, {}, "", nullptr, fields}}).first->second;
     }
 
     Symbol* get(std::string name) {
