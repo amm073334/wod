@@ -1,0 +1,12 @@
+inline int ret_1() {
+    return 1;
+}
+
+inline void do_thing() {
+    int a = ret_1();
+    return;
+}
+
+void main() {
+    do_thing();
+}

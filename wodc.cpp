@@ -4,6 +4,7 @@
 #include "printer.h"
 #include "typechecker.h"
 #include "codegen.h"
+#include "targetopt.h"
 
 int main(int argc, const char* argv[]) {
     if (argc != 3) {
@@ -24,7 +25,10 @@ int main(int argc, const char* argv[]) {
     if (typechecker.failed()) exit(1);
 
     Codegen codegen;
-    codegen.gen(statements, argv[2]);
+    BasicData bd = codegen.gen(statements);
+
+    for (CommonEvent& cev : bd.cevs) clean_inline(cev);
+    bd.write(argv[2]);
 
     delete env;
     return 0;

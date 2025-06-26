@@ -1,3 +1,5 @@
+#pragma once
+
 #include <iostream>
 #include <sstream>
 #include <cstdint>
@@ -76,8 +78,6 @@ struct CommonEvent {
 
     std::string CSELF_NAME_i[100];
 
-    int32_t COMMAND_NUM = 0;
-
     // class data: things that are not officially named in real editor output,
     // or auxiliary things to make the class easier to use
     int8_t current_indent = 0;
@@ -85,12 +85,10 @@ struct CommonEvent {
 
     Command* add_cmd(int32_t command_id) {
         commands.push_back(Command{command_id, current_indent, {}, {}});
-        COMMAND_NUM++;
         return &commands.back();
     }
     Command* add_cmd(int32_t command_id, std::vector<int32_t> int_fields, std::vector<std::string> str_fields) {
         commands.push_back(Command{command_id, current_indent, int_fields, str_fields});
-        COMMAND_NUM++;
         return &commands.back();
     }
 
@@ -156,7 +154,7 @@ struct CommonEvent {
         WOD_CEV_WRITE(RETURN_VAL_NAME);
         WOD_CEV_WRITE(RETURN_VAL_TARGET);
         WOD_CEV_WRITE_I(CSELF_NAME_, 100);
-        WOD_CEV_WRITE(COMMAND_NUM);
+        out << "COMMAND_NUM=" << commands.size() << std::endl;
         
         #undef WOD_CEV_WRITE
         #undef WOD_CEV_WRITE8

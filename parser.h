@@ -31,6 +31,7 @@ private:
             if (match({T_INLINE, T_VOID, T_INT, T_STR})) return function_decl();
             if (match(T_CONST)) return var_decl();
             if (match(T_CDB)) return cdb_stmt();
+            // if (match(T_TYPEDEF)) return typedef_stmt();
             error(peek(), "Invalid statement");
         } catch (std::runtime_error e) {
             synchronize();
@@ -135,9 +136,34 @@ private:
         if (match({T_INT, T_STR, T_CONST})) return var_decl();
         if (match(T_CMD)) return cmd_stmt();
         if (match(T_LBRACE)) return new BlockStmt(previous(), block());
+        // if (match(T_TYPEDEF)) return typedef_stmt();
 
         return expr_stmt();
     }
+
+    // Stmt* typedef_stmt() {
+    //     if (!match({T_VOID, T_INT, T_STR})) {
+    //         error(previous(), "Unexpected typedef");
+    //     }
+    //     Token* tok = previous();
+    //     WodType ty;
+    //     switch (tok->token_type) {
+    //         case T_VOID:    ty = WodType(TYPE_VOID); break;
+    //         case T_INT:     ty = WodType(TYPE_INT); break;
+    //         case T_STR:     ty = WodType(TYPE_STR); break;
+    //     }
+        
+    //     Expr* expr = nullptr;
+    //     if (match(T_LBRACK)) {
+    //         ty = WodType(TYPE_INTARR);
+    //         expr = expression();
+    //         eat(T_RBRACK, "Expected ']' after array length");
+    //     }
+    //     Token* n_tok = eat(T_IDENT, "Expected identifier after type");
+    //     eat(T_SEMICOLON, "Expected ';' after typedef declaration");
+
+    //     return new TypedefStmt(tok, ty, expr, n_tok->text);
+    // }
 
     Stmt* while_stmt() {
         Token* tok = previous();

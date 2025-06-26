@@ -200,6 +200,16 @@ public:
         stmt->sym->ref = current_cdb_index++;
     }
 
+    // void visit_TypedefStmt(TypedefStmt* stmt) override {
+    //     if (stmt->arr_len) {
+    //         stmt->arr_len->accept(this);
+    //         if (stmt->arr_len->type != TYPE_INT || !stmt->arr_len->is_const)
+    //             error(stmt->pos, "Expected array length of constant integer expression");
+    //         stmt->type.i = stmt->arr_len->const_int;
+    //     }
+    //     current_env->define(stmt->name, stmt->type);
+    // }
+
     // expressions
     void visit_AssignExpr(AssignExpr* expr) override {
         expr->rhs->accept(this);

@@ -11,6 +11,7 @@ struct ContinueStmt;
 struct BreakStmt;
 struct CmdStmt;
 struct CdbStmt;
+// struct TypedefStmt;
 
 struct AssignExpr;
 struct LiteralExpr;
@@ -38,6 +39,7 @@ public:
     virtual void visit_BreakStmt(BreakStmt* stmt) = 0;
     virtual void visit_CmdStmt(CmdStmt* stmt) = 0;
     virtual void visit_CdbStmt(CdbStmt* stmt) = 0;
+    // virtual void visit_TypedefStmt(TypedefStmt* stmt) = 0;
 
     // expressions
     virtual void visit_AssignExpr(AssignExpr* expr) = 0;

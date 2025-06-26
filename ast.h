@@ -117,6 +117,16 @@ struct CdbStmt : public Stmt {
     Symbol* sym;
 };
 
+// struct TypedefStmt : public Stmt {
+//     TypedefStmt(Token* pos, WodType type, Expr* arr_len, std::string name)
+//         : Stmt(pos), type(type), arr_len(arr_len), name(name) {}
+//     void accept(Visitor* v) override { v->visit_TypedefStmt(this); }
+//     WodType type;
+//     Expr* arr_len;
+//     std::string name;
+//     Symbol* sym;
+// };
+
 
 // expressions
 struct AssignExpr : public Expr {
