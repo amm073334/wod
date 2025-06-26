@@ -8,21 +8,21 @@
 #include "commonevent.h"
 #include "command.h"
 #include "db.h"
-#include "basicdata.h"
+#include "gamedata.h"
 
 class Codegen : public Visitor {
 public:
-    BasicData gen(std::vector<Stmt*> &program) {
+    GameData gen(std::vector<Stmt*> &program) {
         for (Stmt* s : program) {
             s->accept(this);
         }
 
         // editor will crash if there are 0 dbs
-        if (bd.cdbs.size() == 0) {
-            bd.cdbs.push_back(DB());
+        if (gd.cdbs.size() == 0) {
+            gd.cdbs.push_back(DB());
         }
 
-        return bd;
+        return gd;
     }
 
     bool failed() { return had_error; }
@@ -31,14 +31,16 @@ public:
     void visit_FunctionStmt(FunctionStmt* stmt) override {
         if (stmt->is_inline) return;
 
+        if (stmt->name == "main") gd.entry = stmt->sym->ref;
+
         str_sp = BASE_STR_SP;
         for (WodType t : stmt->sym->arg_types)
             if (t == TYPE_STR) str_sp++;
 
         begin_frame();
 
-        bd.cevs.push_back(CommonEvent());
-        current_cev = &bd.cevs.back();
+        gd.cevs.push_back(CommonEvent());
+        current_cev = &gd.cevs.back();
         current_cev->COMMON_ID = cev_index++;
 
         for (Stmt* s : stmt->body) {
@@ -216,16 +218,16 @@ public:
     }
 
     void visit_CdbStmt(CdbStmt* stmt) override {
-        bd.cdbs.push_back(DB());
+        gd.cdbs.push_back(DB());
         for (VarStmt* vs : stmt->fields) {
             DB::Property p;
             if (vs->type == TYPE_INT)
                 p.type = DB::PROP_INT;
             else
                 p.type = DB::PROP_STR;
-            bd.cdbs.back().properties.push_back(p);
+            gd.cdbs.back().properties.push_back(p);
         }
-        bd.cdbs.back().TYPE_ID = cdb_index++;
+        gd.cdbs.back().TYPE_ID = cdb_index++;
     }
 
     // expressions
@@ -637,7 +639,7 @@ private:
     bool visiting_assign_lhs = false;
     int32_t cev_index = 0;
     int32_t cdb_index = 0;
-    BasicData bd;
+    GameData gd;
 
     enum WolfType {
         WT_NUM,

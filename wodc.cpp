@@ -25,10 +25,10 @@ int main(int argc, const char* argv[]) {
     if (typechecker.failed()) exit(1);
 
     Codegen codegen;
-    BasicData bd = codegen.gen(statements);
+    GameData gd = codegen.gen(statements);
 
-    for (CommonEvent& cev : bd.cevs) clean_inline(cev);
-    bd.write(argv[2]);
+    for (CommonEvent& cev : gd.cevs) clean_inline(cev);
+    gd.write(argv[2]);
 
     delete env;
     return 0;

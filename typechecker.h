@@ -48,6 +48,8 @@ public:
             arg_types.push_back(param->type);
         }
         if (stmt->is_inline) {
+            if (stmt->name == "main")
+                error(stmt->pos, "main function cannot be inline");
             stmt->sym = current_env->define_inline_function(stmt->name, stmt, stmt->return_type, arg_types);
         } else {
             if (current_cev_ref > MAX_CEV_REF) error(stmt->pos, "Maximum number of functions exceeded");
