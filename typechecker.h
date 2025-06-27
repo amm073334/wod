@@ -299,7 +299,7 @@ public:
                 error(expr->arr_index->pos, "Array access out of bounds");
         }
 
-        if (prop_sym->type == TYPE_INTARR)
+        if (prop_sym->type == TYPE_INTARR && expr->arr_index)
             expr->type = TYPE_INT;
         else
             expr->type = prop_sym->type;

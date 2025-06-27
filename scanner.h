@@ -52,7 +52,6 @@ private:
     size_t col = 1;
     bool had_error = false;
     bool finished_imports = false;
-    bool scanned_import = false;
     size_t fstring_counter = 0;
 
     const std::unordered_map<std::string, TokType> keywords = {
@@ -148,8 +147,6 @@ private:
                 else error("Unexpected character");
                 break;
         }
-        if (!scanned_import) finished_imports = true;
-        scanned_import = false;
     }
 
     void try_decimal() {
@@ -175,42 +172,43 @@ private:
     void try_identifier() {
         while (is_alpha_under(peek()) || std::isdigit(peek())) advance();
         std::string text = source.substr(token_start, index - token_start);
-        if (keywords.count(text)) {
-            if (keywords.at(text) != T_IMPORT) {
-                add_token(keywords.at(text));
-                return;
-            }
-
-            if (finished_imports)
-                error("Attempted to import after top of file");
-            scanned_import = true;
-
-            while (!is_at_end() && peek() == ' ') {
-                advance();
-            }
-
-            if (is_at_end() || advance() != '"')
-                error("Expected '\"' after import");
-            size_t name_start = index;
-            while (!is_at_end() && peek() != '"') {
-                if (peek() == '\n') error("Unterminated string");
-                advance();
-            }
-            if (is_at_end()) error("Unterminated string");
-            std::string file_name = base_dir + source.substr(name_start, index - name_start) + ".wod";
-            advance();
-            if (advance() != ';') error("Expected ';' after import statement");
-            
-            Scanner s;
-            std::vector<Token> imported = s.scan_source(file_name);
-            if (s.failed()) had_error = true;
-            tokens.insert(tokens.end(), std::make_move_iterator(imported.begin()), std::make_move_iterator(imported.end() - 1));
-        } else {
+        if (!keywords.count(text)) {
             add_token(T_IDENT);
+            return;
         }
+    
+        if (keywords.at(text) != T_IMPORT) {
+            add_token(keywords.at(text));
+            return;
+        }
+
+        if (finished_imports)
+            error("Attempted to import after top of file");
+
+        while (!is_at_end() && peek() == ' ') {
+            advance();
+        }
+
+        if (is_at_end() || advance() != '"')
+            error("Expected '\"' after import");
+        size_t name_start = index;
+        while (!is_at_end() && peek() != '"') {
+            if (peek() == '\n') error("Unterminated string");
+            advance();
+        }
+        if (is_at_end()) error("Unterminated string");
+        std::string file_name = base_dir + source.substr(name_start, index - name_start) + ".wod";
+        advance();
+        if (advance() != ';') error("Expected ';' after import statement");
+        
+        Scanner s;
+        std::vector<Token> imported = s.scan_source(file_name);
+        if (s.failed()) had_error = true;
+        tokens.insert(tokens.end(), std::make_move_iterator(imported.begin()), std::make_move_iterator(imported.end() - 1));
     }
 
     void try_string() {
+        finished_imports = true;
         while (peek() != '"' && peek() != '\n' && !is_at_end()) {
             advance();
         }
@@ -222,6 +220,7 @@ private:
     }
 
     void fstring() {
+        finished_imports = true;
         token_start = index;
         while (peek() != '"' && peek() != '\n' && peek() != '{' && !is_at_end()) {
             advance();
@@ -266,6 +265,7 @@ private:
     }
     
     void add_token(TokType token_type) {
+        finished_imports = true;
         tokens.push_back({token_type, source.substr(token_start, index - token_start), line, col, file});
     }
 

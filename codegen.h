@@ -242,7 +242,10 @@ public:
         visiting_assign_lhs = true;
         WolfValue lhs = eval(expr->lhs);
         visiting_assign_lhs = false;
+
+        visiting_assign_rhs = true;
         WolfValue rhs = eval(expr->rhs);
+        visiting_assign_rhs = false;
         
         if (lhs.wt == WT_DB) {
             DBFlag db_assign;
@@ -310,28 +313,23 @@ public:
         if (!inline_funcs.empty()) {
             for (size_t i = 0; i < inline_funcs.top().fn->params.size(); i++) {
                 if (inline_funcs.top().fn->params.at(i)->sym == expr->sym) {
-                    expr_return = WolfValue(WT_NUMREF,
-                        inline_funcs.top().args.at(i).v + expr->index->const_int);
+                    expr_return = inline_funcs.top().args.at(i);
+                    if (inline_funcs.top().args.at(i).wt == WT_DB)
+                        expr_return.db_prop += expr->index->const_int;
                     return;
                 }
             }
-        } else {
-            expr_return = WolfValue(WT_NUMREF, expr->sym->ref + expr->index->const_int);
         }
+        expr_return = WolfValue(WT_NUMREF, expr->sym->ref + expr->index->const_int);
     }
 
     void visit_CdbExpr(CdbExpr* expr) override {
         Symbol* sym = expr->sym->cdb_fields->get(expr->property);
         int32_t prop_index = sym->ref;
-        if (sym->type == TYPE_INTARR) {
+        if (sym->type == TYPE_INTARR && expr->arr_index) {
             prop_index += expr->arr_index->const_int;
         }
-        if (visiting_assign_lhs) {
-            WolfType wt;
-            if (expr->type == TYPE_INT || expr->type == TYPE_INTARR)
-                wt = WT_NUMREF;
-            else
-                wt = WT_STRREF;
+        if (visiting_assign_lhs || expr->type == TYPE_INTARR) {
             if (expr->data_index->is_const) {
                 expr_return =
                     WolfValue(
@@ -352,9 +350,8 @@ public:
             return;
         }
 
-        // else if part of rhs expression
         WolfValue temp;
-        if (expr->type == TYPE_INT || expr->type == TYPE_INTARR)
+        if (expr->type == TYPE_INT)
             temp = push_int();
         else 
             temp = push_str();
@@ -648,6 +645,7 @@ public:
 private:
     bool had_error = false;
     bool visiting_assign_lhs = false;
+    bool visiting_assign_rhs = false;
     int32_t cev_index = 0;
     int32_t cdb_index = 0;
     GameData gd;
@@ -764,6 +762,9 @@ private:
 
     void cmd_arith(WolfValue lhs, WolfValue rhs_0, WolfValue rhs_1, ArithFlag flag) {
         assert(lhs.wt = WT_NUMREF);
+        assert(lhs.v >= 1600000 && lhs.v < 1600099);
+        assert(rhs_0.wt == WT_NUM || (rhs_0.v >= 1600000 && rhs_0.v < 1600099));
+        assert(rhs_1.wt == WT_NUM || (rhs_1.v >= 1600000 && rhs_1.v < 1600099));
         int32_t flags = flag
             | (rhs_0.do_suppress() ? ARITH_SUPPRESS_RHS_0 : 0)
             | (rhs_1.do_suppress() ? ARITH_SUPPRESS_RHS_1 : 0);
