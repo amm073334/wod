@@ -15,6 +15,10 @@ public:
         current_env = global_env;
         for (Stmt* s : program) s->accept(this);
         globals_visited = true;
+
+        Symbol* main_fn = global_env->get("main");
+        if (!main_fn || main_fn->st != SYM_FUNC)
+            error(program.back()->pos, "main function not found");
         for (Stmt* s : program) s->accept(this);
         assert(global_env == current_env);
         return global_env;
@@ -38,10 +42,7 @@ public:
             else if (param->type == TYPE_STR) n_str_args++;
             else {
                 has_arr_param = true;
-                if (param->arr_len) {
-                    param->arr_len->accept(this);
-                    if (param->arr_len->type != TYPE_INT || !param->arr_len->is_const)
-                        error(stmt->pos, "Array parameter must have length of constant integer expression");
+                if (check_arrlen(param->arr_len)) {
                     param->type.i = param->arr_len->const_int;
                 }
             }
@@ -108,10 +109,7 @@ public:
         if (!stmt->initializer) {
             if (stmt->is_const)
                 error(stmt->pos, "const declarations must have an initializer");
-            if (stmt->arr_len) {
-                stmt->arr_len->accept(this);
-                if (!stmt->arr_len->is_const || stmt->arr_len->type != TYPE_INT)
-                    error(stmt->pos, "Array length must be constant integer expression");
+            if (check_arrlen(stmt->arr_len)) {
                 if (stmt->arr_len->const_int <= 0)
                     error(stmt->pos, "Array length must be positive");
                 stmt->type.i = stmt->arr_len->const_int;
@@ -191,12 +189,24 @@ public:
         Environment* cdb_fields = new Environment;
         size_t field_index = 0;
         for (VarStmt* field : stmt->fields) {
-            assert(!field->initializer);
+            bool has_arr = check_arrlen(field->arr_len);
+            if (has_arr) {
+                if (field->arr_len->const_int <= 0)
+                    error(field->pos, "Array length must be positive");
+                field->type.i = field->arr_len->const_int;
+            }
             Symbol* sym = cdb_fields->define(field->name, field->type);
             if (!sym) error(field->pos, "Redeclaration of field");
 
+            if (field_index > 100)
+                error(field->pos, "Exceeded 100 CDB properties");
+
             sym->ref = field_index;
-            field_index++;
+
+            if (has_arr)
+                field_index += field->type.i;
+            else
+                field_index++;
         }
         stmt->sym = current_env->define_cdb(stmt->name, cdb_fields);
         stmt->sym->ref = current_cdb_index++;
@@ -239,6 +249,8 @@ public:
     void visit_VariableExpr(VariableExpr* expr) override {
         Symbol* sym = current_env->get(expr->name);
         if (!sym) error(expr->pos, "Variable not declared");
+        if (sym->st != SYM_VAR)
+            error(expr->pos, "Attempted to use non-variable name in expression");
         expr->sym = sym;
 
         expr->type = sym->type;
@@ -271,17 +283,26 @@ public:
     void visit_CdbExpr(CdbExpr* expr) override {
         Symbol* cdb_sym = current_env->get(expr->name);
         if (!cdb_sym) error(expr->pos, "CDB not declared");
-        // TODO: differentiate cdb, function, and variable symbols so that an existing variable/function wouldn't match this search
+        if (cdb_sym->st != SYM_CDB)
+            error(expr->pos, "Attempted to access non-CDB name as a CDB");
         expr->sym = cdb_sym;
 
-        expr->index->accept(this);
-        if (expr->index->type != TYPE_INT)
+        expr->data_index->accept(this);
+        if (expr->data_index->type != TYPE_INT)
             error(expr->pos, "CDB access index must be of integer type");
 
         Symbol* prop_sym = cdb_sym->cdb_fields->get(expr->property);
         if (!prop_sym) error(expr->pos, "No such CDB property");
 
-        expr->type = prop_sym->type;
+        if (check_arrlen(expr->arr_index)) {
+            if (expr->arr_index->const_int < 0 || expr->arr_index->const_int >= prop_sym->type.i)
+                error(expr->arr_index->pos, "Array access out of bounds");
+        }
+
+        if (prop_sym->type == TYPE_INTARR)
+            expr->type = TYPE_INT;
+        else
+            expr->type = prop_sym->type;
         expr->assignable = true;
         expr->is_const = false;
     }
@@ -347,6 +368,7 @@ public:
                     expr->const_int = expr->left->const_int * expr->right->const_int;
                     break;
                 case BinaryExpr::DIV:
+                    if (expr->right->const_int == 0) error(expr->pos, "Division by 0 in constant expression");
                     expr->const_int = expr->left->const_int / expr->right->const_int;
                     break;
                 case BinaryExpr::MODULO:
@@ -404,6 +426,7 @@ public:
         // if (visiting_inline_function && expr->sym->inline_function)
         //     error(expr->pos, "Calling an inline function from an inline function is currently unsupported");
         if (!sym) error(expr->pos, "Function not declared");
+        if (sym->st != SYM_FUNC) error(expr->pos, "Attempted to call non-function");
         expr->sym = sym;
         if (expr->args.size() != sym->arg_types.size())
             error(expr->pos, "Wrong number of arguments");
@@ -459,6 +482,14 @@ private:
     WodType current_return_type;
 
     // utility
+    bool check_arrlen(Expr* e) {
+        if (!e) return false;
+        e->accept(this);
+        if (!e->is_const || e->type != TYPE_INT)
+            error(e->pos, "Array length must be constant integer expression");
+        return true;
+    }
+
     void error(Token* pos, std::string error_msg) {
         had_error = true;
         std::cout << "typecheck error " << pos->file <<": line " << pos->line << " col " << pos->col << " " << error_msg << std::endl;

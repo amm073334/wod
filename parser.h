@@ -50,7 +50,18 @@ private:
             switch(previous()->token_type) {
                 case T_INT: field_type = WodType(TYPE_INT); break;
                 case T_STR: field_type = WodType(TYPE_STR); break;
+                default:
+                    error(previous(), "Unexpected field type");
+                    break;
             }
+
+            Expr* arr_len = nullptr;
+            if (match(T_LBRACK)) {
+                field_type = WodType(TYPE_INTARR);
+                arr_len = expression();
+                eat(T_RBRACK, "Expected ']' after array length");
+            }
+
             Token* ntok = eat(T_IDENT, "Expected field name");
             
             Expr* initializer = nullptr;
@@ -59,7 +70,7 @@ private:
                 error(ntok, "CDB field initializers are not yet supported");
             }
             fields.push_back(new VarStmt(ntok,
-                false, field_type, nullptr, ntok->text, initializer));
+                false, field_type, arr_len, ntok->text, initializer));
             eat(T_SEMICOLON, "Expected ';' after cdb field");
         }
         eat(T_RBRACE, "Expected '}' at end of cdb declaration");
@@ -476,8 +487,13 @@ private:
                 eat(T_RBRACK, "Expected ']' after array index");
                 if (match(T_DOT)) {
                     Token* prop_tok = eat(T_IDENT, "Expected property name after '.'");
+                    Expr* arr_index = nullptr;
+                    if (match(T_LBRACK)) {
+                        arr_index = expression();
+                        eat(T_RBRACK, "Expected ']' after array index");
+                    }
                     expr = new CdbExpr(tok,
-                        tok->text, data_index, prop_tok->text);
+                        tok->text, data_index, prop_tok->text, arr_index);
                 } else {
                     expr = new ArrayExpr(tok, tok->text, data_index);
                 }

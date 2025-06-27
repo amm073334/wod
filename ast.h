@@ -164,12 +164,13 @@ struct ArrayExpr : public Expr {
 };
 
 struct CdbExpr : public Expr {
-    CdbExpr(Token* pos, std::string name, Expr* index, std::string property)
-        : Expr(pos), name(name), index(index), property(property) {}
+    CdbExpr(Token* pos, std::string name, Expr* data_index, std::string property, Expr* arr_index)
+        : Expr(pos), name(name), data_index(data_index), property(property), arr_index(arr_index) {}
     void accept(Visitor* v) override { v->visit_CdbExpr(this); }
     std::string name;
-    Expr* index;
+    Expr* data_index;
     std::string property;
+    Expr* arr_index;
     Symbol* sym;
 };
 

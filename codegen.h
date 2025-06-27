@@ -220,12 +220,19 @@ public:
     void visit_CdbStmt(CdbStmt* stmt) override {
         gd.cdbs.push_back(DB());
         for (VarStmt* vs : stmt->fields) {
-            DB::Property p;
-            if (vs->type == TYPE_INT)
-                p.type = DB::PROP_INT;
-            else
-                p.type = DB::PROP_STR;
-            gd.cdbs.back().properties.push_back(p);
+            if (vs->type == TYPE_INTARR) {
+                for (size_t i = 0; i < vs->type.i; i++) {
+                    gd.cdbs.back().properties.push_back(DB::Property());
+                    gd.cdbs.back().properties.back().type = DB::PROP_INT;
+                }
+            } else {
+                DB::Property p;
+                if (vs->type == TYPE_INT)
+                    p.type = DB::PROP_INT;
+                else
+                    p.type = DB::PROP_STR;
+                gd.cdbs.back().properties.push_back(p);
+            }
         }
         gd.cdbs.back().TYPE_ID = cdb_index++;
     }
@@ -314,48 +321,52 @@ public:
     }
 
     void visit_CdbExpr(CdbExpr* expr) override {
-        int32_t prop_index = expr->sym->cdb_fields->get(expr->property)->ref;
+        Symbol* sym = expr->sym->cdb_fields->get(expr->property);
+        int32_t prop_index = sym->ref;
+        if (sym->type == TYPE_INTARR) {
+            prop_index += expr->arr_index->const_int;
+        }
         if (visiting_assign_lhs) {
             WolfType wt;
-            if (expr->type == TYPE_INT)
+            if (expr->type == TYPE_INT || expr->type == TYPE_INTARR)
                 wt = WT_NUMREF;
             else
                 wt = WT_STRREF;
-            if (expr->index->is_const) {
+            if (expr->data_index->is_const) {
                 expr_return =
                     WolfValue(
                         expr->sym->ref,
-                        expr->index->const_int,
+                        expr->data_index->const_int,
                         prop_index);
                 return;
             }
             begin_frame();
-            WolfValue index = eval(expr->index);
+            WolfValue index = eval(expr->data_index);
             end_frame();
             expr_return =
-            WolfValue(
-                expr->sym->ref,
-                index.v,
-                prop_index);
+                WolfValue(
+                    expr->sym->ref,
+                    index.v,
+                    prop_index);
 
             return;
         }
 
         // else if part of rhs expression
         WolfValue temp;
-        if (expr->type == TYPE_INT)
+        if (expr->type == TYPE_INT || expr->type == TYPE_INTARR)
             temp = push_int();
         else 
             temp = push_str();
 
-        if (expr->index->is_const) {
-            cmd_cdb_get(temp, expr->sym->ref, expr->index->const_int, prop_index);
+        if (expr->data_index->is_const) {
+            cmd_cdb_get(temp, expr->sym->ref, expr->data_index->const_int, prop_index);
             expr_return = temp;
             return;
         }
 
         begin_frame();
-        WolfValue index = eval(expr->index);
+        WolfValue index = eval(expr->data_index);
         end_frame();
         cmd_cdb_get(temp, expr->sym->ref, index.v, prop_index);
         expr_return = temp;
