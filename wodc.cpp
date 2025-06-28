@@ -27,7 +27,7 @@ int main(int argc, const char* argv[]) {
     Codegen codegen;
     GameData gd = codegen.gen(statements);
 
-    for (CommonEvent& cev : gd.cevs) clean_inline(cev);
+    for (CommonEvent& cev : gd.cevs) targopt_label(cev);
     gd.write(argv[2]);
 
     delete env;

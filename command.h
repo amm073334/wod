@@ -15,6 +15,8 @@ enum CommandId : int32_t {
     CMD_LOOP_COUNT      = 179,
     CMD_CALL_ID         = 210,
     CMD_CALL_RESERVE    = 211,
+    CMD_LABEL           = 212,
+    CMD_JUMP            = 213,
     CMD_DB              = 250,
     CMD_CALL_NAME       = 300,
     CMD_BRANCH          = 401,

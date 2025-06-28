@@ -2,11 +2,43 @@
 
 // does some simple optimization on the resulting code
 #include <stack>
+#include <unordered_set>
+#include <string>
 #include "commonevent.h"
+
+// remove jumps that jump to the immediately following command
+// and labels that are unused
+void targopt_label(CommonEvent& cev) {
+    std::unordered_set<std::string> jumps;
+    for (size_t i = 0; i < cev.commands.size() - 1; i++) {
+        Command& c = cev.commands.at(i);
+
+        if (c.command_id == CMD_JUMP) {
+            jumps.insert(c.str_fields.at(0));
+            
+            Command& c1 = cev.commands.at(i + 1);
+            if (c1.command_id == CMD_LABEL &&
+                c.str_fields.at(0) == c1.str_fields.at(0)) {
+                c.command_id = 0;
+                c1.command_id = 0;
+            }
+        }
+    }
+
+    for (size_t i = 0; i < cev.commands.size() - 1; i++) {
+        Command& c = cev.commands.at(i);
+
+        if (c.command_id == CMD_LABEL &&
+            !jumps.count(c.str_fields.at(0)))
+                c.command_id = 0;
+    }
+    cev.commands.erase(std::remove_if(cev.commands.begin(), cev.commands.end() - 1,
+        [](Command& c) { return c.command_id == 0; }), cev.commands.end() - 1);
+}
 
 // look for 1-loops, potentially containing break statements,
 // and remove them where it would not break control flow
-void clean_inline(CommonEvent& cev) {
+void targopt_1loop(CommonEvent& cev) {
     std::stack<size_t> loop_indexes;
     std::stack<bool> can_prune;
     for (size_t i = 0; i < cev.commands.size(); i++) {
