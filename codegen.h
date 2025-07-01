@@ -343,9 +343,7 @@ public:
         if (expr->data_index->is_const) {
             index = expr->data_index->const_int;
         } else {
-            begin_frame();
             index = try_cdb_eval(expr->data_index).v;
-            end_frame();
         }
         expr_return = WolfValue(
             expr->sym->ref,

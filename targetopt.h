@@ -14,17 +14,18 @@ void targopt_label(CommonEvent& cev) {
         Command& c = cev.commands.at(i);
 
         if (c.command_id == CMD_JUMP) {
-            jumps.insert(c.str_fields.at(0));
-            
             Command& c1 = cev.commands.at(i + 1);
             if (c1.command_id == CMD_LABEL &&
                 c.str_fields.at(0) == c1.str_fields.at(0)) {
                 c.command_id = 0;
-                c1.command_id = 0;
+            } else {
+                // if jump does not go to immediately following command, put it in a set
+                jumps.insert(c.str_fields.at(0));
             }
         }
     }
 
+    // remove labels that did not have a non-trivial jump
     for (size_t i = 0; i < cev.commands.size() - 1; i++) {
         Command& c = cev.commands.at(i);
 
