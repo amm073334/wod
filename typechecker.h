@@ -63,7 +63,6 @@ public:
 
     void function_block(FunctionStmt* stmt) {
         current_return_type = current_env->get(stmt->name)->type;
-        if (stmt->is_inline) visiting_inline_function = true;
         open_scope();
         int32_t int_param_ref = CSELF_THRESHOLD;
         int32_t str_param_ref = CSELF_THRESHOLD + 5;
@@ -79,7 +78,6 @@ public:
         }
         for (Stmt* s : stmt->body) s->accept(this);
         close_scope();
-        visiting_inline_function = false;
     }
 
     void visit_BlockStmt(BlockStmt* stmt) override {
@@ -152,18 +150,18 @@ public:
                 error(stmt->pos, "Loop count is not an integer");
         }
         open_scope();
-        in_a_loop = true;
+        loop_depth++;
         stmt->body->accept(this);
-        in_a_loop = false;
+        loop_depth--;
         close_scope();
     }
 
     void visit_ContinueStmt(ContinueStmt* stmt) override {
-        if (!in_a_loop) error(stmt->pos, "Used continue statement outside of loop");
+        if (loop_depth == 0) error(stmt->pos, "Used continue statement outside of loop");
     }
 
     void visit_BreakStmt(BreakStmt* stmt) override {
-        if (!in_a_loop) error(stmt->pos, "Used break statement outside of loop");
+        if (loop_depth == 0) error(stmt->pos, "Used break statement outside of loop");
     }
 
     void visit_CmdStmt(CmdStmt* stmt) override {
@@ -468,8 +466,7 @@ private:
     bool had_error = false;
     bool globals_visited = false;
     bool visiting_assign_lhs = false;
-    bool in_a_loop = false;
-    bool visiting_inline_function = false;
+    size_t loop_depth = 0;
 
     int32_t current_cev_ref = CEV_THRESHOLD;
     int32_t current_cdb_index = 0;

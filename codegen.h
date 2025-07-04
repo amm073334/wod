@@ -791,7 +791,7 @@ private:
         assert(lhs.wt != WT_DB && rhs.wt == WT_DB);
         current_cev->add_cmd(CMD_DB, 
             {rhs.db_type, rhs.db_data, rhs.db_prop, 
-                DB_TYPE_CDB | DB_ASSIGN_TO_VAR, lhs.v}, 
+                DB_TYPE_CDB | DB_ASSIGN_TO_VAR | flags, lhs.v}, 
             {"", "", "", ""});
     }
 
@@ -885,6 +885,11 @@ private:
     void error(std::string error_msg) {
         had_error = true;
         std::cout << "code generation error: " << error_msg << std::endl;
+        std::cout << "inline stack trace: " << std::endl;
+        while (!inline_funcs.empty()) {
+            std::cout << inline_funcs.top().fn->name << std::endl;
+            inline_funcs.pop();
+        }
         throw std::runtime_error(error_msg);
     }
 };
