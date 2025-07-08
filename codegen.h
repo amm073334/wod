@@ -12,6 +12,20 @@
 
 class Codegen : public Visitor {
 public:
+    Codegen(int use_globals) : use_globals(use_globals) {
+        if (use_globals) {
+            BASE_INT_SP = VAR_THRESHOLD - 1;
+            MAX_INT_SP = VAR_THRESHOLD + 99999;
+            BASE_STR_SP = STRVAR_THRESHOLD - 1;
+            MAX_STR_SP = STRVAR_THRESHOLD + 99999;
+        } else {
+            BASE_INT_SP = CSELF_THRESHOLD - 1;
+            MAX_INT_SP = MAX_CSELF_REF;
+            BASE_STR_SP = CSELF_THRESHOLD + 5;
+            MAX_STR_SP = CSELF_THRESHOLD + 9;
+        }
+    }
+
     GameData gen(std::vector<Stmt*> &program) {
         for (Stmt* s : program) {
             s->accept(this);
@@ -33,9 +47,13 @@ public:
 
         if (stmt->name == "main") gd.entry = stmt->sym->ref;
 
+        int_sp = BASE_INT_SP;
         str_sp = BASE_STR_SP;
-        for (WodType t : stmt->sym->arg_types)
-            if (t == TYPE_STR) str_sp++;
+        for (WodType t : stmt->sym->arg_types) {
+            if (t == TYPE_INT) push_int();
+            else if (t == TYPE_STR) push_str();
+            else assert(false);
+        }
 
         begin_frame();
 
@@ -203,8 +221,13 @@ public:
             int_fields.push_back(try_cdb_eval(e).v);
         for (Expr* e: stmt->str_fields) {
             WolfValue v = try_cdb_eval(e);
-            if (v.wt == WT_STRREF)
-                str_fields.push_back("\\cself[" + std::to_string(v.v - CSELF_THRESHOLD) + "]");
+            if (v.wt == WT_STRREF) {
+                if (use_globals) {
+                    str_fields.push_back("\\v[" + std::to_string(v.v - VAR_THRESHOLD) + "]");
+                } else {
+                    str_fields.push_back("\\cself[" + std::to_string(v.v - CSELF_THRESHOLD) + "]");
+                }
+            }
             else
                 str_fields.push_back(v.string_lit);
         }
@@ -518,11 +541,11 @@ public:
                 v = try_cdb_eval(arg);
                 // for variables passed by value, do a copy here to
                 // simulate copying of variables during a normal function call
-                if (v.wt == WT_NUMREF) {
+                if (v.wt == WT_NUMREF /*|| v.wt == WT_NUMLIT*/) {
                     WolfValue v2 = push_int();
                     cmd_arith(v2, v);
                     v = v2;
-                } else if (v.wt == WT_STRREF) {
+                } else if (v.wt == WT_STRREF /*|| v.wt == WT_STRLIT*/) {
                     WolfValue v2 = push_str();
                     cmd_string(v2, v);
                     v = v2;
@@ -609,14 +632,19 @@ public:
                 WolfValue v = try_cdb_eval(f.expr);
                 switch (v.wt) {
                     case WT_NUMLIT:
-                        out += v.v;
+                        out += std::to_string(v.v);
                         break;
                     case WT_STRLIT:
                         out += v.string_lit;
                         break;
                     case WT_NUMREF:
                     case WT_STRREF:
-                        out += "\\cself[" + std::to_string(v.v - CSELF_THRESHOLD) + "]";
+                        if (use_globals) {
+                            if (v.wt == WT_STRREF) error("can't currently print string variables when using globals");
+                            out += "\\v[" + std::to_string(v.v - VAR_THRESHOLD) + "]";
+                        } else {
+                            out += "\\cself[" + std::to_string(v.v - CSELF_THRESHOLD) + "]";
+                        }
                         break;
                 }
             } else out += f.str;
@@ -625,6 +653,7 @@ public:
     }
 
 private:
+    bool use_globals;
     bool had_error = false;
     int32_t cev_index = 0;
     int32_t cdb_index = 0;
@@ -657,7 +686,7 @@ private:
             : wt(WT_DB)
             , db_type(db_type), db_data(db_data), db_prop(db_prop) {}
         bool is_ref() { return wt == WT_NUMREF || wt == WT_STRREF; }
-        bool do_suppress() { return wt == WT_NUMLIT && v >= VAR_THRESHOLD; }
+        bool do_suppress() { return wt == WT_NUMLIT && v >= REF_THRESHOLD; }
     };
 
     struct InlineFrame {
@@ -671,10 +700,12 @@ private:
     std::stack<InlineFrame> inline_funcs;
 
     CommonEvent* current_cev = nullptr;
-    const int32_t BASE_INT_SP = CSELF_THRESHOLD + 10 - 1; // start pointers at one less than the minimum value
-    const int32_t BASE_STR_SP = CSELF_THRESHOLD + 5  - 1; // because a push operation will start by incrementing them to the minimum
-    int32_t int_sp = BASE_INT_SP;
-    int32_t str_sp = BASE_STR_SP;
+    int32_t BASE_INT_SP;
+    int32_t BASE_STR_SP;
+    int32_t MAX_INT_SP;
+    int32_t MAX_STR_SP;
+    int32_t int_sp;
+    int32_t str_sp;
 
     struct VarScope {
         const int32_t int_bp;
@@ -699,12 +730,13 @@ private:
     }
 
     WolfValue push_int() {
-        if (++int_sp > MAX_CSELF_REF) error("Integer stack overflow");
+        if (++int_sp == CSELF_THRESHOLD + 5) int_sp = CSELF_THRESHOLD + 10;
+        if (int_sp > MAX_INT_SP) error("Integer stack overflow");
         return WolfValue(WT_NUMREF, int_sp);
     }
 
     WolfValue push_str() {
-        if (++str_sp > CSELF_THRESHOLD + 9) error("String stack overflow");
+        if (++str_sp > MAX_STR_SP) error("String stack overflow");
         return WolfValue(WT_STRREF, str_sp);
     }
 
@@ -749,13 +781,28 @@ private:
 
     void cmd_arith(WolfValue lhs, WolfValue rhs_0, WolfValue rhs_1, ArithFlag flag) {
         assert(lhs.wt = WT_NUMREF);
-        assert(lhs.v >= 1600000 && lhs.v < 1600099);
-        assert(rhs_0.wt == WT_NUMLIT || (rhs_0.v >= 1600000 && rhs_0.v < 1600099));
-        assert(rhs_1.wt == WT_NUMLIT || (rhs_1.v >= 1600000 && rhs_1.v < 1600099));
-        int32_t flags = flag
-            | (rhs_0.do_suppress() ? ARITH_SUPPRESS_RHS_0 : 0)
-            | (rhs_1.do_suppress() ? ARITH_SUPPRESS_RHS_1 : 0);
-        current_cev->add_cmd(CMD_ARITH, {lhs.v, rhs_0.v, rhs_1.v, flags}, {});
+        assert(v_is_cself(lhs.v) || v_is_normalvar(lhs.v));
+        assert(rhs_0.wt == WT_NUMLIT || v_is_cself(rhs_0.v) || v_is_normalvar(rhs_0.v));
+        assert(rhs_1.wt == WT_NUMLIT || v_is_cself(rhs_1.v) || v_is_normalvar(rhs_1.v));
+        // if a rhs value should be suppressed, do so by assigning (0 - -rhs.v) into a temporary
+        // this is generally better than using the built-in suppression flag for two reasons:
+        // 1. it seems to run faster
+        // 2. the engine normally clamps literals greater than 2 billion to +2,000,000,000, but doing this
+        //    roundabout assignment avoids that
+        // the cons for doing this involve using more temporaries and using more commands
+        begin_frame();
+        if (rhs_0.do_suppress()) {
+            WolfValue tmp = push_int();
+            cmd_arith(tmp, WolfValue(WT_NUMLIT, 0), WolfValue(WT_NUMLIT, -rhs_0.v), ARITH_OP_MINUS);
+            rhs_0 = tmp;
+        }
+        if (rhs_1.do_suppress()) {
+            WolfValue tmp = push_int();
+            cmd_arith(tmp, WolfValue(WT_NUMLIT, 0), WolfValue(WT_NUMLIT, -rhs_1.v), ARITH_OP_MINUS);
+            rhs_1 = tmp;
+        }
+        end_frame();
+        current_cev->add_cmd(CMD_ARITH, {lhs.v, rhs_0.v, rhs_1.v, flag}, {});
     }
 
     void cmd_string(WolfValue lhs, WolfValue rhs) {
@@ -880,6 +927,9 @@ private:
         int32_t prop = trunc % 100;
         return {type, data, prop};
     }
+
+    bool v_is_cself(int32_t v) { return v >= 1600000 && v <= 1600099; }
+    bool v_is_normalvar(int32_t v) { return v >= 2000000 && v < 2100000; }
 
     // error
     void error(std::string error_msg) {

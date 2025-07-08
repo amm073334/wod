@@ -7,7 +7,7 @@
 #include "targetopt.h"
 
 int main(int argc, const char* argv[]) {
-    if (argc != 3) {
+    if (argc != 3 && argc != 4) {
         std::cout << "wrong number of args" << std::endl;
         exit(1);
     }
@@ -24,7 +24,13 @@ int main(int argc, const char* argv[]) {
     Environment* env = typechecker.typecheck(statements);
     if (typechecker.failed()) exit(1);
 
-    Codegen codegen;
+    bool use_globals;
+    if (argc == 3) {
+        use_globals = false;
+    } else {
+        use_globals = true;
+    }
+    Codegen codegen(use_globals);
     GameData gd = codegen.gen(statements);
 
     for (CommonEvent& cev : gd.cevs) targopt_label(cev);
