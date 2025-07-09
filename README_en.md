@@ -16,6 +16,8 @@ The scanner, parser, and AST are largely based off of the Java implementation of
 
 - Using f-strings with string variables when `use-globals` is on doesn't work
 
+- `import` statements don't work the way they probably should, and work more like `#include` directives; if you import the same file into different files the compiler will complain
+
 ## Running
 ```
 .\wodc.exe <file> <output-dir> [use-globals]
