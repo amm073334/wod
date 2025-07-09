@@ -3,7 +3,7 @@
 
 かなりバグだらけなので自己責任でお願いします。
 
-字句解析と構文解析に関してはjlox(https://github.com/munificent/craftinginterpreters)に基づいて作りました。
+字句解析と構文解析に関しては[jlox](https://github.com/munificent/craftinginterpreters)に基づいて作りました。
 
 ## 割と重大なバグなど
 - 現在、ASCIIしか扱えない
