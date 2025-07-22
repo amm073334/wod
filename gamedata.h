@@ -29,7 +29,7 @@ struct GameData {
         }
 
         std::string map_dir = outdir + "MapData\\";
-        if (!CreateDirectoryA(bd_dir.c_str(), NULL) && ERROR_ALREADY_EXISTS != GetLastError()) {
+        if (!CreateDirectoryA(map_dir.c_str(), NULL) && ERROR_ALREADY_EXISTS != GetLastError()) {
             std::cout << "failed" << std::endl;
             return;
         }
