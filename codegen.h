@@ -19,7 +19,7 @@ public:
             BASE_STR_SP = STRVAR_THRESHOLD - 1;
             MAX_STR_SP = STRVAR_THRESHOLD + 99999;
         } else {
-            BASE_INT_SP = CSELF_THRESHOLD - 1;
+            BASE_INT_SP = CSELF_THRESHOLD + 9;
             MAX_INT_SP = MAX_CSELF_REF;
             BASE_STR_SP = CSELF_THRESHOLD + 5;
             MAX_STR_SP = CSELF_THRESHOLD + 9;
