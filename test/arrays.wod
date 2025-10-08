@@ -1,4 +1,4 @@
-const int THREE = 3;
+const int THREE = 3; 
 
 inline void modify_array(int[3] a) {
     a[2] = 9999;
