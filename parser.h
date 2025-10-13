@@ -521,7 +521,9 @@ private:
 
     Expr* primary() {
         if (match(T_NUMBER))
-            return new IntLiteralExpr(previous(), std::stoi(previous()->text, nullptr, 0));
+            // NOTE: this uses stoll instead of stoi to prevent a literal like 0x80000000 from causing an exception
+            // an exception can still happen here if number is too big for stoll
+            return new IntLiteralExpr(previous(), static_cast<int32_t>(std::stoll(previous()->text, nullptr, 0)));
         if (match(T_STRING))
             return new StrLiteralExpr(previous(), previous()->text);
         if (match(T_F_QUOTE)) {
