@@ -1,24 +1,21 @@
 HEADERS := $(wildcard *.h)
 SOURCES := $(wildcard *.c)
+MAINS := main.c test.c
 
-release: $(HEADERS) $(SOURCES) wodc
+release: wodc.exe
 
 debug: CFLAGS = /Zi /Wall /wd5045 /wd4820 /wd4061 /wd4668
-debug: wodc
+debug: wodc.exe
 
-wodc:
-	mkdir build
-	cl ${CFLAGS} /Fobuild\ main.c \
-	memory.c sv.c environment.c error.c \
-	gamedata.c commonevent.c db.c \
-	lexer.c parser.c typechecker.c wl.c \
-	/link /out:$@
+wodc.exe: $(HEADERS) $(SOURCES)
+	@ if not exist build mkdir build
+	@ cl $(CFLAGS) /Fobuild\ main.c $(filter-out $(MAINS),$(SOURCES)) /link /out:$@
 
 test: test.c sv.c memory.c
-	cl $^
+	@ cl $^
 
 clean:
-	del wodc
-	rmdir /s /q build
+	@ if exist wodc.exe del wodc.exe
+	@ if exist build rmdir /s /q build
 
 .PHONY: clean debug release
