@@ -28,7 +28,7 @@ int main() {
         StringView command = 
             sv_concat(&arena, SV(".\\main.exe test\\"), to_sv(tests[i]));
         
-        if (!command.data) {
+        if (sv_is_null(command)) {
             fprintf(stderr, "Failed to allocate memory.");
             exit(1);
         }

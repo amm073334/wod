@@ -21,8 +21,22 @@ Environment *env_new(Environment *parent, Arena *arena) {
     return env;
 }
 
+Symbol *env_insert(Environment *env, StringView name, BaseType basetype, int32_t offset, Arena *arena) {
+    Symbol *entry = env_find(env, name);
+    
+    if (entry) return NULL;
+
+    Symbol sym;
+    sym.name = name;
+    sym.offset = offset;
+    sym.type.basetype = basetype;
+
+    VEC_PUSH(env->symbols, sym, arena);
+    return &env->symbols.at[env->symbols.count - 1];
+}
+
 // TODO: This would be more efficient with a hash table.
-static Symbol *env_find(Environment *env, StringView name) {
+Symbol *env_find(Environment *env, StringView name) {
     if (!env) return NULL;
     
     for (size_t i = 0; i < env->symbols.count; i++) {
@@ -33,25 +47,4 @@ static Symbol *env_find(Environment *env, StringView name) {
     }
 
     return env_find(env->parent, name);
-}
-
-bool env_insert(Environment *env, StringView name, int32_t offset, Arena *arena) {
-    Symbol *entry = env_find(env, name);
-    
-    if (!entry) {
-        Symbol sym;
-        sym.name = name;
-        sym.offset = offset;
-        sym.type.basetype = TYPE_VOID;
-
-        VEC_PUSH(env->symbols, sym, arena);
-        return true;
-    }
-
-    return false;
-}
-
-int32_t *env_get(Environment *env, StringView name) {
-    Symbol *entry = env_find(env, name);
-    return entry ? &entry->offset : NULL;
 }

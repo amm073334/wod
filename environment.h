@@ -39,7 +39,7 @@ struct WodType {
         };
 
         // If TYPE_CDB or TYPE_MODULE:
-        Environment env;
+        Environment *env;
     };
 };
 
@@ -51,7 +51,7 @@ struct Symbol {
 
 void env_init(Environment *env);
 Environment *env_new(Environment *parent, Arena *arena);
-bool env_insert(Environment *env, StringView name, int32_t offset, Arena *arena);
-int32_t *env_get(Environment *env, StringView name);
+Symbol *env_insert(Environment *env, StringView name, BaseType basetype, int32_t offset, Arena *arena);
+Symbol *env_find(Environment *env, StringView name);
 
 #endif // WOD_ENVIRONMENT_H_

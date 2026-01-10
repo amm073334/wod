@@ -4,6 +4,6 @@
 #include "parser.h"
 #include "environment.h"
 
-Environment *typecheck(VEC_PTR_Stmt *ast, const char *source, Arena *arena);
+Environment *typecheck(StringView path, Arena *arena);
 
 #endif // WOD_TYPECHECKER_H_
