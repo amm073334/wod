@@ -15,7 +15,8 @@ test: test.c sv.c memory.c
 	@ cl $^
 
 clean:
-	@ if exist wodc.exe del wodc.exe
 	@ if exist build rmdir /s /q build
+	@ del *.obj
+	@ del *.exe
 
 .PHONY: clean debug release

@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <windows.h>
 
 #include "common.h"
 
@@ -26,8 +25,11 @@ int main() {
         if (!tests[i]) break;
 
         StringView command = 
-            sv_concat(&arena, SV(".\\main.exe test\\"), to_sv(tests[i]));
+            sv_concat(&arena, SV(".\\wodc.exe test\\"), to_sv(tests[i]));
         
+        command =
+            sv_concat(&arena, command, to_sv(" 2> nul"));
+
         if (sv_is_null(command)) {
             fprintf(stderr, "Failed to allocate memory.");
             exit(1);

@@ -39,7 +39,7 @@ int main(int argc, const char *argv[]) {
     Arena arena;
     arena_init(&arena);
 
-    typecheck(to_sv(argv[1]), &arena);
+    Environment *e = typecheck(to_sv(argv[1]), &arena);
 
     // Arena wl_arena;
     // arena_init(&wl_arena);
@@ -58,5 +58,7 @@ int main(int argc, const char *argv[]) {
 
     // gd_write_dir(&gd, "build");
     arena_free(&arena);
+
+    if (!e) return 1;
     return 0;
 }

@@ -35,18 +35,6 @@ static void globals() {
 
 }
 
-Environment *typecheck(StringView path, Arena *arena) {
-    Typechecker tc;
-    // tc.current_env = NULL;
-    // tc.source = source;
-    tc.arena = arena;
-    tc.had_error = false;
-    tc.function_offset = 0;
-    env_init(&tc.modules);
-
-    return typecheck_file(&tc, get_full_path(path, arena), true, arena);
-}
-
 static char *alloc_source(StringView path, Arena *arena) {
     char *path_cstr = arena_alloc(arena, path.len + 1);
     if (!path_cstr) {
@@ -208,7 +196,19 @@ static Environment *typecheck_file(Typechecker *typechecker, StringView path, bo
     }
 
     if (is_main_file && !env_find(globals, SV("main")))
-        tc_error(&typechecker, NULL, SV("No 'main' function."));
+        tc_error(typechecker, NULL, SV("No 'main' function."));
 
     return typechecker->had_error ? NULL : globals;
+}
+
+Environment *typecheck(StringView path, Arena *arena) {
+    Typechecker tc;
+    // tc.current_env = NULL;
+    // tc.source = source;
+    tc.arena = arena;
+    tc.had_error = false;
+    tc.function_offset = 0;
+    env_init(&tc.modules);
+
+    return typecheck_file(&tc, get_full_path(path, arena), true, arena);
 }
