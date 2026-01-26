@@ -16,7 +16,7 @@ test: test.c sv.c memory.c
 
 clean:
 	@ if exist build rmdir /s /q build
-	@ del *.obj
-	@ del *.exe
+	@ if exist *.obj del *.obj
+	@ if exist *.exe del *.exe
 
 .PHONY: clean debug release
