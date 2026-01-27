@@ -721,7 +721,34 @@ static Stmt *function_decl(Parser *parser) {
     return (Stmt *)stmt;
 }
 
+static VEC_PTR_Stmt sm_body(Parser *parser) {
+    
+}
+
+static Stmt *sm_decl(Parser *parser) {
+    bool flow_insensitive = false;
+    if (match(parser, TOK_FLOW_INSENSITIVE))
+        flow_insensitive = true;
+
+    consume(parser, TOK_IDENTIFIER, SV("Expected SM name."));
+    Token loc = parser->previous;
+
+    consume(parser, TOK_LEFT_BRACE, SV("Expected '{' before function body."));
+    VEC_PTR_Stmt body = sm_body(parser);
+
+    StmtSMDecl *stmt;
+    ALLOC_NODE(stmt, loc, StmtSMDecl,
+        (StmtSMDecl){ .name = loc.text,
+            .flow_insensitive = flow_insensitive, .body = body,});
+    
+    return (Stmt *)stmt;
+}
+
 static Stmt *top_decl(Parser *parser) {
+    if (match(parser, TOK_SM)) {
+        return sm_decl(parser);
+    }
+
     if (match(parser, TOK_INLINE) ||
         match(parser, TOK_VOID) ||
         match(parser, TOK_INT) ||

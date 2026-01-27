@@ -13,6 +13,8 @@ typedef enum {
     NODE_ExprCall,
     NODE_ExprIntLit,
     NODE_ExprStrLit,
+
+    NODE_ExprSMMatch,
 } ExprType;
 
 typedef struct {
@@ -90,6 +92,9 @@ typedef enum {
     NODE_StmtBreak,
     NODE_StmtCmd,
     NODE_StmtDBDecl,
+
+    NODE_StmtSMDecl,
+    NODE_StmtSMState,
 } StmtType;
 
 typedef struct Stmt {
