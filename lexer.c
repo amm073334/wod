@@ -27,6 +27,11 @@ static const Keyword keywords[] = {
     {.name = "in",       .type = TOK_IN},
     {.name = "cmd",      .type = TOK_CMD},
     {.name = "cdb",      .type = TOK_CDB},
+
+    {.name = "sm",               .type = TOK_SM},
+    {.name = "flow_insensitive", .type = TOK_FLOW_INSENSITIVE},
+    {.name = "any",              .type = TOK_ANY},
+    {.name = "any_call",         .type = TOK_ANY_CALL},
 };
 
 void lexer_init(Lexer *lexer, const char *source) {
@@ -215,6 +220,7 @@ Token scan_token(Lexer *lexer) {
                 match(lexer, '.') ? TOK_DOT_DOT : TOK_DOT);
         case '^': return make_token(lexer, TOK_CARET);
         case ';': return make_token(lexer, TOK_SEMICOLON);
+        case ':': return make_token(lexer, TOK_COLON);
         case '+':
             return make_token(lexer,
                 match(lexer, '=') ? TOK_PLUS_EQUAL : TOK_PLUS);

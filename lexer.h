@@ -39,6 +39,9 @@ typedef enum {
     // Literals.
     TOK_IDENTIFIER, TOK_NUMBER, TOK_STRING,
 
+    // Compiler extensions.
+    TOK_SM, TOK_FLOW_INSENSITIVE, TOK_COLON, TOK_ANY, TOK_ANY_CALL,
+
     TOK_ERROR, TOK_EOF
 } TokenType;
 

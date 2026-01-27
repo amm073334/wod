@@ -69,6 +69,13 @@ typedef struct {
     StringView value;
 } ExprStrLit;
 
+typedef struct Stmt Stmt;
+typedef struct {
+    Expr base;
+    Stmt *match;
+    Stmt *action;
+} ExprSMMatch;
+
 typedef enum {
     NODE_StmtImport,
     NODE_StmtAssign,
@@ -85,7 +92,7 @@ typedef enum {
     NODE_StmtDBDecl,
 } StmtType;
 
-typedef struct {
+typedef struct Stmt {
     StmtType type;
     Token loc;
 } Stmt;
@@ -175,6 +182,18 @@ typedef struct {
     StringView name;
     VEC_PTR_StmtVarDecl fields;
 } StmtDBDecl;
+
+typedef struct {
+    Stmt base;
+    StringView name;
+    bool flow_insensitive;
+    VEC_PTR_Stmt body;
+} StmtSMDecl;
+
+typedef struct {
+    Stmt base;
+    Expr *matches;
+} StmtSMState;
 
 VEC_PTR_Stmt *generate_ast(const char *source, Arena *arena);
 
