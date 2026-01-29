@@ -9,6 +9,7 @@
 #include "commonevent.h"
 
 #include "environment.h"
+#include "sm.h"
 
 typedef struct {
     // Table of modules compiled for the entire program so far.
@@ -39,7 +40,9 @@ int main(int argc, const char *argv[]) {
     Arena arena;
     arena_init(&arena);
 
-    Environment *e = typecheck(to_sv(argv[1]), &arena);
+    // Environment *e = typecheck(to_sv(argv[1]), &arena);
+    // if (!e) exit(1);
+    bool success = run_sm_checker(to_sv(argv[1]), &arena);
 
     // Arena wl_arena;
     // arena_init(&wl_arena);
@@ -59,6 +62,5 @@ int main(int argc, const char *argv[]) {
     // gd_write_dir(&gd, "build");
     arena_free(&arena);
 
-    if (!e) return 1;
-    return 0;
+    return !success;
 }

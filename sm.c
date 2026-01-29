@@ -41,18 +41,22 @@ static char *alloc_source(StringView path, Arena *arena) {
 }
 
 static bool run_sm(VEC_PTR_Stmt *ast, StmtSMDecl *sm) {
-    
+    return true;
 }
 
 bool run_sm_checker(StringView path, Arena *arena) {
     char *source = alloc_source(path, arena);
     VEC_PTR_Stmt *ast = generate_ast(source, arena);
-    if (!ast) return NULL;
+    if (!ast) return false;
 
+    bool failed = false;
     for (size_t i = 0; i < ast->count; i++) {
-        if (ast->at[i]->type == NODE_StmtSMDecl)
-            run_sm(ast, ast->at[i]);
+        if (ast->at[i]->type == NODE_StmtSMDecl) {
+            bool result = run_sm(ast, (StmtSMDecl *)ast->at[i]);
+            if (!result)
+                failed = true;
+        }
     }
 
-    return true;
+    return !failed;
 }

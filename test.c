@@ -4,8 +4,10 @@
 #include "common.h"
 
 static const char *tests[] = {
-    "fail_0.wod",
-    "fail_nomain.wod",
+    // "fail_0.wod",
+    // "fail_nomain.wod",
+    // "fail_ret_mismatch.wod",
+    "sm.wod",
     NULL
 };
 
@@ -27,8 +29,7 @@ int main() {
         StringView command = 
             sv_concat(&arena, SV(".\\wodc.exe test\\"), to_sv(tests[i]));
         
-        command =
-            sv_concat(&arena, command, to_sv(" 2> nul"));
+        // command = sv_concat(&arena, command, to_sv(" 2> nul"));
 
         if (sv_is_null(command)) {
             fprintf(stderr, "Failed to allocate memory.");

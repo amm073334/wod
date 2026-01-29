@@ -97,7 +97,7 @@ static bool sv_to_int(StringView s, int32_t *out) {
         (s.data[1] == 'x' || s.data[1] == 'X')) {
 
         int32_t total = 0;
-        size_t multiplier = 1;
+        int32_t multiplier = 1;
         for (size_t i = s.len - 1; i >= 2; i--) {
             int32_t digit;
             if (s.data[i] >= 'A' && s.data[i] <= 'F')
@@ -121,7 +121,7 @@ static bool sv_to_int(StringView s, int32_t *out) {
         (s.data[1] == 'b' || s.data[1] == 'B')) {
 
         int32_t total = 0;
-        size_t multiplier = 1;
+        int32_t multiplier = 1;
         for (size_t i = s.len - 1; i >= 2; i--) {
             int32_t digit = s.data[i] - '0';
             
@@ -137,7 +137,7 @@ static bool sv_to_int(StringView s, int32_t *out) {
     // Decimal.
     {
         int32_t total = 0;
-        size_t multiplier = 1;
+        int32_t multiplier = 1;
         for (size_t i = s.len - 1; i != -1; i--) {
             int32_t digit = s.data[i] - '0';
             
@@ -209,7 +209,6 @@ static Expr *call(Parser *parser) {
     if (!match(parser, TOK_IDENTIFIER))
         return primary(parser);
 
-    advance(parser);
     Token name = parser->previous;
 
     if (match(parser, TOK_LEFT_BRACK))
@@ -222,7 +221,7 @@ static Expr *call(Parser *parser) {
             VEC_PUSH(args, expression(parser), parser->arena);
         } while (match(parser, TOK_COMMA));
 
-        consume(parser, TOK_COMMA, SV("Expected ')' after argument list."));
+        consume(parser, TOK_RIGHT_PAREN, SV("Expected ')' after argument list."));
 
         ExprCall *expr;
         ALLOC_NODE(expr, name, ExprCall,
@@ -620,6 +619,15 @@ static Stmt *cmd_stmt(Parser *parser) {
 
 static Stmt *assign_stmt(Parser *parser) {
     Expr *lhs = expression(parser);
+    if (lhs->type == NODE_ExprCall &&
+        match(parser, TOK_SEMICOLON)) {
+
+        StmtExpr *stmt;
+        ALLOC_NODE(stmt, lhs->loc, StmtExpr,
+            (StmtExpr){ .expr = lhs });
+        return (Stmt *)stmt;
+    }
+
     consume(parser, TOK_EQUAL, SV("Expected '='."));
     Token tok = parser->previous;
     Expr *rhs = expression(parser);
@@ -722,7 +730,83 @@ static Stmt *function_decl(Parser *parser) {
 }
 
 static VEC_PTR_Stmt sm_body(Parser *parser) {
-    
+    VEC_PTR_Stmt stmts;
+    VEC_INIT(stmts);
+
+    // Declarations.
+    while (match(parser, TOK_DECL)) {
+        consume(parser, TOK_LEFT_BRACE, SV("Expected '{' before decl type."));
+        
+        Token decl_type = parser->current;
+        if (!match(parser, TOK_ANY) &&
+            !match(parser, TOK_ANY_CALL) &&
+            !match(parser, TOK_ANY_ARGS)) {
+            
+            error_current(parser, SV("Unexpected decl type."));
+        }
+        decl_type = parser->previous;
+
+        consume(parser, TOK_RIGHT_BRACE, SV("Expected '}' after decl type."));
+
+        consume(parser, TOK_IDENTIFIER, SV("Expected decl name."));
+        Token loc = parser->previous;
+
+        consume(parser, TOK_SEMICOLON, SV("Expected ';' after decl."));
+        
+        StmtVarDecl *stmt;
+        ALLOC_NODE(stmt, loc, StmtVarDecl,
+            (StmtVarDecl){ .type = decl_type, .name = loc.text, });
+
+        VEC_PUSH(stmts, (Stmt *)stmt, parser->arena);
+    }
+
+    // States.
+    while (match(parser, TOK_IDENTIFIER)) {
+        Token state_loc = parser->previous;
+        consume(parser, TOK_COLON, SV("Expected colon after state name."));
+
+        VEC_PTR_ExprSMMatch matches;
+        VEC_INIT(matches);
+
+        do {
+            consume(parser, TOK_LEFT_BRACE, SV("Expected '{' before state rule."));
+            Token loc = parser->previous;
+            Expr *to_match = expression(parser);
+
+            consume(parser, TOK_RIGHT_BRACE, SV("Expected '}' after pattern."));
+            consume(parser, TOK_SM_ARROW, SV("Expected '==>' after pattern."));
+            
+            ExprSMMatch *expr;
+            if (match(parser, TOK_LEFT_BRACE)) {
+                VEC_PTR_Stmt action = block(parser);
+
+                ALLOC_NODE(expr, loc, ExprSMMatch,
+                    (ExprSMMatch){ .expr_pattern = to_match,
+                        .next_state = SV(""), .action = action, });
+            } else {
+                consume(parser, TOK_IDENTIFIER, SV("Expected state name."));
+                
+                ALLOC_NODE(expr, loc, ExprSMMatch,
+                    (ExprSMMatch){ .expr_pattern = to_match,
+                        .next_state = parser->previous.text, });
+            }
+            VEC_PUSH(matches, expr, parser->arena);   
+        
+        } while (match(parser, TOK_PIPE));
+
+        consume(parser, TOK_SEMICOLON, SV("Expected ';' after state rule."));
+
+
+        StmtSMState *stmt;
+        ALLOC_NODE(stmt, state_loc, StmtSMState,
+            (StmtSMState){ .name = state_loc.text, .matches = matches, });
+        
+        VEC_PUSH(stmts, (Stmt *)stmt, parser->arena);
+    }
+
+    consume(parser, TOK_RIGHT_BRACE, SV("Expected '}' after SM body."));
+
+    return stmts;
 }
 
 static Stmt *sm_decl(Parser *parser) {
@@ -733,7 +817,7 @@ static Stmt *sm_decl(Parser *parser) {
     consume(parser, TOK_IDENTIFIER, SV("Expected SM name."));
     Token loc = parser->previous;
 
-    consume(parser, TOK_LEFT_BRACE, SV("Expected '{' before function body."));
+    consume(parser, TOK_LEFT_BRACE, SV("Expected '{' before SM body."));
     VEC_PTR_Stmt body = sm_body(parser);
 
     StmtSMDecl *stmt;

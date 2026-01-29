@@ -4,7 +4,7 @@ MAINS := main.c test.c
 
 release: wodc.exe
 
-debug: CFLAGS = /Zi /Wall /wd5045 /wd4820 /wd4061 /wd4668
+debug: CFLAGS = /Zi /Wall /wd5045 /wd4820 /wd4061 /wd4668 /wd4201
 debug: wodc.exe
 
 wodc.exe: $(HEADERS) $(SOURCES)

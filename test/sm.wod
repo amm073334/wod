@@ -1,0 +1,10 @@
+sm flow_insensitive check_assert {
+    decl { any } expr;
+    decl { any_call } any_fcall;
+    decl { any_args } args;
+
+    start: { assert(expr) } ==> test_state;
+
+    test_state:
+        { any_fcall(args) } ==> { err("function call"); } ;
+}

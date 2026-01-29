@@ -1,8 +1,7 @@
 #ifndef WOD_SM_H_
 #define WOD_SM_H_
 
-#include "sv.h"
-#include "memory.h"
+#include "common.h"
 
 bool run_sm_checker(StringView path, Arena *arena);
 
