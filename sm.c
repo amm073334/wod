@@ -2,6 +2,7 @@
 
 #include "sm.h"
 #include "parser.h"
+#include "environment.h"
 
 static char *alloc_source(StringView path, Arena *arena) {
     char *path_cstr = arena_alloc(arena, path.len + 1);
@@ -41,6 +42,9 @@ static char *alloc_source(StringView path, Arena *arena) {
 }
 
 static bool run_sm(VEC_PTR_Stmt *ast, StmtSMDecl *sm) {
+    printf(SV_FMT, SV_FMT_VAL(sm->name));
+
+    Environment env;
     return true;
 }
 

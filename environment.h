@@ -11,6 +11,10 @@ typedef enum {
     TYPE_FUNC,
     TYPE_CDB,
     TYPE_MODULE,
+
+    TYPE_SM_ANY,
+    TYPE_SM_ANY_CALL,
+    TYPE_SM_ANY_ARGS,
 } BaseType;
 
 typedef struct WodType WodType;

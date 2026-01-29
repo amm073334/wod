@@ -461,13 +461,12 @@ static Stmt *break_stmt(Parser *parser) {
 
 static Stmt *var_decl(Parser *parser, bool parse_initializer) {
     bool is_const = false;
-    if (parser->previous.type == TOK_CONST) {
+    if (match(parser, TOK_CONST)) {
         is_const = true;
         advance(parser);
     }
 
-    if (parser->previous.type != TOK_INT &&
-        parser->previous.type != TOK_STR)
+    if (!match(parser, TOK_INT) && !match(parser, TOK_STR))
         error_current(parser, SV("Invalid declaration type."));
 
     Token var_type = parser->previous;
@@ -642,9 +641,9 @@ static Stmt *assign_stmt(Parser *parser) {
 
 static Stmt *declaration(Parser *parser) {
     if (parser->panic_mode) synchronize(parser);
-    if (match(parser, TOK_INT) || 
-        match(parser, TOK_STR) ||
-        match(parser, TOK_CONST)) {
+    if (check(parser, TOK_INT) || 
+        check(parser, TOK_STR) ||
+        check(parser, TOK_CONST)) {
 
         Stmt *stmt = var_decl(parser, true);
         consume(parser, TOK_SEMICOLON, SV("Expected ';' after declaration."));

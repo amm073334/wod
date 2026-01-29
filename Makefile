@@ -18,5 +18,7 @@ clean:
 	@ if exist build rmdir /s /q build
 	@ if exist *.obj del *.obj
 	@ if exist *.exe del *.exe
+	@ if exist *.pdb del *.pdb
+	@ if exist *.ilk del *.ilk
 
 .PHONY: clean debug release

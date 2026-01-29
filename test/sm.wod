@@ -1,3 +1,7 @@
+void assert(int x) {
+    int asdf = 5;
+}
+
 sm flow_insensitive check_assert {
     decl { any } expr;
     decl { any_call } any_fcall;
