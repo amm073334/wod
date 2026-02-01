@@ -82,6 +82,7 @@ static void synchronize(Parser *parser) {
             case TOK_FOR:
             case TOK_WHILE:
             case TOK_RETURN:
+            case TOK_SM:
                 return;
             default:
                 ;

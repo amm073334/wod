@@ -111,6 +111,9 @@ static Token error_token(Lexer *lexer, const char *message) {
 }
 
 static Token string(Lexer *lexer) {
+    // Skip start quote.
+    lexer->start = lexer->current;
+
     while (peek(lexer) != '"' && !is_at_end(lexer)) {
         if (peek(lexer) == '\n')
             return error_token(lexer, "Unterminated string.");
@@ -121,10 +124,13 @@ static Token string(Lexer *lexer) {
     if (is_at_end(lexer))
         return error_token(lexer, "Unterminated string.");
 
+
+    Token tok = make_token(lexer, TOK_STRING);
+
     // Move past end quote.
     advance(lexer);
 
-    return make_token(lexer, TOK_STRING);
+    return tok;
 }
 
 static TokenType identifier_type(Lexer *lexer) {

@@ -11,6 +11,7 @@
 #define ARRLEN(arr) (sizeof(arr) / sizeof(arr[0]))
 
 #define UNREACHABLE assert(false)
+#define UNIMPLEMENTED assert(false)
 
 VEC_DEF(int32_t);
 VEC_DEF(StringView);
