@@ -12,6 +12,8 @@ typedef struct {
     Environment env;
     StmtSMState *state;
     StmtSMDecl *sm;
+
+    StringView file_path;
 } SMChecker;
 
 static char *alloc_source(StringView path, Arena *arena) {
@@ -132,10 +134,10 @@ static void sm_error(SMChecker *smc, Token *tok, VEC_PTR_Stmt action) {
         if (sv_equals(ec->name, SV("err"))) {
             if (ec->args.count == 1 
                 && ec->args.at[0]->type == NODE_ExprStrLit) {
-                error(smc->source, tok, 
+                error(smc->file_path, smc->source, tok, 
                     ((ExprStrLit *)ec->args.at[0])->value);
             } else {
-                error(smc->source, tok, SV("Error."));
+                error(smc->file_path, smc->source, tok, SV("Error."));
             }
             return;                
         }
@@ -226,7 +228,7 @@ static bool run_sm(SMChecker *smc, VEC_PTR_Stmt *ast, StmtSMDecl *sm) {
 
         if (!sym) {
             failed = true;
-            error(smc->source, &decl->base.loc,
+            error(smc->file_path, smc->source, &decl->base.loc,
                 SV("Failed to insert declaration."));
         }
     }
@@ -245,7 +247,7 @@ static bool run_sm(SMChecker *smc, VEC_PTR_Stmt *ast, StmtSMDecl *sm) {
 
         if (!sym) {
             failed = true;
-            error(smc->source, &state->base.loc,
+            error(smc->file_path, smc->source, &state->base.loc,
                 SV("Failed to insert state."));
         }
     }
@@ -259,12 +261,13 @@ static bool run_sm(SMChecker *smc, VEC_PTR_Stmt *ast, StmtSMDecl *sm) {
 
 bool run_sm_checker(StringView path, Arena *arena) {
     char *source = alloc_source(path, arena);
-    VEC_PTR_Stmt *ast = generate_ast(source, arena);
+    VEC_PTR_Stmt *ast = generate_ast(path, source, arena);
     if (!ast) return false;
 
     SMChecker smc;
     smc.source = source;
     smc.arena = arena;
+    smc.file_path = path;
 
     bool failed = false;
     for (size_t i = 0; i < ast->count; i++) {

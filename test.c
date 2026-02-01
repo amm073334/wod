@@ -3,13 +3,9 @@
 
 #include "common.h"
 
-static const char *tests[] = {
-    // "fail_0.wod",
-    // "fail_nomain.wod",
-    // "fail_ret_mismatch.wod",
-    "sm.wod",
-    NULL
-};
+#define C_RED "\x1b[31m"
+#define C_GRN "\x1b[32m"
+#define C_RESET "\x1b[m"
 
 static bool starts_with(const char *str, const char *substr) {
     for (size_t i = 0; substr[i] != '\0'; i++) {
@@ -19,31 +15,29 @@ static bool starts_with(const char *str, const char *substr) {
     return true;
 }
 
-int main() {
+int main(int argc, char **argv) {
+    if (argc != 2) exit(1);
+    
     Arena arena;
     arena_init(&arena);
 
-    for (size_t i = 0;; i++) {
-        if (!tests[i]) break;
+    StringView command = 
+        sv_concat(&arena, SV(".\\wodc.exe "), to_sv(argv[1]));
+    
+    command = sv_concat(&arena, command, to_sv(" 2> nul"));
 
-        StringView command = 
-            sv_concat(&arena, SV(".\\wodc.exe test\\"), to_sv(tests[i]));
-        
-        // command = sv_concat(&arena, command, to_sv(" 2> nul"));
-
-        if (sv_is_null(command)) {
-            fprintf(stderr, "Failed to allocate memory.");
-            exit(1);
-        }
-
-        bool expected = starts_with(tests[i], "fail");
-        bool ret = system(command.data);
-
-        if (ret != expected)
-            fprintf(stderr, "Failed: %s\n", tests[i]);
-        else
-            fprintf(stderr, "Passed: %s\n", tests[i]);
+    if (sv_is_null(command)) {
+        fprintf(stderr, "Failed to allocate memory.");
+        exit(1);
     }
+
+    bool expected = starts_with(argv[1], "test/fail");
+    bool ret = system(command.data);
+
+    if (ret != expected)
+        fprintf(stderr, C_RED "Failed: %s\n" C_RESET, argv[1]);
+    else
+        fprintf(stderr, C_GRN "Passed: %s\n" C_RESET, argv[1]);
     
     arena_free(&arena);
     return 0;

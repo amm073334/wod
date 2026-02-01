@@ -19,6 +19,7 @@
 typedef struct {
     Lexer lexer;
     const char *source;
+    StringView file_path;
     Arena *arena;
     Token previous;
     Token current;
@@ -31,7 +32,7 @@ static void parse_error(Parser *parser, Token *token, StringView message) {
     parser->panic_mode = true;
     parser->had_error = true;
 
-    error(parser->source, token, message);
+    error(parser->file_path, parser->source, token, message);
 }
 
 static void error_previous(Parser *parser, StringView message) {
@@ -619,7 +620,7 @@ static Stmt *cmd_stmt(Parser *parser) {
 
 static Stmt *assign_stmt(Parser *parser) {
     Expr *lhs = expression(parser);
-    if (lhs->type == NODE_ExprCall &&
+    if (lhs && lhs->type == NODE_ExprCall &&
         match(parser, TOK_SEMICOLON)) {
 
         StmtExpr *stmt;
@@ -849,7 +850,7 @@ static Stmt *top_decl(Parser *parser) {
     return NULL;
 }
 
-VEC_PTR_Stmt *generate_ast(const char *source, Arena *arena) {
+VEC_PTR_Stmt *generate_ast(StringView file_path, const char *source, Arena *arena) {
     Parser parser;
     lexer_init(&parser.lexer, source);
 
@@ -858,6 +859,7 @@ VEC_PTR_Stmt *generate_ast(const char *source, Arena *arena) {
 
     parser.arena = arena;
     parser.source = source;
+    parser.file_path = file_path;
 
     VEC_PTR_Stmt *stmts = arena_alloc(arena, sizeof(VEC_PTR_Stmt));
     if (!stmts) {

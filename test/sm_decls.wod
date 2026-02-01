@@ -6,11 +6,17 @@ void turn_off() {}
 void main() {
     turn_on();
     turn_off();
+    turn_on();
+    turn_off();
 
     exit();
 }
 
 sm flow_insensitive on_off {
+    decl { any } expr;
+    decl { any_call } any_fcall;
+    decl { any_args } args;
+
     off:
         { turn_on() } ==> on
         | { turn_off() } ==> { err("double off"); }

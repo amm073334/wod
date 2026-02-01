@@ -11,6 +11,7 @@ typedef struct {
     int32_t function_offset;
     Arena *arena;
     const char *source;
+    StringView file_path;
     bool had_error;
 } Typechecker;
 
@@ -28,7 +29,7 @@ static void close_scope(Typechecker *tc) {
 
 static void tc_error(Typechecker *tc, Token *token, StringView message) {
     tc->had_error = true;
-    error(tc->source, token, message);
+    error(tc->file_path, tc->source, token, message);
 }
 
 static void globals() {
@@ -74,7 +75,7 @@ static char *alloc_source(StringView path, Arena *arena) {
 
 static Environment *typecheck_file(Typechecker *typechecker, StringView path, bool is_main_file, Arena *arena) {
     char *source = alloc_source(path, arena);
-    VEC_PTR_Stmt *ast = generate_ast(source, arena);
+    VEC_PTR_Stmt *ast = generate_ast(path, source, arena);
     if (!ast) return NULL;
     
     Environment imports;

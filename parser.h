@@ -210,6 +210,6 @@ typedef struct {
     VEC_PTR_ExprSMMatch matches;
 } StmtSMState;
 
-VEC_PTR_Stmt *generate_ast(const char *source, Arena *arena);
+VEC_PTR_Stmt *generate_ast(StringView file_path, const char *source, Arena *arena);
 
 #endif // WOD_PARSER_H_

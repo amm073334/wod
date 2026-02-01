@@ -3,6 +3,6 @@
 
 #include "lexer.h"
 
-void error(const char *source, Token *token, StringView message);
+void error(StringView file_path, const char *source, Token *token, StringView message);
 
 #endif
