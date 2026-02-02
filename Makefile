@@ -14,7 +14,7 @@ wodc.exe: $(HEADERS) $(SOURCES)
 	@ cl $(CFLAGS) /Fobuild\ main.c $(filter-out $(MAINS),$(SOURCES)) /link /out:$@
 
 test: wodc.exe test.c sv.c memory.c
-	@ cl test.c sv.c memory.c
+	@ cl test.c sv.c memory.c > nul
 	@ -$(foreach test,$(TESTS),.\test.exe $(test)&)
 
 clean:

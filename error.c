@@ -2,7 +2,7 @@
 
 #include "error.h"
 
-void error(StringView file, const char *source, Token *token, StringView message) {
+void error(StringView file_path, const char *source, Token *token, StringView message) {
     if (!token) {
         fprintf(stderr, "[Error] " SV_FMT "\n\n", SV_FMT_VAL(message));
         return;
@@ -22,7 +22,7 @@ void error(StringView file, const char *source, Token *token, StringView message
         line_end++;
 
     fprintf(stderr, "[Error] line: %zu, col: %zu, " SV_FMT "\n",
-        token->line, token->col, SV_FMT_VAL(file));
+        token->line, token->col, SV_FMT_VAL(file_path));
     fprintf(stderr, "%6zu | %.*s\n", token->line,
         (int)(line_end - line_start), line_start);
     fprintf(stderr, "%*s", 8 + (int)token->col, "");

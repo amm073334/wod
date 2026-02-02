@@ -54,6 +54,14 @@ static char *alloc_source(StringView path, Arena *arena) {
 }
 
 static bool expr_match(SMChecker *smc, Expr *expr, Expr *pattern) {
+    if (pattern->type == NODE_ExprVar) {
+        ExprVar *pat = (ExprVar *)pattern;
+        Symbol *sym = env_find(&smc->env, pat->name);
+        if (sym && sym->type.basetype == TYPE_SM_ANY) {
+            return true;
+        }
+    }
+    
     if (expr->type != pattern->type) return false;
 
     switch (expr->type) {
@@ -70,8 +78,32 @@ static bool expr_match(SMChecker *smc, Expr *expr, Expr *pattern) {
         case NODE_ExprCall: {
             ExprCall *exp = (ExprCall *)expr;
             ExprCall *pat = (ExprCall *)pattern;
-            if (!sv_equals(exp->name, pat->name))
-                return false;
+
+            // Unconditionally get past this check if pattern is
+            // of type any_call.
+            {
+                Symbol *sym = env_find(&smc->env, pat->name);
+                if (!(sym && sym->type.basetype == TYPE_SM_ANY_CALL)
+                    && !sv_equals(exp->name, pat->name)) {
+    
+                    return false;
+                }
+            }
+
+            // Unconditionally get past this check if call has
+            // exactly one argument that is of type any_args.
+            {
+                if (pat->args.count == 1
+                    && pat->args.at[0]->type == NODE_ExprVar) {
+
+                    Symbol *sym =
+                        env_find(&smc->env, ((ExprVar *)pat->args.at[0])->name);
+
+                    if (sym && sym->type.basetype == TYPE_SM_ANY_ARGS)
+                        return true;
+                }
+            }
+
             if (exp->args.count != pat->args.count)
                 return false;
             for (size_t i = 0; i < exp->args.count; i++) {
@@ -91,10 +123,10 @@ static bool expr_match(SMChecker *smc, Expr *expr, Expr *pattern) {
     return false;
 }
 
-static bool visit_Expr(SMChecker *smc, Expr *stmt);
+static bool visit_Expr(SMChecker *smc, Expr *expr);
 static bool visit_Stmt(SMChecker *smc, Stmt *stmt);
 
-static bool visit_param(SMChecker *smc, StmtVarDecl *param) {
+static bool visit_args(SMChecker *smc, StmtVarDecl *param) {
     return false;
 }
 
@@ -117,44 +149,77 @@ static bool visit_StmtExpr(SMChecker *smc, StmtExpr *stmt) {
     return visit_Expr(smc, stmt->expr);
 }
 
-static void sm_error(SMChecker *smc, Token *tok, VEC_PTR_Stmt action) {
-    for (size_t i = 0; i < action.count; i++) {
-        if (action.at[i]->type != NODE_StmtExpr) {
-            fprintf(stderr, "Unknown action.\n");
-            return;
+static bool sm_func_action(SMChecker *smc, Token *tok, ExprCall *action) {
+    if (sv_equals(action->name, SV("err"))) {
+        if (action->args.count == 1 
+            && action->args.at[0]->type == NODE_ExprStrLit) {
+            
+            error(smc->file_path, smc->source, tok, 
+                ((ExprStrLit *)action->args.at[0])->value);
+        } else {
+            error(smc->file_path, smc->source, &action->base.loc,
+                SV("Bad action."));
+        }
+        return false;
+    } else if (sv_equals(action->name, SV("mgk_expr_recurse"))) {
+        if (!(action->args.count == 2
+            && action->args.at[0]->type == NODE_ExprVar
+            && action->args.at[1]->type == NODE_ExprVar)) {
+
+            
+            error(smc->file_path, smc->source, &action->base.loc,
+                SV("Bad action."));
+            return false;
         }
 
-        StmtExpr *se = ((StmtExpr *)action.at[i]);
-        if (se->expr->type != NODE_ExprCall) {
-            fprintf(stderr, "Unknown action.\n");
-            return;
+        StringView state = ((ExprVar *)action->args.at[1])->name;
+        Symbol *sym = env_find(&smc->env, state);
+
+        if (!sym) {
+            error(smc->file_path, smc->source, &action->base.loc,
+                SV("Bad action."));
+            return false;
         }
 
-        ExprCall *ec = (ExprCall *)se->expr;
-        if (sv_equals(ec->name, SV("err"))) {
-            if (ec->args.count == 1 
-                && ec->args.at[0]->type == NODE_ExprStrLit) {
-                error(smc->file_path, smc->source, tok, 
-                    ((ExprStrLit *)ec->args.at[0])->value);
-            } else {
-                error(smc->file_path, smc->source, tok, SV("Error."));
-            }
-            return;                
-        }
+        SMChecker smc_copy = *smc;
+        smc_copy.state = (StmtSMState *)smc->sm->body.at[sym->offset];
+
+        // TODO: this needs to visit the actual expr, not the word "expr"
+        return visit_Expr(&smc_copy, (Expr *)action->args.at[0]);
+    } else {
+        fprintf(stderr, "Unknown action.\n");
+        return false;
     }
-    fprintf(stderr, "Unknown action.\n");
-    return;
 }
 
-static bool visit_Expr(SMChecker *smc, Expr *expr) {
+static bool sm_action(SMChecker *smc, Token *tok, VEC_PTR_Stmt action) {
+    assert(action.count == 1);
+    
+    if (action.at[0]->type != NODE_StmtExpr) {
+        fprintf(stderr, "Unknown action.\n");
+        return false;
+    }
+
+    StmtExpr *se = ((StmtExpr *)action.at[0]);
+    if (se->expr->type != NODE_ExprCall) {
+        fprintf(stderr, "Unknown action.\n");
+        return false;
+    }
+
+    return sm_func_action(smc, tok, (ExprCall *)se->expr);
+}
+
+// Returns false if error, true if successful or no relevant states.
+static bool transition(SMChecker *smc, Expr *expr) {
     VEC_PTR_ExprSMMatch matches = smc->state->matches;
     for (size_t i = 0; i < matches.count; i++) {
         if (!expr_match(smc, expr, matches.at[i]->expr_pattern))
             continue;
         
         if (sv_equals(matches.at[i]->next_state, SV(""))) {
-            sm_error(smc, &expr->loc, matches.at[i]->action);
-            return false;
+            if (!sm_action(smc, &expr->loc, matches.at[i]->action))
+                return false;
+            else continue;
         }
 
         Symbol *sym = env_find(&smc->env, matches.at[i]->next_state);
@@ -164,6 +229,46 @@ static bool visit_Expr(SMChecker *smc, Expr *expr) {
         return true;
     }
     return true;
+}
+
+static bool visit_Expr(SMChecker *smc, Expr *expr) {
+    if (!transition(smc, expr)) return false;
+
+    bool success = true;
+    switch (expr->type) {
+        case NODE_ExprVar:
+            UNIMPLEMENTED;
+        case NODE_ExprArray:
+            UNIMPLEMENTED;
+        case NODE_ExprDB:
+            UNIMPLEMENTED;
+        case NODE_ExprBinary: {
+            ExprBinary *e = (ExprBinary *)expr;
+            success = success && visit_Expr(smc, e->left);
+            success = success && visit_Expr(smc, e->right);
+            return success;
+        }
+        case NODE_ExprUnary: {
+            ExprUnary *e = (ExprUnary *)expr;
+            success = success && visit_Expr(smc, e->right);
+            return success;
+        }
+        case NODE_ExprCall: {
+            ExprCall *e = (ExprCall *)expr;
+            for (size_t i = 0; i < e->args.count; i++)
+                success = success && visit_Expr(smc, e->args.at[i]);
+            return success;
+        }
+        case NODE_ExprIntLit:
+            return success;
+        case NODE_ExprStrLit:
+            return success;
+
+        case NODE_ExprSMMatch:
+        default:
+            UNREACHABLE;
+    }
+    return false;
 }
 
 static bool visit_Stmt(SMChecker *smc, Stmt *stmt) {
@@ -219,7 +324,7 @@ static bool run_sm(SMChecker *smc, VEC_PTR_Stmt *ast, StmtSMDecl *sm) {
     size_t i = 0;
     
     for (; i < sm->body.count
-           && sm->body.at[i]->type == NODE_StmtSMDecl; i++) {
+           && sm->body.at[i]->type == NODE_StmtVarDecl; i++) {
         StmtVarDecl *decl = (StmtVarDecl *)sm->body.at[i];
 
         assert(decl->type.type < ARRLEN(TYPE_TABLE));
