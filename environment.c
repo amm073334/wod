@@ -21,14 +21,14 @@ Environment *env_new(Environment *parent, Arena *arena) {
     return env;
 }
 
-Symbol *env_insert(Environment *env, StringView name, BaseType basetype, int32_t offset, Arena *arena) {
+Symbol *env_insert(Environment *env, StringView name, BaseType basetype, void *value, Arena *arena) {
     Symbol *entry = env_find(env, name);
     
     if (entry) return NULL;
 
     Symbol sym;
     sym.name = name;
-    sym.offset = offset;
+    sym.value = value;
     sym.type.basetype = basetype;
 
     VEC_PUSH(env->symbols, sym, arena);

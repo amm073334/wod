@@ -1,0 +1,10 @@
+void main() {
+    assert(1 * 2 + 1);
+    assert(123 + 123);
+}
+
+sm flow_insensitive check_assert {
+    decl { any } expr;
+
+    start: { expr + expr } ==> { err("added expr to self"); };
+}

@@ -58,7 +58,12 @@ static bool expr_match(SMChecker *smc, Expr *expr, Expr *pattern) {
         ExprVar *pat = (ExprVar *)pattern;
         Symbol *sym = env_find(&smc->env, pat->name);
         if (sym && sym->type.basetype == TYPE_SM_ANY) {
-            return true;
+            if (sym->value == NULL) {
+                sym->value = expr;
+                return true;
+            } else {
+                return expr_match(smc, expr, (Expr *)sym->value);
+            }
         }
     }
     
@@ -71,27 +76,36 @@ static bool expr_match(SMChecker *smc, Expr *expr, Expr *pattern) {
             UNIMPLEMENTED;
         case NODE_ExprDB:
             UNIMPLEMENTED;
-        case NODE_ExprBinary:
-            UNIMPLEMENTED;
+        case NODE_ExprBinary: {
+            ExprBinary *exp = (ExprBinary *)expr;
+            ExprBinary *pat = (ExprBinary *)pattern;
+
+            return exp->op.type == pat->op.type
+                && expr_match(smc, exp->left, pat->left)
+                && expr_match(smc, exp->right, pat->right);
+        }
         case NODE_ExprUnary:
             UNIMPLEMENTED;
         case NODE_ExprCall: {
             ExprCall *exp = (ExprCall *)expr;
             ExprCall *pat = (ExprCall *)pattern;
 
-            // Unconditionally get past this check if pattern is
-            // of type any_call.
+            // Handle any_call.
             {
                 Symbol *sym = env_find(&smc->env, pat->name);
-                if (!(sym && sym->type.basetype == TYPE_SM_ANY_CALL)
-                    && !sv_equals(exp->name, pat->name)) {
-    
+
+                // NULL value means variable hasn't been bound yet.
+                if (sym && sym->type.basetype == TYPE_SM_ANY_CALL) {
+                    if (sym->value == NULL) {
+                        sym->value = exp;
+                    } else {
+                        return expr_match(smc, expr, (Expr *)sym->value);
+                    }
+                } else if (!sv_equals(exp->name, pat->name))
                     return false;
-                }
             }
 
-            // Unconditionally get past this check if call has
-            // exactly one argument that is of type any_args.
+            // Handle any_args; only work if call has exactly one arg.
             {
                 if (pat->args.count == 1
                     && pat->args.at[0]->type == NODE_ExprVar) {
@@ -99,8 +113,18 @@ static bool expr_match(SMChecker *smc, Expr *expr, Expr *pattern) {
                     Symbol *sym =
                         env_find(&smc->env, ((ExprVar *)pat->args.at[0])->name);
 
-                    if (sym && sym->type.basetype == TYPE_SM_ANY_ARGS)
-                        return true;
+                    if (sym && sym->type.basetype == TYPE_SM_ANY_ARGS) {
+                        if (sym->value == NULL) {
+                            // Since there is no AST node for params, bind the
+                            // variable to the call instead.
+                            sym->value = exp;
+                            return true;
+                        } else {
+                            // If args already bound, then fall through to
+                            // check that all args match.
+                            pat = (ExprCall *)sym->value;
+                        }
+                    }
                 }
             }
 
@@ -112,12 +136,16 @@ static bool expr_match(SMChecker *smc, Expr *expr, Expr *pattern) {
             }
             return true;
         }
-        case NODE_ExprIntLit:
-            UNIMPLEMENTED;
+        case NODE_ExprIntLit: {
+            ExprIntLit *exp = (ExprIntLit *)expr;
+            ExprIntLit *pat = (ExprIntLit *)pattern;
+
+            return exp->value == pat->value;
+        }
         case NODE_ExprStrLit:
             UNIMPLEMENTED;
+
         case NODE_ExprSMMatch:
-            UNIMPLEMENTED;
         default: UNREACHABLE;
     }
     return false;
@@ -182,7 +210,7 @@ static bool sm_func_action(SMChecker *smc, Token *tok, ExprCall *action) {
         }
 
         SMChecker smc_copy = *smc;
-        smc_copy.state = (StmtSMState *)smc->sm->body.at[sym->offset];
+        smc_copy.state = (StmtSMState *)sym->value;
 
         // TODO: this needs to visit the actual expr, not the word "expr"
         return visit_Expr(&smc_copy, (Expr *)action->args.at[0]);
@@ -213,6 +241,14 @@ static bool sm_action(SMChecker *smc, Token *tok, VEC_PTR_Stmt action) {
 static bool transition(SMChecker *smc, Expr *expr) {
     VEC_PTR_ExprSMMatch matches = smc->state->matches;
     for (size_t i = 0; i < matches.count; i++) {
+        // Reset all bound variables before a transition is made.
+        // (A variable bound during one transition shouldn't persist to
+        //  other transitions, nor should it persist if the variable was
+        //  bound but the transition didn't match completely.)
+        for (size_t sym = 0; sym < smc->env.symbols.count; sym++) {
+            smc->env.symbols.at[sym].value = NULL;
+        }
+
         if (!expr_match(smc, expr, matches.at[i]->expr_pattern))
             continue;
         
@@ -225,7 +261,7 @@ static bool transition(SMChecker *smc, Expr *expr) {
         Symbol *sym = env_find(&smc->env, matches.at[i]->next_state);
         assert(sym && sym->type.basetype == TYPE_SM_STATE);
 
-        smc->state = (StmtSMState *)smc->sm->body.at[sym->offset];
+        smc->state = (StmtSMState *)sym->value;
         return true;
     }
     return true;
@@ -348,7 +384,7 @@ static bool run_sm(SMChecker *smc, VEC_PTR_Stmt *ast, StmtSMDecl *sm) {
         StmtSMState *state = (StmtSMState *)sm->body.at[i];
 
         Symbol *sym = env_insert(&smc->env, state->name,
-            TYPE_SM_STATE, i, smc->arena);
+            TYPE_SM_STATE, state, smc->arena);
 
         if (!sym) {
             failed = true;
