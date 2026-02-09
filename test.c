@@ -31,8 +31,8 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
-    bool expected = starts_with(argv[1], "test/fail");
-    bool ret = system(command.data);
+    int expected = starts_with(argv[1], "test/fail") ? 2 : 0;
+    int ret = system(command.data);
 
     if (ret != expected)
         fprintf(stderr, C_RED "Failed: %s\n" C_RESET, argv[1]);

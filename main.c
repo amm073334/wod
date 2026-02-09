@@ -62,5 +62,5 @@ int main(int argc, const char *argv[]) {
     // gd_write_dir(&gd, "build");
     arena_free(&arena);
 
-    return !success;
+    return success ? 0 : 2;
 }

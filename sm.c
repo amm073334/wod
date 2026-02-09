@@ -200,8 +200,8 @@ static bool sm_func_action(SMChecker *smc, Token *tok, ExprCall *action) {
             return false;
         }
 
-        StringView state = ((ExprVar *)action->args.at[1])->name;
-        Symbol *sym = env_find(&smc->env, state);
+        StringView state_name = ((ExprVar *)action->args.at[1])->name;
+        Symbol *sym = env_find(&smc->env, state_name);
 
         if (!sym) {
             error(smc->file_path, smc->source, &action->base.loc,
@@ -212,8 +212,10 @@ static bool sm_func_action(SMChecker *smc, Token *tok, ExprCall *action) {
         SMChecker smc_copy = *smc;
         smc_copy.state = (StmtSMState *)sym->value;
 
-        // TODO: this needs to visit the actual expr, not the word "expr"
-        return visit_Expr(&smc_copy, (Expr *)action->args.at[0]);
+        Expr *next_node = (Expr *)env_find(&smc->env,
+            ((ExprVar *)action->args.at[0])->name)->value;
+
+        return visit_Expr(&smc_copy, next_node);
     } else {
         fprintf(stderr, "Unknown action.\n");
         return false;
@@ -246,7 +248,8 @@ static bool transition(SMChecker *smc, Expr *expr) {
         //  other transitions, nor should it persist if the variable was
         //  bound but the transition didn't match completely.)
         for (size_t sym = 0; sym < smc->env.symbols.count; sym++) {
-            smc->env.symbols.at[sym].value = NULL;
+            if (smc->env.symbols.at[sym].type.basetype != TYPE_SM_STATE)
+                smc->env.symbols.at[sym].value = NULL;
         }
 
         if (!expr_match(smc, expr, matches.at[i]->expr_pattern))
