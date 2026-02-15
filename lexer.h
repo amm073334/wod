@@ -43,6 +43,7 @@ typedef enum {
     TOK_SM, TOK_FLOW_INSENSITIVE, TOK_DECL, TOK_PAT, TOK_COLON,
     TOK_ANY, TOK_ANY_CALL, TOK_ANY_ARGS,
     TOK_SM_ARROW,
+    TOK_END_OF_PATH,
 
     TOK_ERROR, TOK_EOF
 } TokenType;
@@ -61,6 +62,7 @@ typedef struct {
     size_t col;
 } Lexer;
 
+char *alloc_source(StringView path, Arena *arena);
 void lexer_init(Lexer *lexer, const char *source);
 Token scan_token(Lexer *lexer);
 

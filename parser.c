@@ -770,11 +770,18 @@ static VEC_PTR_Stmt sm_body(Parser *parser) {
         VEC_INIT(matches);
 
         do {
-            consume(parser, TOK_LEFT_BRACE, SV("Expected '{' before state rule."));
-            Token loc = parser->previous;
-            Expr *to_match = expression(parser);
-
-            consume(parser, TOK_RIGHT_BRACE, SV("Expected '}' after pattern."));
+            Expr *to_match = NULL;
+            Token loc;
+            if (match(parser, TOK_END_OF_PATH)) {
+                ALLOC_NODE((ExprSMEndOfPath *)to_match,
+                    parser->previous, ExprSMEndOfPath, (ExprSMEndOfPath){0});
+            } else {
+                consume(parser, TOK_LEFT_BRACE, SV("Expected '{' before state rule."));
+                loc = parser->previous;
+                to_match = expression(parser);
+    
+                consume(parser, TOK_RIGHT_BRACE, SV("Expected '}' after pattern."));
+            }
             consume(parser, TOK_SM_ARROW, SV("Expected '==>' after pattern."));
             
             ExprSMMatch *expr;

@@ -15,6 +15,7 @@ typedef enum {
     NODE_ExprStrLit,
 
     NODE_ExprSMMatch,
+    NODE_ExprSMEndOfPath,
 } ExprType;
 
 typedef struct {
@@ -82,6 +83,10 @@ typedef struct {
 } ExprSMMatch;
 
 VEC_PTR_DEF(ExprSMMatch);
+
+typedef struct {
+    Expr base;
+} ExprSMEndOfPath;
 
 typedef enum {
     NODE_StmtImport,

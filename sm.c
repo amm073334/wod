@@ -16,43 +16,6 @@ typedef struct {
     StringView file_path;
 } SMChecker;
 
-static char *alloc_source(StringView path, Arena *arena) {
-    char *path_cstr = arena_alloc(arena, path.len + 1);
-    if (!path_cstr) {
-        fprintf(stderr, "Not enough memory to read '" SV_FMT "'.", SV_FMT_VAL(path));
-        exit(1);
-    }
-    memcpy(path_cstr, path.data, path.len);
-    path_cstr[path.len] = '\0';
-
-    FILE *file = fopen(path_cstr, "rb");
-    if (!file) {
-        fprintf(stderr, "Could not open file '%s'.", path_cstr);
-        exit(1);
-    }
-
-    fseek(file, 0L, SEEK_END);
-    size_t file_size = ftell(file);
-    rewind(file);
-
-    char *buf = arena_alloc(arena, file_size + 1);
-    if (!buf) {
-        fprintf(stderr, "Not enough memory to read '%s'.", path_cstr);
-        exit(1);
-    }
-
-    size_t n = fread(buf, sizeof(char), file_size, file);
-    if (n < file_size) {
-        fprintf(stderr, "Could not read '%s'.", path_cstr);
-        exit(1);
-    }
-
-    buf[n] = '\0';
-
-    fclose(file);
-    return buf;
-}
-
 static bool expr_match(SMChecker *smc, Expr *expr, Expr *pattern) {
     if (pattern->type == NODE_ExprVar) {
         ExprVar *pat = (ExprVar *)pattern;
@@ -310,6 +273,10 @@ static bool visit_Expr(SMChecker *smc, Expr *expr) {
     return false;
 }
 
+static bool split_SM(SMChecker *base_smc, Stmt *stmt) {
+
+}
+
 static bool visit_Stmt(SMChecker *smc, Stmt *stmt) {
     switch (stmt->type) {
         case NODE_StmtImport:
@@ -323,9 +290,25 @@ static bool visit_Stmt(SMChecker *smc, Stmt *stmt) {
         case NODE_StmtBlock:
             UNIMPLEMENTED;
         case NODE_StmtReturn:
+            if (!smc->sm->flow_insensitive)
+                
             UNIMPLEMENTED;
-        case NODE_StmtIf:
-            UNIMPLEMENTED;
+        case NODE_StmtIf: {
+            StmtIf *st = (StmtIf *)stmt;
+            bool res = visit_Expr(smc, st->condition);
+            if (smc->sm->flow_insensitive)
+                return res;
+
+            res &= visit_Stmt(smc, st->then_branch);
+            SMChecker smc_copy = *smc;
+
+            if (st->else_branch)
+                res &= visit_Stmt(&smc_copy, st->else_branch);
+
+            // TODO: this doesn't quite work: the smc copy is going
+            // to return after it visits the branch, when it needs
+            // to keep going after it visits the branch
+        }
         case NODE_StmtLoop:
             UNIMPLEMENTED;
         case NODE_StmtFor:

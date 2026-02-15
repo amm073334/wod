@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <string.h>
 
 #include "common.h"
@@ -35,6 +36,7 @@ static const Keyword keywords[] = {
     {.name = "any",              .type = TOK_ANY},
     {.name = "any_call",         .type = TOK_ANY_CALL},
     {.name = "any_args",         .type = TOK_ANY_ARGS},
+    {.name = "$end_of_path$",    .type = TOK_END_OF_PATH},
 };
 
 void lexer_init(Lexer *lexer, const char *source) {
@@ -288,4 +290,41 @@ Token scan_token(Lexer *lexer) {
     }
 
     return error_token(lexer, "Unexpected character.");
+}
+
+char *alloc_source(StringView path, Arena *arena) {
+    char *path_cstr = arena_alloc(arena, path.len + 1);
+    if (!path_cstr) {
+        fprintf(stderr, "Not enough memory to read '" SV_FMT "'.", SV_FMT_VAL(path));
+        exit(1);
+    }
+    memcpy(path_cstr, path.data, path.len);
+    path_cstr[path.len] = '\0';
+
+    FILE *file = fopen(path_cstr, "rb");
+    if (!file) {
+        fprintf(stderr, "Could not open file '%s'.", path_cstr);
+        exit(1);
+    }
+
+    fseek(file, 0L, SEEK_END);
+    size_t file_size = ftell(file);
+    rewind(file);
+
+    char *buf = arena_alloc(arena, file_size + 1);
+    if (!buf) {
+        fprintf(stderr, "Not enough memory to read '%s'.", path_cstr);
+        exit(1);
+    }
+
+    size_t n = fread(buf, sizeof(char), file_size, file);
+    if (n < file_size) {
+        fprintf(stderr, "Could not read '%s'.", path_cstr);
+        exit(1);
+    }
+
+    buf[n] = '\0';
+
+    fclose(file);
+    return buf;
 }
