@@ -318,6 +318,8 @@ static bool visit_Stmt(SMChecker *smc, Stmt *stmt) {
 
             if (st->else_branch)
                 res = res && visit_Stmt(smc, st->else_branch);
+            
+            return res;
         }
         case NODE_StmtLoop:
             UNIMPLEMENTED;
