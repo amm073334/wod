@@ -92,7 +92,8 @@ CFGNode *generate_cfg(VEC_PTR_Stmt *func_body, Arena *arena) {
     
     CFGNode *end = alloc_node(arena);
 
-    visit_Stmt(start, (Stmt *)&fake_block, end, arena);
+    CFGNode *last = visit_Stmt(start, (Stmt *)&fake_block, end, arena);
+    last->branch_a = end;
 
     return start;
 }
@@ -134,7 +135,7 @@ static StringView graph_gen(VEC_PTR_CFGNode *visited, CFGNode *parent, CFGNode *
         // Ideally we'd just prune that node since it does nothing, but
         // uhh pain.
         sv = transition(sv, parent->block.at[0]->loc.line,
-            9999, arena);
+            8888, arena);
         return sv;
     }
 
@@ -160,9 +161,6 @@ StringView generate_cfg_graph(CFGNode *start, Arena *arena) {
     VEC_PTR_CFGNode visited;
     VEC_INIT(visited);
     VEC_PUSH(visited, start, arena);
-
-    // sv = sv_concat(arena, sv, 
-    //     number_to_sv(start->block.at[0]->loc.line, arena));
 
     sv = graph_gen(&visited, start, start->branch_a, sv, arena);
     sv = graph_gen(&visited, start, start->branch_b, sv, arena);

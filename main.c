@@ -41,21 +41,22 @@ int main(int argc, const char *argv[]) {
     Arena arena;
     arena_init(&arena);
 
-    char *source = alloc_source(to_sv(argv[1]), &arena);
-    VEC_PTR_Stmt *ast = generate_ast(to_sv(argv[1]), source, &arena);
+    // char *source = alloc_source(to_sv(argv[1]), &arena);
+    // VEC_PTR_Stmt *ast = generate_ast(to_sv(argv[1]), source, &arena);
 
-    for (size_t i = 0; i < ast->count; i++) {
-        if (ast->at[i]->type == NODE_StmtFuncDecl) {
-            StmtFuncDecl *s = (StmtFuncDecl *)ast->at[i];
-            CFGNode *cfg = generate_cfg(&s->body, &arena);
-            StringView out = generate_cfg_graph(cfg, &arena);
-            printf(SV_FMT "\n", SV_FMT_VAL(out));
-        }
-    }
+    // for (size_t i = 0; i < ast->count; i++) {
+    //     if (ast->at[i]->type == NODE_StmtFuncDecl) {
+    //         StmtFuncDecl *s = (StmtFuncDecl *)ast->at[i];
+    //         CFGNode *cfg = generate_cfg(&s->body, &arena);
+    //         StringView out = generate_cfg_graph(cfg, &arena);
+    //         printf(SV_FMT "\n", SV_FMT_VAL(out));
+    //     }
+    // }
 
     // Environment *e = typecheck(to_sv(argv[1]), &arena);
     // if (!e) exit(1);
-    // bool success = run_sm_checker(to_sv(argv[1]), &arena);
+
+    bool success = run_sm_checker(to_sv(argv[1]), &arena);
 
     // Arena wl_arena;
     // arena_init(&wl_arena);
@@ -75,6 +76,6 @@ int main(int argc, const char *argv[]) {
     // gd_write_dir(&gd, "build");
     arena_free(&arena);
 
-    // return success ? 0 : 2;
-    return 0;
+    return success ? 0 : 2;
+    // return 0;
 }

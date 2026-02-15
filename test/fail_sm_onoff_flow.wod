@@ -3,7 +3,8 @@ void turn_off() {}
 
 void main() {
     turn_on();
-    if (1) return;
+    if (1)
+        return;
     turn_off();
 }
 
@@ -15,6 +16,6 @@ sm on_off {
     on:
         { turn_off() } ==> off
         | { turn_on() } ==> { err("double on"); }
-        | $end_of_path$ ==> { err("don't forget to turn off the light"); }
+        | __end_of_path ==> { err("don't forget to turn off the light"); }
         ;
 }

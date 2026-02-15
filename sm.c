@@ -2,6 +2,7 @@
 
 #include "sm.h"
 #include "parser.h"
+#include "cfg.h"
 #include "error.h"
 #include "environment.h"
 
@@ -12,6 +13,12 @@ typedef struct {
     Environment env;
     StmtSMState *state;
     StmtSMDecl *sm;
+
+    CFGNode *current_node;
+
+    // Kind of a hack. Stores the most-recently seen
+    // token, for error reporting.
+    Token last;
 
     StringView file_path;
 } SMChecker;
@@ -107,6 +114,9 @@ static bool expr_match(SMChecker *smc, Expr *expr, Expr *pattern) {
         }
         case NODE_ExprStrLit:
             UNIMPLEMENTED;
+
+        case NODE_ExprSMEndOfPath:
+            return true;
 
         case NODE_ExprSMMatch:
         default: UNREACHABLE;
@@ -273,10 +283,6 @@ static bool visit_Expr(SMChecker *smc, Expr *expr) {
     return false;
 }
 
-static bool split_SM(SMChecker *base_smc, Stmt *stmt) {
-
-}
-
 static bool visit_Stmt(SMChecker *smc, Stmt *stmt) {
     switch (stmt->type) {
         case NODE_StmtImport:
@@ -287,27 +293,31 @@ static bool visit_Stmt(SMChecker *smc, Stmt *stmt) {
             UNIMPLEMENTED;
         case NODE_StmtFuncDecl:
             return visit_StmtFuncDecl(smc, (StmtFuncDecl *)stmt);
-        case NODE_StmtBlock:
+        case NODE_StmtBlock: {
+            bool success = true;
+            StmtBlock *st = (StmtBlock *)stmt;
+            for (size_t i = 0; i < st->stmts.count; i++) {
+                success = success && visit_Stmt(smc, st->stmts.at[i]);
+            }
+            return success;
+        }
+            
             UNIMPLEMENTED;
         case NODE_StmtReturn:
-            if (!smc->sm->flow_insensitive)
-                
-            UNIMPLEMENTED;
+            return true;
         case NODE_StmtIf: {
             StmtIf *st = (StmtIf *)stmt;
             bool res = visit_Expr(smc, st->condition);
-            if (smc->sm->flow_insensitive)
+
+            // If flow-sensitive, only need to visit condition here;
+            // checking the two paths will be left up to the CFG walker.
+            if (!smc->sm->flow_insensitive)
                 return res;
 
-            res &= visit_Stmt(smc, st->then_branch);
-            SMChecker smc_copy = *smc;
+            res = res && visit_Stmt(smc, st->then_branch);
 
             if (st->else_branch)
-                res &= visit_Stmt(&smc_copy, st->else_branch);
-
-            // TODO: this doesn't quite work: the smc copy is going
-            // to return after it visits the branch, when it needs
-            // to keep going after it visits the branch
+                res = res && visit_Stmt(smc, st->else_branch);
         }
         case NODE_StmtLoop:
             UNIMPLEMENTED;
@@ -337,6 +347,34 @@ static const int TYPE_TABLE[] = {
     [TOK_ANY_ARGS] = TYPE_SM_ANY_ARGS,
     [TOK_ANY_CALL] = TYPE_SM_ANY_CALL,
 };
+
+static bool visit_cfg_node(SMChecker *smc, CFGNode *node) {
+    bool success = true;
+    for (size_t i = 0; i < node->block.count; i++) {
+        smc->last = node->block.at[i]->loc;
+        if (!visit_Stmt(smc, node->block.at[i]))
+            success = false;
+    }
+
+    if (!node->branch_a) {
+        return success && transition(smc, 
+            (Expr*)&(ExprSMEndOfPath){ 
+            .base.loc = smc->last,
+            .base.type = NODE_ExprSMEndOfPath
+        });
+    }
+    
+    // Don't split if there's only one branch.
+    if (!node->branch_b) {
+        return success 
+            && visit_cfg_node(smc, node->branch_a);
+    }
+
+    SMChecker smc_copy = *smc;
+    return success
+        && visit_cfg_node(smc, node->branch_a)
+        && visit_cfg_node(&smc_copy, node->branch_b);
+}
 
 static bool run_sm(SMChecker *smc, VEC_PTR_Stmt *ast, StmtSMDecl *sm) {
     env_init(&smc->env);
@@ -380,10 +418,24 @@ static bool run_sm(SMChecker *smc, VEC_PTR_Stmt *ast, StmtSMDecl *sm) {
     }
     if (failed) return false;
 
-    for (size_t stmt = 0; stmt < ast->count; stmt++)
-        if (!visit_Stmt(smc, ast->at[stmt])) return false;
+    for (size_t stmt = 0; stmt < ast->count; stmt++) {
+        if (ast->at[stmt]->type != NODE_StmtFuncDecl)
+            continue;
+        
+        StmtFuncDecl *st = (StmtFuncDecl *)ast->at[stmt];
+        
+        if (sm->flow_insensitive) {
+            if (!visit_Stmt(smc, (Stmt *)st))
+                failed = true;
+        } else {
+            smc->last = st->base.loc;
+            CFGNode *cfg = generate_cfg(&st->body, smc->arena);
+            if (!visit_cfg_node(smc, cfg))
+                failed = true;
+        }
+    }
 
-    return true;
+    return !failed;
 }
 
 bool run_sm_checker(StringView path, Arena *arena) {

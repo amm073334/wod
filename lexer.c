@@ -36,7 +36,7 @@ static const Keyword keywords[] = {
     {.name = "any",              .type = TOK_ANY},
     {.name = "any_call",         .type = TOK_ANY_CALL},
     {.name = "any_args",         .type = TOK_ANY_ARGS},
-    {.name = "$end_of_path$",    .type = TOK_END_OF_PATH},
+    {.name = "__end_of_path",    .type = TOK_END_OF_PATH},
 };
 
 void lexer_init(Lexer *lexer, const char *source) {
