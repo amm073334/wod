@@ -11,6 +11,7 @@ typedef enum {
     TYPE_FUNC,
     TYPE_CDBTYPE,
     TYPE_CDBDATA,
+    TYPE_CEVTYPE,
     TYPE_MODULE,
 
     TYPE_SM_ANY,
@@ -44,6 +45,11 @@ struct WodType {
             VEC_WodType params;
         };
 
+        // If TYPE_CEVTYPE:
+        StringView typename;
+
+        // TODO: Should this be part of the type,
+        //       or part of the Symbol value?
         // If TYPE_CDBTYPE or TYPE_MODULE:
         Environment *env;
 

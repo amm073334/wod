@@ -28,6 +28,7 @@ static const Keyword keywords[] = {
     {.name = "in",       .type = TOK_IN},
     {.name = "cmd",      .type = TOK_CMD},
     {.name = "cdb",      .type = TOK_CDB},
+    {.name = "cevtype",  .type = TOK_CEVTYPE},
 
     {.name = "sm",               .type = TOK_SM},
     {.name = "flow_insensitive", .type = TOK_FLOW_INSENSITIVE},
