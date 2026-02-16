@@ -8,6 +8,7 @@ typedef enum {
     NODE_ExprVar,
     NODE_ExprArray,
     NODE_ExprDB,
+    NODE_ExprAccess,
     NODE_ExprBinary,
     NODE_ExprUnary,
     NODE_ExprCall,
@@ -32,7 +33,7 @@ typedef struct {
 
 typedef struct {
     Expr base;
-    StringView name;
+    Expr *left;
     Expr *index;
 } ExprArray;
 
@@ -42,6 +43,12 @@ typedef struct {
     Expr *data_index;
     StringView field_name;
 } ExprDB;
+
+typedef struct {
+    Expr base;
+    Expr *left;
+    Token name;
+} ExprAccess;
 
 typedef struct {
     Expr base;
@@ -58,7 +65,7 @@ typedef struct {
 
 typedef struct {
     Expr base;
-    StringView name;
+    Expr *callee;
     VEC_PTR_Expr args;
 } ExprCall;
 

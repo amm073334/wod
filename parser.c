@@ -175,6 +175,14 @@ static Expr *primary(Parser *parser) {
         return (Expr *)expr;
     }
 
+    if (match(parser, TOK_IDENTIFIER)) {
+        // Variable.
+        Token name = parser->previous;
+        ExprVar *expr;
+        ALLOC_NODE(expr, name, ExprVar, (ExprVar){ .name = name.text });
+        return (Expr *)expr;
+    }
+
     if (match(parser, TOK_LEFT_PAREN)) {
         Expr *expr = expression(parser);
         consume(parser, TOK_RIGHT_PAREN, SV("Expected ')' after expression."));
@@ -185,57 +193,45 @@ static Expr *primary(Parser *parser) {
     return NULL;
 }
 
-static Expr *array(Parser *parser, Token name) {
-    Expr *index = expression(parser);
-    consume(parser, TOK_RIGHT_BRACK, SV("Expected ']' after array index."));
-    
-    if (match(parser, TOK_DOT)) {
-        consume(parser, TOK_IDENTIFIER, SV("Expected DB field identifier."));
-        
-        ExprDB *expr;
-        ALLOC_NODE(expr, name, ExprDB,
-            (ExprDB){ .type_name = name.text, .data_index = index,
-                .field_name = parser->previous.text });
+static Expr *call(Parser *parser) {
+    Expr *expr = primary(parser);
 
-        return (Expr *)expr;
+    while (true) {
+        if (match(parser, TOK_LEFT_PAREN)) {
+            VEC_PTR_Expr args;
+            VEC_INIT(args);
+            if (!check(parser, TOK_RIGHT_PAREN)) do {
+                VEC_PUSH(args, expression(parser), parser->arena);
+            } while (match(parser, TOK_COMMA));
+    
+            consume(parser, TOK_RIGHT_PAREN, SV("Expected ')' after argument list."));
+    
+            ExprCall *e;
+            ALLOC_NODE(e, expr->loc, ExprCall,
+                (ExprCall){ .callee = expr, .args = args });
+        
+            expr = (Expr *)e;
+        } else if (match(parser, TOK_DOT)) {
+            consume(parser, TOK_IDENTIFIER, SV("Expected field name."));
+
+            ExprAccess *e;
+            ALLOC_NODE(e, expr->loc, ExprAccess,
+                (ExprAccess){ .left = expr, .name = parser->previous });
+
+            expr = (Expr *)e;
+        } else if (match(parser, TOK_LEFT_BRACK)) {
+            Expr *index = expression(parser);
+            consume(parser, TOK_RIGHT_BRACK, SV("Expected ']' after array index."));
+
+            ExprArray *e;
+            ALLOC_NODE(e, expr->loc, ExprArray,
+                (ExprArray){ .left = expr, .index = index });
+            
+            expr = (Expr *)e;
+        } else break;
     }
 
-    ExprArray *expr;
-    ALLOC_NODE(expr, name, ExprArray,
-        (ExprArray){ .name = name.text, .index = index });
-
-    return (Expr *)expr;
-}
-
-static Expr *call(Parser *parser) {
-    if (!match(parser, TOK_IDENTIFIER))
-        return primary(parser);
-
-    Token name = parser->previous;
-
-    if (match(parser, TOK_LEFT_BRACK))
-        return array(parser, name);
-
-    if (match(parser, TOK_LEFT_PAREN)) {
-        VEC_PTR_Expr args;
-        VEC_INIT(args);
-        if (!check(parser, TOK_RIGHT_PAREN)) do {
-            VEC_PUSH(args, expression(parser), parser->arena);
-        } while (match(parser, TOK_COMMA));
-
-        consume(parser, TOK_RIGHT_PAREN, SV("Expected ')' after argument list."));
-
-        ExprCall *expr;
-        ALLOC_NODE(expr, name, ExprCall,
-            (ExprCall){ .name = name.text, .args = args });
-    
-        return (Expr *)expr;
-    } 
-
-    // Variable.
-    ExprVar *expr;
-    ALLOC_NODE(expr, name, ExprVar, (ExprVar){ .name = name.text });
-    return (Expr *)expr;
+    return expr;
 }
 
 static Expr *unary(Parser *parser) {

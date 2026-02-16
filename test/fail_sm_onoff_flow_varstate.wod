@@ -1,0 +1,31 @@
+cdb asdf {
+    int a;
+}
+
+int alloc() {
+    return 1;
+}
+
+void main() {
+    int v = alloc();
+
+    int something = asdf[v].a;
+}
+
+sm varstate {
+    decl { any } v;
+    decl { cdb } c;
+
+    start:
+        { v = alloc() } ==> v.unknown;
+
+    v.unknown, v.null, v.not_null:
+        { v == 0 } ==> true=v.null, false=v.not_null
+        | { v != 0 } ==> true=v.not_null, false=v.null
+        ;
+    
+    v.unknown, v.null:
+        { c[v] } ==> { err("invalid access!") }
+        ;
+
+}

@@ -9,7 +9,8 @@ typedef enum {
     TYPE_STR,
     TYPE_BOOL,
     TYPE_FUNC,
-    TYPE_CDB,
+    TYPE_CDBTYPE,
+    TYPE_CDBDATA,
     TYPE_MODULE,
 
     TYPE_SM_ANY,
@@ -43,8 +44,11 @@ struct WodType {
             VEC_WodType params;
         };
 
-        // If TYPE_CDB or TYPE_MODULE:
+        // If TYPE_CDBTYPE or TYPE_MODULE:
         Environment *env;
+
+        // If TYPE_CDBDATA:
+        size_t cdb_type;
     };
 };
 

@@ -40,8 +40,11 @@ static bool expr_match(SMChecker *smc, Expr *expr, Expr *pattern) {
     if (expr->type != pattern->type) return false;
 
     switch (expr->type) {
-        case NODE_ExprVar:
-            UNIMPLEMENTED;
+        case NODE_ExprVar: {
+            ExprVar *exp = (ExprVar *)expr;
+            ExprVar *pat = (ExprVar *)pattern;
+            return sv_equals(exp->name, pat->name);
+        }
         case NODE_ExprArray:
             UNIMPLEMENTED;
         case NODE_ExprDB:
@@ -62,7 +65,13 @@ static bool expr_match(SMChecker *smc, Expr *expr, Expr *pattern) {
 
             // Handle any_call.
             {
-                Symbol *sym = env_find(&smc->env, pat->name);
+                // If pattern is a simple call, it could be
+                // a SM variable: search for it.
+                Symbol *sym = NULL;
+                if (pat->callee->type == NODE_ExprVar) {
+                    sym = env_find(&smc->env, 
+                        ((ExprVar *)pat->callee)->name);
+                }
 
                 // NULL value means variable hasn't been bound yet.
                 if (sym && sym->type.basetype == TYPE_SM_ANY_CALL) {
@@ -71,7 +80,7 @@ static bool expr_match(SMChecker *smc, Expr *expr, Expr *pattern) {
                     } else {
                         return expr_match(smc, expr, (Expr *)sym->value);
                     }
-                } else if (!sv_equals(exp->name, pat->name))
+                } else if (!expr_match(smc, exp->callee, pat->callee))
                     return false;
             }
 
@@ -151,7 +160,13 @@ static bool visit_StmtExpr(SMChecker *smc, StmtExpr *stmt) {
 }
 
 static bool sm_func_action(SMChecker *smc, Token *tok, ExprCall *action) {
-    if (sv_equals(action->name, SV("err"))) {
+    // Only handle simple call actions.
+    if (action->callee->type != NODE_ExprVar)
+        return false;
+
+    StringView action_name = ((ExprVar *)action->callee)->name;
+
+    if (sv_equals(action_name, SV("err"))) {
         if (action->args.count == 1 
             && action->args.at[0]->type == NODE_ExprStrLit) {
             
@@ -162,7 +177,7 @@ static bool sm_func_action(SMChecker *smc, Token *tok, ExprCall *action) {
                 SV("Bad action."));
         }
         return false;
-    } else if (sv_equals(action->name, SV("mgk_expr_recurse"))) {
+    } else if (sv_equals(action_name, SV("mgk_expr_recurse"))) {
         if (!(action->args.count == 2
             && action->args.at[0]->type == NODE_ExprVar
             && action->args.at[1]->type == NODE_ExprVar)) {
