@@ -731,7 +731,13 @@ static VEC_PTR_Stmt sm_body(Parser *parser) {
     VEC_INIT(stmts);
 
     // Declarations.
-    while (match(parser, TOK_DECL)) {
+    while (match(parser, TOK_STATE) || match(parser, TOK_DECL)) {
+        bool has_state = false;
+        if (parser->previous.type == TOK_STATE) {
+            consume(parser, TOK_DECL, SV("Expected 'decl' after 'state'."));
+            has_state = true;
+        }
+        
         consume(parser, TOK_LEFT_BRACE, SV("Expected '{' before decl type."));
         
         Token decl_type = parser->current;
@@ -752,7 +758,8 @@ static VEC_PTR_Stmt sm_body(Parser *parser) {
         
         StmtVarDecl *stmt;
         ALLOC_NODE(stmt, loc, StmtVarDecl,
-            (StmtVarDecl){ .type = decl_type, .name = loc.text, });
+            (StmtVarDecl){ .type = decl_type, .name = loc.text,
+                .smvar_has_state = has_state });
 
         VEC_PUSH(stmts, (Stmt *)stmt, parser->arena);
     }

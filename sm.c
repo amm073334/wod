@@ -23,16 +23,26 @@ typedef struct {
     StringView file_path;
 } SMChecker;
 
+typedef struct {
+    // AST node to bind a variable to.
+    void *match;
+
+    // For variables that store state.
+    bool has_state;
+    StringView state;
+} SMVar;
+
 static bool expr_match(SMChecker *smc, Expr *expr, Expr *pattern) {
     if (pattern->type == NODE_ExprVar) {
         ExprVar *pat = (ExprVar *)pattern;
         Symbol *sym = env_find(&smc->env, pat->name);
         if (sym && sym->type.basetype == TYPE_SM_ANY) {
-            if (sym->value == NULL) {
-                sym->value = expr;
+            SMVar *v = (SMVar *)sym->value;
+            if (v->match == NULL) {
+                v->match = expr;
                 return true;
             } else {
-                return expr_match(smc, expr, (Expr *)sym->value);
+                return expr_match(smc, expr, (Expr *)v->match);
             }
         }
     }
@@ -75,10 +85,11 @@ static bool expr_match(SMChecker *smc, Expr *expr, Expr *pattern) {
 
                 // NULL value means variable hasn't been bound yet.
                 if (sym && sym->type.basetype == TYPE_SM_ANY_CALL) {
-                    if (sym->value == NULL) {
-                        sym->value = exp;
+                    SMVar *v = ((SMVar *)sym->value);
+                    if (v->match == NULL) {
+                        v->match = exp;
                     } else {
-                        return expr_match(smc, expr, (Expr *)sym->value);
+                        return expr_match(smc, expr, (Expr *)v->match);
                     }
                 } else if (!expr_match(smc, exp->callee, pat->callee))
                     return false;
@@ -93,15 +104,16 @@ static bool expr_match(SMChecker *smc, Expr *expr, Expr *pattern) {
                         env_find(&smc->env, ((ExprVar *)pat->args.at[0])->name);
 
                     if (sym && sym->type.basetype == TYPE_SM_ANY_ARGS) {
-                        if (sym->value == NULL) {
+                        SMVar *v = ((SMVar *)sym->value);
+                        if (v->match == NULL) {
                             // Since there is no AST node for params, bind the
                             // variable to the call instead.
-                            sym->value = exp;
+                            v->match = exp;
                             return true;
                         } else {
                             // If args already bound, then fall through to
                             // check that all args match.
-                            pat = (ExprCall *)sym->value;
+                            pat = (ExprCall *)v->match;
                         }
                     }
                 }
@@ -200,8 +212,8 @@ static bool sm_func_action(SMChecker *smc, Token *tok, ExprCall *action) {
         SMChecker smc_copy = *smc;
         smc_copy.state = (StmtSMState *)sym->value;
 
-        Expr *next_node = (Expr *)env_find(&smc->env,
-            ((ExprVar *)action->args.at[0])->name)->value;
+        Expr *next_node = ((SMVar *)(env_find(&smc->env,
+            ((ExprVar *)action->args.at[0])->name)->value))->match;
 
         return visit_Expr(&smc_copy, next_node);
     } else {
@@ -237,7 +249,7 @@ static bool transition(SMChecker *smc, Expr *expr) {
         //  bound but the transition didn't match completely.)
         for (size_t sym = 0; sym < smc->env.symbols.count; sym++) {
             if (smc->env.symbols.at[sym].type.basetype != TYPE_SM_STATE)
-                smc->env.symbols.at[sym].value = NULL;
+                ((SMVar *)smc->env.symbols.at[sym].value)->match = NULL;
         }
 
         if (!expr_match(smc, expr, matches.at[i]->expr_pattern))
@@ -404,9 +416,16 @@ static bool run_sm(SMChecker *smc, VEC_PTR_Stmt *ast, StmtSMDecl *sm) {
            && sm->body.at[i]->type == NODE_StmtVarDecl; i++) {
         StmtVarDecl *decl = (StmtVarDecl *)sm->body.at[i];
 
+        SMVar *var_struct = arena_alloc(smc->arena, sizeof(SMVar));
+        assert(var_struct);
+
+        var_struct->match = NULL;
+        var_struct->has_state = decl->smvar_has_state;
+        var_struct->state = SV("");
+
         assert(decl->type.type < ARRLEN(TYPE_TABLE));
         Symbol *sym = env_insert(&smc->env, decl->name,
-            TYPE_TABLE[decl->type.type], 0, smc->arena);
+            TYPE_TABLE[decl->type.type], var_struct, smc->arena);
 
         if (!sym) {
             failed = true;

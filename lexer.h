@@ -44,6 +44,7 @@ typedef enum {
     TOK_ANY, TOK_ANY_CALL, TOK_ANY_ARGS,
     TOK_SM_ARROW,
     TOK_END_OF_PATH,
+    TOK_STATE,
 
     TOK_ERROR, TOK_EOF
 } TokenType;

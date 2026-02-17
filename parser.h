@@ -138,6 +138,7 @@ typedef struct {
     StringView name;
     Expr *array_length;
     Expr *initializer;
+    bool smvar_has_state;
 } StmtVarDecl;
 
 VEC_PTR_DEF(StmtVarDecl);
