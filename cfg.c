@@ -84,6 +84,8 @@ static CFGNode *visit_Stmt(CFGNode *parent, Stmt *stmt, CFGNode *end, Arena *are
     }
 }
 
+// TODO: There is sometimes an awkward empty block right before the end
+//       node, because of if paths joining.
 CFGNode *generate_cfg(VEC_PTR_Stmt *func_body, Arena *arena) {
     CFGNode *start = alloc_node(arena);
     StmtBlock fake_block = {
@@ -93,7 +95,7 @@ CFGNode *generate_cfg(VEC_PTR_Stmt *func_body, Arena *arena) {
     CFGNode *end = alloc_node(arena);
 
     CFGNode *last = visit_Stmt(start, (Stmt *)&fake_block, end, arena);
-    last->branch_a = end;
+    if (last) last->branch_a = end;
 
     return start;
 }

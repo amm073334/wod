@@ -26,6 +26,8 @@ static const Keyword keywords[] = {
     {.name = "while",    .type = TOK_WHILE},
     {.name = "for",      .type = TOK_FOR},
     {.name = "in",       .type = TOK_IN},
+    {.name = "true",     .type = TOK_TRUE},
+    {.name = "false",    .type = TOK_FALSE},
     {.name = "cmd",      .type = TOK_CMD},
     {.name = "cdb",      .type = TOK_CDB},
     {.name = "cevtype",  .type = TOK_CEVTYPE},
@@ -38,7 +40,7 @@ static const Keyword keywords[] = {
     {.name = "any_call",         .type = TOK_ANY_CALL},
     {.name = "any_args",         .type = TOK_ANY_ARGS},
     {.name = "__end_of_path",    .type = TOK_END_OF_PATH},
-    {.name = "state",    .type = TOK_STATE},
+    {.name = "state",            .type = TOK_STATE},
 };
 
 void lexer_init(Lexer *lexer, const char *source) {

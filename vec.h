@@ -32,14 +32,13 @@
 #define VEC_PUSH(vec, item, arena) \
     do { \
         if ((vec).count >= (vec).capacity) { \
-            size_t new_capacity; \
             if ((vec).capacity == 0) \
-                new_capacity = VEC_MIN_CAPACITY; \
+                (vec).capacity = VEC_MIN_CAPACITY; \
             else \
-                new_capacity = (vec).capacity * 2; \
+                (vec).capacity *= 2; \
  \
             void *new_ptr = arena_alloc(arena, \
-                new_capacity * sizeof((vec).at[0])); \
+                (vec).capacity * sizeof((vec).at[0])); \
             if (!new_ptr) exit(1); \
             if ((vec).at) \
                 memcpy(new_ptr, (vec).at, \

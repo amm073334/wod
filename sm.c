@@ -29,8 +29,33 @@ typedef struct {
 
     // For variables that store state.
     bool has_state;
-    StringView state;
+    StmtSMState *state;
 } SMVar;
+
+// Copy SMChecker, and duplicate all SMVar objects in its environment.
+static SMChecker smc_copy(SMChecker *smc, Arena *arena) {
+    SMChecker copy = *smc;
+    copy.env.symbols.at 
+        = arena_alloc(arena, copy.env.symbols.capacity * sizeof(Symbol));
+    assert(copy.env.symbols.at);
+
+    memcpy(copy.env.symbols.at, smc->env.symbols.at,
+        smc->env.symbols.count * sizeof(Symbol));
+
+    for (size_t i = 0; i < copy.env.symbols.count; i++) {
+        if (copy.env.symbols.at[i].type.basetype != TYPE_SM_STATE) {
+            
+            copy.env.symbols.at[i].value
+                = arena_alloc(arena, sizeof(SMVar));
+            assert(copy.env.symbols.at[i].value);
+            
+            memcpy(copy.env.symbols.at[i].value,
+                 smc->env.symbols.at[i].value, sizeof(SMVar));
+        }
+    }
+
+    return copy;
+}
 
 static bool expr_match(SMChecker *smc, Expr *expr, Expr *pattern) {
     if (pattern->type == NODE_ExprVar) {
@@ -55,10 +80,13 @@ static bool expr_match(SMChecker *smc, Expr *expr, Expr *pattern) {
             ExprVar *pat = (ExprVar *)pattern;
             return sv_equals(exp->name, pat->name);
         }
-        case NODE_ExprArray:
-            UNIMPLEMENTED;
-        case NODE_ExprDB:
-            UNIMPLEMENTED;
+        case NODE_ExprArray: {
+            ExprArray *exp = (ExprArray *)expr;
+            ExprArray *pat = (ExprArray *)pattern;
+            
+            return expr_match(smc, exp->left, pat->left)
+                && expr_match(smc, exp->index, pat->index);
+        }
         case NODE_ExprBinary: {
             ExprBinary *exp = (ExprBinary *)expr;
             ExprBinary *pat = (ExprBinary *)pattern;
@@ -209,13 +237,13 @@ static bool sm_func_action(SMChecker *smc, Token *tok, ExprCall *action) {
             return false;
         }
 
-        SMChecker smc_copy = *smc;
-        smc_copy.state = (StmtSMState *)sym->value;
+        SMChecker copy = smc_copy(smc, smc->arena);
+        copy.state = (StmtSMState *)sym->value;
 
         Expr *next_node = ((SMVar *)(env_find(&smc->env,
             ((ExprVar *)action->args.at[0])->name)->value))->match;
 
-        return visit_Expr(&smc_copy, next_node);
+        return visit_Expr(&copy, next_node);
     } else {
         fprintf(stderr, "Unknown action.\n");
         return false;
@@ -248,20 +276,23 @@ static bool transition(SMChecker *smc, Expr *expr) {
         //  other transitions, nor should it persist if the variable was
         //  bound but the transition didn't match completely.)
         for (size_t sym = 0; sym < smc->env.symbols.count; sym++) {
-            if (smc->env.symbols.at[sym].type.basetype != TYPE_SM_STATE)
-                ((SMVar *)smc->env.symbols.at[sym].value)->match = NULL;
+            if (smc->env.symbols.at[sym].type.basetype != TYPE_SM_STATE) {
+                SMVar *var = (SMVar *)smc->env.symbols.at[sym].value;
+                if (!var->has_state)
+                    var->match = NULL;
+            }
         }
 
         if (!expr_match(smc, expr, matches.at[i]->expr_pattern))
             continue;
         
-        if (sv_equals(matches.at[i]->next_state, SV(""))) {
+        if (sv_equals(matches.at[i]->next_state_true, SV(""))) {
             if (!sm_action(smc, &expr->loc, matches.at[i]->action))
                 return false;
             else continue;
         }
 
-        Symbol *sym = env_find(&smc->env, matches.at[i]->next_state);
+        Symbol *sym = env_find(&smc->env, matches.at[i]->next_state_true);
         assert(sym && sym->type.basetype == TYPE_SM_STATE);
 
         smc->state = (StmtSMState *)sym->value;
@@ -276,11 +307,17 @@ static bool visit_Expr(SMChecker *smc, Expr *expr) {
     bool success = true;
     switch (expr->type) {
         case NODE_ExprVar:
-            UNIMPLEMENTED;
-        case NODE_ExprArray:
-            UNIMPLEMENTED;
-        case NODE_ExprDB:
-            UNIMPLEMENTED;
+            return success;
+        case NODE_ExprArray: {
+            ExprArray *e = (ExprArray *)expr;
+            return success 
+                && visit_Expr(smc, e->left)
+                && visit_Expr(smc, e->index);
+        }
+        case NODE_ExprAccess: {
+            ExprAccess *e = (ExprAccess *)expr;
+            return success && visit_Expr(smc, e->left);
+        }
         case NODE_ExprBinary: {
             ExprBinary *e = (ExprBinary *)expr;
             success = success && visit_Expr(smc, e->left);
@@ -314,10 +351,15 @@ static bool visit_Stmt(SMChecker *smc, Stmt *stmt) {
     switch (stmt->type) {
         case NODE_StmtImport:
             UNIMPLEMENTED;
-        case NODE_StmtAssign:
-            UNIMPLEMENTED;
-        case NODE_StmtVarDecl:
-            UNIMPLEMENTED;
+        case NODE_StmtAssign: {
+            StmtAssign *st = (StmtAssign *)stmt;
+            return visit_Expr(smc, st->left)
+                && visit_Expr(smc, st->right);
+        }
+        case NODE_StmtVarDecl: {
+            StmtVarDecl *st = (StmtVarDecl *)stmt;
+            return visit_Expr(smc, st->initializer);
+        }
         case NODE_StmtFuncDecl:
             return visit_StmtFuncDecl(smc, (StmtFuncDecl *)stmt);
         case NODE_StmtBlock: {
@@ -399,10 +441,10 @@ static bool visit_cfg_node(SMChecker *smc, CFGNode *node) {
             && visit_cfg_node(smc, node->branch_a);
     }
 
-    SMChecker smc_copy = *smc;
+    SMChecker copy = smc_copy(smc, smc->arena);
     return success
         && visit_cfg_node(smc, node->branch_a)
-        && visit_cfg_node(&smc_copy, node->branch_b);
+        && visit_cfg_node(&copy, node->branch_b);
 }
 
 static bool run_sm(SMChecker *smc, VEC_PTR_Stmt *ast, StmtSMDecl *sm) {
@@ -421,7 +463,7 @@ static bool run_sm(SMChecker *smc, VEC_PTR_Stmt *ast, StmtSMDecl *sm) {
 
         var_struct->match = NULL;
         var_struct->has_state = decl->smvar_has_state;
-        var_struct->state = SV("");
+        var_struct->state = NULL;
 
         assert(decl->type.type < ARRLEN(TYPE_TABLE));
         Symbol *sym = env_insert(&smc->env, decl->name,

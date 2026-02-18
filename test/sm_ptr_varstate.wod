@@ -1,0 +1,35 @@
+cdb asdf {
+    int a;
+}
+
+int alloc() {
+    return 1;
+}
+
+void main() {
+    int index = 0;
+    index = index + alloc();
+
+    if (index != -1) {
+        int something = asdf[index].a;
+    }
+}
+
+sm varstate {
+    decl { any } c;
+    state decl { any } v;
+
+    start:
+        { v + alloc() } ==> v.unknown;
+
+    v.unknown:
+        { v == 0 } ==> true=v.null, false=v.not_null
+        | { v != 0 } ==> true=v.not_null, false=v.null
+        | { c[v] } ==> { err("unknown access"); }
+        ;
+    
+    v.null:
+        { c[v] } ==> { err("null access"); }
+        ;
+
+}

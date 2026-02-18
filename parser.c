@@ -76,6 +76,7 @@ static void synchronize(Parser *parser) {
     parser->panic_mode = false;
 
     while (parser->current.type != TOK_EOF) {
+        advance(parser);
         if (parser->previous.type == TOK_SEMICOLON) return;
         switch (parser->current.type) {
             case TOK_IF:
@@ -88,7 +89,6 @@ static void synchronize(Parser *parser) {
             default:
                 ;
         }
-        advance(parser);
     }
 }
 
@@ -457,9 +457,10 @@ static Stmt *break_stmt(Parser *parser) {
     return (Stmt *)stmt;
 }
 
-static Stmt *var_decl(Parser *parser, bool parse_initializer) {
+static Stmt *var_decl(Parser *parser, bool parse_const, bool parse_initializer) {
     bool is_const = false;
-    if (match(parser, TOK_CONST)) {
+    
+    if (parse_const && match(parser, TOK_CONST)) {
         is_const = true;
         advance(parser);
     }
@@ -643,7 +644,7 @@ static Stmt *declaration(Parser *parser) {
         check(parser, TOK_STR) ||
         check(parser, TOK_CONST)) {
 
-        Stmt *stmt = var_decl(parser, true);
+        Stmt *stmt = var_decl(parser, true, true);
         consume(parser, TOK_SEMICOLON, SV("Expected ';' after declaration."));
         return stmt;
     }
@@ -709,7 +710,7 @@ static Stmt *function_decl(Parser *parser) {
     VEC_PTR_StmtVarDecl params;
     VEC_INIT(params);
     if (!check(parser, TOK_RIGHT_PAREN)) do {
-        StmtVarDecl *stmt = (StmtVarDecl *)var_decl(parser, false);
+        StmtVarDecl *stmt = (StmtVarDecl *)var_decl(parser, false, false);
         VEC_PUSH(params, stmt, parser->arena);
     } while (match(parser, TOK_COMMA));
 
@@ -766,7 +767,14 @@ static VEC_PTR_Stmt sm_body(Parser *parser) {
 
     // States.
     while (match(parser, TOK_IDENTIFIER)) {
+        StringView state_var = SV("");
         Token state_loc = parser->previous;
+        if (match(parser, TOK_DOT)) {
+            consume(parser, TOK_IDENTIFIER, SV("Expected state name."));
+            state_var = state_loc.text;
+            state_loc = parser->previous;
+        }
+
         consume(parser, TOK_COLON, SV("Expected colon after state name."));
 
         VEC_PTR_ExprSMMatch matches;
@@ -793,13 +801,52 @@ static VEC_PTR_Stmt sm_body(Parser *parser) {
 
                 ALLOC_NODE(expr, loc, ExprSMMatch,
                     (ExprSMMatch){ .expr_pattern = to_match,
-                        .next_state = SV(""), .action = action, });
+                        .next_state_true = SV(""), .action = action, });
             } else {
+                bool transition_on_split = false;
+                if (match(parser, TOK_TRUE)) {
+                    transition_on_split = true;
+                    consume(parser, TOK_EQUAL, SV("Expected '='."));
+                }
+
+                bool using_varstate = false;
+
+                StringView state_name_true = SV("");
+                StringView state_name_false = SV("");
+                StringView var_name = SV("");
+
                 consume(parser, TOK_IDENTIFIER, SV("Expected state name."));
-                
+                state_name_true = parser->previous.text;
+                if (match(parser, TOK_DOT)) {
+                    using_varstate = true;
+
+                    var_name = state_name_true;
+
+                    consume(parser, TOK_IDENTIFIER, SV("Expected state name."));
+                    state_name_true = parser->previous.text;
+                }
+
+                if (transition_on_split) {
+                    consume(parser, TOK_COMMA, SV("Expected a second state."));
+                    consume(parser, TOK_FALSE, SV("Expected 'false'."));
+                    consume(parser, TOK_EQUAL, SV("Expected '='."));
+
+                    if (using_varstate) {
+                        consume(parser, TOK_IDENTIFIER, SV("Expected variable name."));
+                        if (!sv_equals(parser->previous.text, var_name))
+                            error_previous(parser, SV("Variable names must match."));
+                        
+                        consume(parser, TOK_DOT, SV("Expected '.'"));
+                    }
+                    consume(parser, TOK_IDENTIFIER, SV("Expected state name."));
+                    state_name_false = parser->previous.text;
+                }
+
                 ALLOC_NODE(expr, loc, ExprSMMatch,
                     (ExprSMMatch){ .expr_pattern = to_match,
-                        .next_state = parser->previous.text, });
+                        .next_state_var = var_name,
+                        .next_state_true = state_name_true,
+                        .next_state_false = state_name_false });
             }
             VEC_PUSH(matches, expr, parser->arena);   
         
@@ -810,7 +857,8 @@ static VEC_PTR_Stmt sm_body(Parser *parser) {
 
         StmtSMState *stmt;
         ALLOC_NODE(stmt, state_loc, StmtSMState,
-            (StmtSMState){ .name = state_loc.text, .matches = matches, });
+            (StmtSMState){ .name = state_loc.text,
+                .var = state_var, .matches = matches, });
         
         VEC_PUSH(stmts, (Stmt *)stmt, parser->arena);
     }
@@ -839,9 +887,42 @@ static Stmt *sm_decl(Parser *parser) {
     return (Stmt *)stmt;
 }
 
+static Stmt *db_decl(Parser *parser) {
+    Token db = parser->previous;
+
+    consume(parser, TOK_IDENTIFIER, SV("Expected DB name."));
+    StringView name = parser->previous.text;
+
+    consume(parser, TOK_LEFT_BRACE, SV("Expected '{' before DB fields."));
+
+    VEC_PTR_StmtVarDecl fields;
+    VEC_INIT(fields);
+    while (check(parser, TOK_INT) || 
+        check(parser, TOK_STR)) {
+
+        StmtVarDecl *stmt = (StmtVarDecl *)var_decl(parser, false, false);
+        consume(parser, TOK_SEMICOLON, SV("Expected ';' after declaration."));
+        VEC_PUSH(fields, stmt, parser->arena);
+    }
+
+    consume(parser, TOK_RIGHT_BRACE, SV("Expected '}' after DB fields."));
+
+    StmtDBDecl *stmt;
+    ALLOC_NODE(stmt, db, StmtDBDecl,
+        (StmtDBDecl){ .name = name,
+            .db = db, .fields = fields });
+   
+    return (Stmt *)stmt;
+}
+
 static Stmt *top_decl(Parser *parser) {
     if (match(parser, TOK_SM)) {
         return sm_decl(parser);
+    }
+
+    if (match(parser, TOK_CDB) ||
+        match(parser, TOK_UDB)) {
+        return db_decl(parser);
     }
 
     if (match(parser, TOK_INLINE) ||
@@ -853,7 +934,7 @@ static Stmt *top_decl(Parser *parser) {
     }
 
     if (match(parser, TOK_CONST)) {
-        return var_decl(parser, true);
+        return var_decl(parser, true, true);
     }
     
     error_current(parser, SV("Unexpected declaration."));

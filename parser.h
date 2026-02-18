@@ -7,7 +7,6 @@
 typedef enum {
     NODE_ExprVar,
     NODE_ExprArray,
-    NODE_ExprDB,
     NODE_ExprAccess,
     NODE_ExprBinary,
     NODE_ExprUnary,
@@ -36,13 +35,6 @@ typedef struct {
     Expr *left;
     Expr *index;
 } ExprArray;
-
-typedef struct {
-    Expr base;
-    StringView type_name;
-    Expr *data_index;
-    StringView field_name;
-} ExprDB;
 
 typedef struct {
     Expr base;
@@ -85,7 +77,9 @@ VEC_PTR_DEF(Stmt);
 typedef struct {
     Expr base;
     Expr *expr_pattern;
-    StringView next_state;
+    StringView next_state_var;
+    StringView next_state_true;
+    StringView next_state_false;
     VEC_PTR_Stmt action;
 } ExprSMMatch;
 
@@ -219,6 +213,7 @@ typedef struct {
 
 typedef struct {
     Stmt base;
+    StringView var;
     StringView name;
     VEC_PTR_ExprSMMatch matches;
 } StmtSMState;
