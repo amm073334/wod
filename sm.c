@@ -7,6 +7,8 @@
 #include "environment.h"
 
 typedef struct {
+    bool had_error;
+
     char *source;
     Arena *arena;
 
@@ -15,10 +17,14 @@ typedef struct {
     StmtSMDecl *sm;
 
     CFGNode *current_node;
+    size_t stmt_in_node;
 
     // Kind of a hack. Stores the most-recently seen
     // token, for error reporting.
     Token last;
+
+    // Another hack. Stores the most-recently-seen
+    StmtSMState *false_next;
 
     StringView file_path;
 } SMChecker;
@@ -31,6 +37,12 @@ typedef struct {
     bool has_state;
     StmtSMState *state;
 } SMVar;
+
+void smc_error(SMChecker *smc, Token *token, StringView message) {
+    smc->had_error = true;
+    error(smc->file_path, smc->source, token, message);
+}
+
 
 // Copy SMChecker, and duplicate all SMVar objects in its environment.
 static SMChecker smc_copy(SMChecker *smc, Arena *arena) {
@@ -173,36 +185,17 @@ static bool expr_match(SMChecker *smc, Expr *expr, Expr *pattern) {
     return false;
 }
 
-static bool visit_Expr(SMChecker *smc, Expr *expr);
-static bool visit_Stmt(SMChecker *smc, Stmt *stmt);
+static void visit_Expr(SMChecker *smc, Expr *expr);
+static void visit_Stmt(SMChecker *smc, Stmt *stmt);
 
 static bool visit_args(SMChecker *smc, StmtVarDecl *param) {
     return false;
 }
 
-
-static bool visit_StmtFuncDecl(SMChecker *smc, StmtFuncDecl *stmt) {
-    bool success = true;
-    for (size_t i = 0; i < stmt->body.count; i++)
-        success = success && visit_Stmt(smc, stmt->body.at[i]);
-    return success;
-}
-
-static bool visit_ExprCall(SMChecker *smc, ExprCall *call) {
-    bool success = true;
-    for (size_t i = 0; i < call->args.count; i++)
-        success = success && visit_Expr(smc, call->args.at[i]);
-    return success;
-}
-
-static bool visit_StmtExpr(SMChecker *smc, StmtExpr *stmt) {
-    return visit_Expr(smc, stmt->expr);
-}
-
-static bool sm_func_action(SMChecker *smc, Token *tok, ExprCall *action) {
+static void sm_func_action(SMChecker *smc, Token *tok, ExprCall *action) {
     // Only handle simple call actions.
     if (action->callee->type != NODE_ExprVar)
-        return false;
+        return;
 
     StringView action_name = ((ExprVar *)action->callee)->name;
 
@@ -210,31 +203,31 @@ static bool sm_func_action(SMChecker *smc, Token *tok, ExprCall *action) {
         if (action->args.count == 1 
             && action->args.at[0]->type == NODE_ExprStrLit) {
             
-            error(smc->file_path, smc->source, tok, 
+            smc_error(smc, tok, 
                 ((ExprStrLit *)action->args.at[0])->value);
         } else {
-            error(smc->file_path, smc->source, &action->base.loc,
+            smc_error(smc, &action->base.loc,
                 SV("Bad action."));
         }
-        return false;
+        return;
     } else if (sv_equals(action_name, SV("mgk_expr_recurse"))) {
         if (!(action->args.count == 2
             && action->args.at[0]->type == NODE_ExprVar
             && action->args.at[1]->type == NODE_ExprVar)) {
 
             
-            error(smc->file_path, smc->source, &action->base.loc,
+            smc_error(smc, &action->base.loc,
                 SV("Bad action."));
-            return false;
+            return;
         }
 
         StringView state_name = ((ExprVar *)action->args.at[1])->name;
         Symbol *sym = env_find(&smc->env, state_name);
 
         if (!sym) {
-            error(smc->file_path, smc->source, &action->base.loc,
+            smc_error(smc, &action->base.loc,
                 SV("Bad action."));
-            return false;
+            return;
         }
 
         SMChecker copy = smc_copy(smc, smc->arena);
@@ -243,33 +236,39 @@ static bool sm_func_action(SMChecker *smc, Token *tok, ExprCall *action) {
         Expr *next_node = ((SMVar *)(env_find(&smc->env,
             ((ExprVar *)action->args.at[0])->name)->value))->match;
 
-        return visit_Expr(&copy, next_node);
+        visit_Expr(&copy, next_node);
+
+        if (copy.had_error)
+            smc->had_error = true;
+        return;
     } else {
         fprintf(stderr, "Unknown action.\n");
-        return false;
+        smc->had_error = true;
+        return;
     }
 }
 
-static bool sm_action(SMChecker *smc, Token *tok, VEC_PTR_Stmt action) {
+static void sm_action(SMChecker *smc, Token *tok, VEC_PTR_Stmt action) {
     assert(action.count == 1);
     
     if (action.at[0]->type != NODE_StmtExpr) {
         fprintf(stderr, "Unknown action.\n");
-        return false;
+        smc->had_error = true;
+        return;
     }
 
     StmtExpr *se = ((StmtExpr *)action.at[0]);
     if (se->expr->type != NODE_ExprCall) {
         fprintf(stderr, "Unknown action.\n");
-        return false;
+        smc->had_error = true;
+        return;
     }
 
-    return sm_func_action(smc, tok, (ExprCall *)se->expr);
+    sm_func_action(smc, tok, (ExprCall *)se->expr);
 }
 
-// Returns false if error, true if successful or no relevant states.
-static bool transition(SMChecker *smc, Expr *expr) {
-    VEC_PTR_ExprSMMatch matches = smc->state->matches;
+// Find first transition in list that matches expr. Return true if found.
+static bool check_matches(SMChecker *smc, Expr *expr, VEC_PTR_ExprSMMatch matches) {
     for (size_t i = 0; i < matches.count; i++) {
         // Reset all bound variables before a transition is made.
         // (A variable bound during one transition shouldn't persist to
@@ -286,109 +285,175 @@ static bool transition(SMChecker *smc, Expr *expr) {
         if (!expr_match(smc, expr, matches.at[i]->expr_pattern))
             continue;
         
-        if (sv_equals(matches.at[i]->next_state_true, SV(""))) {
-            if (!sm_action(smc, &expr->loc, matches.at[i]->action))
-                return false;
-            else continue;
+        // If the match was an action.
+        if (sv_is_null(matches.at[i]->next_state_true)) {
+            sm_action(smc, &expr->loc, matches.at[i]->action);
+            return true;
         }
 
-        Symbol *sym = env_find(&smc->env, matches.at[i]->next_state_true);
-        assert(sym && sym->type.basetype == TYPE_SM_STATE);
+        Symbol *sym_state_true
+            = env_find(&smc->env, matches.at[i]->next_state_true);
+        assert(sym_state_true && sym_state_true->type.basetype == TYPE_SM_STATE);
 
-        smc->state = (StmtSMState *)sym->value;
+        // If there's a second state, i.e. if the SM state should split on
+        // a predicate, set a variable in smc so that visit_cfg_node knows
+        // to update the state of the false path differently when it
+        // branches.
+        if (!sv_is_null(matches.at[i]->next_state_false)) {
+            Symbol *sym_state_false
+                = env_find(&smc->env, matches.at[i]->next_state_false);
+            assert(sym_state_false 
+                && sym_state_false->type.basetype == TYPE_SM_STATE);
+
+            smc->false_next = (StmtSMState *)sym_state_false->value;
+        }
+
+        // If the (true) state to transition to isn't a variable one, just
+        // set the global state.
+        StmtSMState *state_true = (StmtSMState *)sym_state_true->value;
+        if (sv_is_null(state_true->var)) {
+            smc->state = state_true;
+            return true;
+        }
+
+        // Otherwise, transition to a variable's state. If variable
+        // does not yet have a state, instantiate new SM to handle it.
+        // False case is again handled in visit_cfg_node.
+        Symbol *varsym = env_find(&smc->env, matches.at[i]->next_state_var);
+        SMVar *var = (SMVar *)varsym->value;
+        assert(var->has_state);
+
+        // TODO: spawn new SM if variable previously did not have state
+        //       in order to handle e.g. multiple allocations on a path
+        // problem: if we instantiate a new sm here, it can't know where
+        // to continue execution, since that information is in
+        // visit_cfg_node
+        // but if we instantiate a new sm in visit_cfg_node, that has
+        // to finish iterating through a whole block before it does
+        // any instantiation
+        // if (!var->state) {
+        //     SMChecker copy = smc_copy(smc, smc->arena);
+        //     var->state = state_true;
+        //     visit_cfg_node(&copy, copy.current_node, ++copy.stmt_in_node)
+            
+        // }
+        var->state = state_true;
         return true;
     }
-    return true;
+
+    return false;
 }
 
-static bool visit_Expr(SMChecker *smc, Expr *expr) {
-    if (!transition(smc, expr)) return false;
+static void transition(SMChecker *smc, Expr *expr) {
+    smc->false_next = NULL;
 
-    bool success = true;
+    if (check_matches(smc, expr, smc->state->matches))
+        return;
+
+    for (size_t var_i = 0; var_i < smc->env.symbols.count; var_i++) {
+        if (smc->env.symbols.at[var_i].type.basetype == TYPE_SM_STATE)
+            continue;
+        
+        VEC_PTR_ExprSMMatch matches;
+        {
+            SMVar *v = (SMVar *)smc->env.symbols.at[var_i].value;
+            if (!v->has_state) continue;
+            matches = v->state->matches;
+        }
+
+        check_matches(smc, expr, matches);
+    }
+}
+
+static void visit_Expr(SMChecker *smc, Expr *expr) {
+    transition(smc, expr);
+
     switch (expr->type) {
         case NODE_ExprVar:
-            return success;
+            return;
         case NODE_ExprArray: {
             ExprArray *e = (ExprArray *)expr;
-            return success 
-                && visit_Expr(smc, e->left)
-                && visit_Expr(smc, e->index);
+            visit_Expr(smc, e->left);
+            visit_Expr(smc, e->index);
+            return;
         }
         case NODE_ExprAccess: {
             ExprAccess *e = (ExprAccess *)expr;
-            return success && visit_Expr(smc, e->left);
+            visit_Expr(smc, e->left);
+            return;
         }
         case NODE_ExprBinary: {
             ExprBinary *e = (ExprBinary *)expr;
-            success = success && visit_Expr(smc, e->left);
-            success = success && visit_Expr(smc, e->right);
-            return success;
+            visit_Expr(smc, e->left);
+            visit_Expr(smc, e->right);
+            return;
         }
         case NODE_ExprUnary: {
             ExprUnary *e = (ExprUnary *)expr;
-            success = success && visit_Expr(smc, e->right);
-            return success;
+            visit_Expr(smc, e->right);
+            return;
         }
         case NODE_ExprCall: {
             ExprCall *e = (ExprCall *)expr;
             for (size_t i = 0; i < e->args.count; i++)
-                success = success && visit_Expr(smc, e->args.at[i]);
-            return success;
+                visit_Expr(smc, e->args.at[i]);
+            return;
         }
         case NODE_ExprIntLit:
-            return success;
+            return;
         case NODE_ExprStrLit:
-            return success;
+            return;
 
         case NODE_ExprSMMatch:
         default:
             UNREACHABLE;
     }
-    return false;
 }
 
-static bool visit_Stmt(SMChecker *smc, Stmt *stmt) {
+static void visit_Stmt(SMChecker *smc, Stmt *stmt) {
     switch (stmt->type) {
         case NODE_StmtImport:
             UNIMPLEMENTED;
         case NODE_StmtAssign: {
             StmtAssign *st = (StmtAssign *)stmt;
-            return visit_Expr(smc, st->left)
-                && visit_Expr(smc, st->right);
+            visit_Expr(smc, st->left);
+            visit_Expr(smc, st->right);
+            return;
         }
         case NODE_StmtVarDecl: {
             StmtVarDecl *st = (StmtVarDecl *)stmt;
-            return visit_Expr(smc, st->initializer);
+            visit_Expr(smc, st->initializer);
+            return;
         }
-        case NODE_StmtFuncDecl:
-            return visit_StmtFuncDecl(smc, (StmtFuncDecl *)stmt);
+        case NODE_StmtFuncDecl: {
+            StmtFuncDecl *st = (StmtFuncDecl *)stmt;
+            for (size_t i = 0; i < st->body.count; i++)
+                visit_Stmt(smc, st->body.at[i]);
+            return;
+        }
         case NODE_StmtBlock: {
-            bool success = true;
             StmtBlock *st = (StmtBlock *)stmt;
-            for (size_t i = 0; i < st->stmts.count; i++) {
-                success = success && visit_Stmt(smc, st->stmts.at[i]);
-            }
-            return success;
+            for (size_t i = 0; i < st->stmts.count; i++)
+                visit_Stmt(smc, st->stmts.at[i]);
+            return;
         }
-            
-            UNIMPLEMENTED;
         case NODE_StmtReturn:
-            return true;
+            return;
         case NODE_StmtIf: {
             StmtIf *st = (StmtIf *)stmt;
-            bool res = visit_Expr(smc, st->condition);
+            visit_Expr(smc, st->condition);
 
             // If flow-sensitive, only need to visit condition here;
             // checking the two paths will be left up to the CFG walker.
             if (!smc->sm->flow_insensitive)
-                return res;
+                return;
 
-            res = res && visit_Stmt(smc, st->then_branch);
+            visit_Stmt(smc, st->then_branch);
 
             if (st->else_branch)
-                res = res && visit_Stmt(smc, st->else_branch);
+                visit_Stmt(smc, st->else_branch);
             
-            return res;
+            return;
         }
         case NODE_StmtLoop:
             UNIMPLEMENTED;
@@ -403,14 +468,14 @@ static bool visit_Stmt(SMChecker *smc, Stmt *stmt) {
         case NODE_StmtDBDecl:
             UNIMPLEMENTED;
         case NODE_StmtExpr:
-            return visit_StmtExpr(smc, (StmtExpr *)stmt);
-        
+            visit_Expr(smc, ((StmtExpr *)stmt)->expr);
+            return;
+
         case NODE_StmtSMDecl:
         case NODE_StmtSMState:
-            return true;
+            return;
         default: UNREACHABLE;
     }
-    return false;
 }
 
 static const int TYPE_TABLE[] = {
@@ -419,32 +484,48 @@ static const int TYPE_TABLE[] = {
     [TOK_ANY_CALL] = TYPE_SM_ANY_CALL,
 };
 
-static bool visit_cfg_node(SMChecker *smc, CFGNode *node) {
-    bool success = true;
+static void visit_cfg_node(SMChecker *smc, CFGNode *node, StmtSMState* false_next) {
+    smc->current_node = node;
+    
     for (size_t i = 0; i < node->block.count; i++) {
+        smc->stmt_in_node = i;
         smc->last = node->block.at[i]->loc;
-        if (!visit_Stmt(smc, node->block.at[i]))
-            success = false;
+        visit_Stmt(smc, node->block.at[i]);
     }
 
     if (!node->branch_a) {
-        return success && transition(smc, 
+        transition(smc, 
             (Expr*)&(ExprSMEndOfPath){ 
             .base.loc = smc->last,
             .base.type = NODE_ExprSMEndOfPath
         });
+        return;
     }
     
     // Don't split if there's only one branch.
     if (!node->branch_b) {
-        return success 
-            && visit_cfg_node(smc, node->branch_a);
+        visit_cfg_node(smc, node->branch_a, NULL);
+        return;
     }
 
+    // Split the SM.
     SMChecker copy = smc_copy(smc, smc->arena);
-    return success
-        && visit_cfg_node(smc, node->branch_a)
-        && visit_cfg_node(&copy, node->branch_b);
+    if (smc->false_next) {
+        if (sv_is_null(false_next->var))
+            copy.state = false_next;
+        else {
+            Symbol *varsym = env_find(&copy.env, false_next->var);
+            assert(varsym);
+            SMVar *var = (SMVar *)varsym->value;
+
+            var->state = false_next;
+        }
+    }
+    
+    visit_cfg_node(smc, node->branch_a, NULL);
+    visit_cfg_node(&copy, node->branch_b, NULL);
+    if (copy.had_error)
+        smc->had_error = true;
 }
 
 static bool run_sm(SMChecker *smc, VEC_PTR_Stmt *ast, StmtSMDecl *sm) {
@@ -471,7 +552,7 @@ static bool run_sm(SMChecker *smc, VEC_PTR_Stmt *ast, StmtSMDecl *sm) {
 
         if (!sym) {
             failed = true;
-            error(smc->file_path, smc->source, &decl->base.loc,
+            smc_error(smc, &decl->base.loc,
                 SV("Failed to insert declaration."));
         }
     }
@@ -490,7 +571,7 @@ static bool run_sm(SMChecker *smc, VEC_PTR_Stmt *ast, StmtSMDecl *sm) {
 
         if (!sym) {
             failed = true;
-            error(smc->file_path, smc->source, &state->base.loc,
+            smc_error(smc, &state->base.loc,
                 SV("Failed to insert state."));
         }
     }
@@ -503,12 +584,14 @@ static bool run_sm(SMChecker *smc, VEC_PTR_Stmt *ast, StmtSMDecl *sm) {
         StmtFuncDecl *st = (StmtFuncDecl *)ast->at[stmt];
         
         if (sm->flow_insensitive) {
-            if (!visit_Stmt(smc, (Stmt *)st))
+            visit_Stmt(smc, (Stmt *)st);
+            if (smc->had_error)
                 failed = true;
         } else {
             smc->last = st->base.loc;
             CFGNode *cfg = generate_cfg(&st->body, smc->arena);
-            if (!visit_cfg_node(smc, cfg))
+            visit_cfg_node(smc, cfg, NULL);
+            if (smc->had_error)
                 failed = true;
         }
     }
@@ -525,6 +608,7 @@ bool run_sm_checker(StringView path, Arena *arena) {
     smc.source = source;
     smc.arena = arena;
     smc.file_path = path;
+    smc.had_error = false;
 
     bool failed = false;
     for (size_t i = 0; i < ast->count; i++) {

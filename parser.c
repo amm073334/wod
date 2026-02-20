@@ -767,7 +767,7 @@ static VEC_PTR_Stmt sm_body(Parser *parser) {
 
     // States.
     while (match(parser, TOK_IDENTIFIER)) {
-        StringView state_var = SV("");
+        StringView state_var = SV_NULL;
         Token state_loc = parser->previous;
         if (match(parser, TOK_DOT)) {
             consume(parser, TOK_IDENTIFIER, SV("Expected state name."));
@@ -801,7 +801,7 @@ static VEC_PTR_Stmt sm_body(Parser *parser) {
 
                 ALLOC_NODE(expr, loc, ExprSMMatch,
                     (ExprSMMatch){ .expr_pattern = to_match,
-                        .next_state_true = SV(""), .action = action, });
+                        .next_state_true = SV_NULL, .action = action, });
             } else {
                 bool transition_on_split = false;
                 if (match(parser, TOK_TRUE)) {
@@ -811,9 +811,9 @@ static VEC_PTR_Stmt sm_body(Parser *parser) {
 
                 bool using_varstate = false;
 
-                StringView state_name_true = SV("");
-                StringView state_name_false = SV("");
-                StringView var_name = SV("");
+                StringView state_name_true = SV_NULL;
+                StringView state_name_false = SV_NULL;
+                StringView var_name = SV_NULL;
 
                 consume(parser, TOK_IDENTIFIER, SV("Expected state name."));
                 state_name_true = parser->previous.text;
