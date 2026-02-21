@@ -10,7 +10,7 @@ void main() {
     int index = 0;
     index = index + alloc();
 
-    int something = asdf[index].a;
+    int something = asdf[index];
 }
 
 sm varstate {
@@ -26,6 +26,11 @@ sm varstate {
         | { c[v] } ==> { err("unknown access"); }
         ;
     
+    v.not_null:
+        { v == 0 } ==> true=v.null, false=v.not_null
+        | { v != 0 } ==> true=v.not_null, false=v.null
+        ;
+
     v.null:
         { c[v] } ==> { err("null access"); }
         ;

@@ -107,8 +107,13 @@ static bool expr_match(SMChecker *smc, Expr *expr, Expr *pattern) {
                 && expr_match(smc, exp->left, pat->left)
                 && expr_match(smc, exp->right, pat->right);
         }
-        case NODE_ExprUnary:
-            UNIMPLEMENTED;
+        case NODE_ExprUnary: {
+            ExprUnary *exp = (ExprUnary *)expr;
+            ExprUnary *pat = (ExprUnary *)pattern;
+
+            return exp->op.type == pat->op.type
+                && expr_match(smc, exp->right, pat->right);
+        }
         case NODE_ExprCall: {
             ExprCall *exp = (ExprCall *)expr;
             ExprCall *pat = (ExprCall *)pattern;
@@ -173,8 +178,12 @@ static bool expr_match(SMChecker *smc, Expr *expr, Expr *pattern) {
 
             return exp->value == pat->value;
         }
-        case NODE_ExprStrLit:
-            UNIMPLEMENTED;
+        case NODE_ExprStrLit:{
+            ExprStrLit *exp = (ExprStrLit *)expr;
+            ExprStrLit *pat = (ExprStrLit *)pattern;
+
+            return sv_equals(exp->value, pat->value);
+        }
 
         case NODE_ExprSMEndOfPath:
             return true;
@@ -187,6 +196,7 @@ static bool expr_match(SMChecker *smc, Expr *expr, Expr *pattern) {
 
 static void visit_Expr(SMChecker *smc, Expr *expr);
 static void visit_Stmt(SMChecker *smc, Stmt *stmt);
+static void visit_cfg_node(SMChecker *smc, CFGNode *node);
 
 static bool visit_args(SMChecker *smc, StmtVarDecl *param) {
     return false;
@@ -331,12 +341,26 @@ static bool check_matches(SMChecker *smc, Expr *expr, VEC_PTR_ExprSMMatch matche
         // but if we instantiate a new sm in visit_cfg_node, that has
         // to finish iterating through a whole block before it does
         // any instantiation
-        // if (!var->state) {
-        //     SMChecker copy = smc_copy(smc, smc->arena);
-        //     var->state = state_true;
-        //     visit_cfg_node(&copy, copy.current_node, ++copy.stmt_in_node)
+        if (!var->state) {
+            SMChecker copy = smc_copy(smc, smc->arena);
+
+            // Need to change the variable's state within the copy
+            // but not the parent checker.
+            Symbol *varsym = env_find(&copy.env, matches.at[i]->next_state_var);
+            SMVar *var = (SMVar *)varsym->value;
+            assert(var->has_state);
             
-        // }
+            var->state = state_true;
+
+            copy.stmt_in_node++;
+            visit_cfg_node(&copy, copy.current_node);
+            
+            if (copy.had_error)
+                smc->had_error = true;
+
+            return true;
+        }
+
         var->state = state_true;
         return true;
     }
@@ -357,7 +381,10 @@ static void transition(SMChecker *smc, Expr *expr) {
         VEC_PTR_ExprSMMatch matches;
         {
             SMVar *v = (SMVar *)smc->env.symbols.at[var_i].value;
-            if (!v->has_state) continue;
+
+            // Initially, variables don't have a state until the first
+            // transition to one. If they don't have one, then skip this step.
+            if (!v->state) continue;
             matches = v->state->matches;
         }
 
@@ -412,8 +439,6 @@ static void visit_Expr(SMChecker *smc, Expr *expr) {
 
 static void visit_Stmt(SMChecker *smc, Stmt *stmt) {
     switch (stmt->type) {
-        case NODE_StmtImport:
-            UNIMPLEMENTED;
         case NODE_StmtAssign: {
             StmtAssign *st = (StmtAssign *)stmt;
             visit_Expr(smc, st->left);
@@ -465,12 +490,12 @@ static void visit_Stmt(SMChecker *smc, Stmt *stmt) {
             UNIMPLEMENTED;
         case NODE_StmtCmd:
             UNIMPLEMENTED;
-        case NODE_StmtDBDecl:
-            UNIMPLEMENTED;
         case NODE_StmtExpr:
             visit_Expr(smc, ((StmtExpr *)stmt)->expr);
             return;
 
+        case NODE_StmtDBDecl:
+        case NODE_StmtImport:
         case NODE_StmtSMDecl:
         case NODE_StmtSMState:
             return;
@@ -484,14 +509,15 @@ static const int TYPE_TABLE[] = {
     [TOK_ANY_CALL] = TYPE_SM_ANY_CALL,
 };
 
-static void visit_cfg_node(SMChecker *smc, CFGNode *node, StmtSMState* false_next) {
+static void visit_cfg_node(SMChecker *smc, CFGNode *node) {
     smc->current_node = node;
     
-    for (size_t i = 0; i < node->block.count; i++) {
+    for (size_t i = smc->stmt_in_node; i < node->block.count; i++) {
         smc->stmt_in_node = i;
         smc->last = node->block.at[i]->loc;
         visit_Stmt(smc, node->block.at[i]);
     }
+    smc->stmt_in_node = 0;
 
     if (!node->branch_a) {
         transition(smc, 
@@ -504,26 +530,26 @@ static void visit_cfg_node(SMChecker *smc, CFGNode *node, StmtSMState* false_nex
     
     // Don't split if there's only one branch.
     if (!node->branch_b) {
-        visit_cfg_node(smc, node->branch_a, NULL);
+        visit_cfg_node(smc, node->branch_a);
         return;
     }
 
     // Split the SM.
     SMChecker copy = smc_copy(smc, smc->arena);
     if (smc->false_next) {
-        if (sv_is_null(false_next->var))
-            copy.state = false_next;
+        if (sv_is_null(smc->false_next->var))
+            copy.state = smc->false_next;
         else {
-            Symbol *varsym = env_find(&copy.env, false_next->var);
+            Symbol *varsym = env_find(&copy.env, smc->false_next->var);
             assert(varsym);
             SMVar *var = (SMVar *)varsym->value;
 
-            var->state = false_next;
+            var->state = smc->false_next;
         }
     }
     
-    visit_cfg_node(smc, node->branch_a, NULL);
-    visit_cfg_node(&copy, node->branch_b, NULL);
+    visit_cfg_node(smc, node->branch_a);
+    visit_cfg_node(&copy, node->branch_b);
     if (copy.had_error)
         smc->had_error = true;
 }
@@ -590,7 +616,7 @@ static bool run_sm(SMChecker *smc, VEC_PTR_Stmt *ast, StmtSMDecl *sm) {
         } else {
             smc->last = st->base.loc;
             CFGNode *cfg = generate_cfg(&st->body, smc->arena);
-            visit_cfg_node(smc, cfg, NULL);
+            visit_cfg_node(smc, cfg);
             if (smc->had_error)
                 failed = true;
         }

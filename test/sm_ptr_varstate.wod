@@ -10,8 +10,8 @@ void main() {
     int index = 0;
     index = index + alloc();
 
-    if (index != -1) {
-        int something = asdf[index].a;
+    if (index != 0) {
+        int something = asdf[index];
     }
 }
 
@@ -28,6 +28,11 @@ sm varstate {
         | { c[v] } ==> { err("unknown access"); }
         ;
     
+    v.not_null:
+        { v == 0 } ==> true=v.null, false=v.not_null
+        | { v != 0 } ==> true=v.not_null, false=v.null
+        ;
+
     v.null:
         { c[v] } ==> { err("null access"); }
         ;
