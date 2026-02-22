@@ -46,6 +46,7 @@ typedef enum {
     TOK_SM_ARROW,
     TOK_END_OF_PATH,
     TOK_STATE,
+    TOK_STMT,
 
     TOK_ERROR, TOK_EOF
 } TokenType;

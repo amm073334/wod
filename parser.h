@@ -77,6 +77,7 @@ VEC_PTR_DEF(Stmt);
 typedef struct {
     Expr base;
     Expr *expr_pattern;
+    Stmt *stmt_pattern;
     StringView next_state_var;
     StringView next_state_true;
     StringView next_state_false;

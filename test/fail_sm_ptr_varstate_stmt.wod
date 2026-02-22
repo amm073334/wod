@@ -1,0 +1,53 @@
+cdb asdf {
+    int a;
+}
+
+int alloc() {
+    return 1;
+}
+
+void free(int x) {}
+
+void main() {
+    int index;
+    index = alloc();
+
+    if (index != 0) {
+        int something = asdf[index];
+        free(index);
+    }
+    int a = asdf[index];
+}
+
+sm varstate {
+    decl { any } c;
+    state decl { any } v;
+
+    start:
+        __stmt { v = alloc(); } ==> v.unknown;
+
+    v.unknown:
+        { v == 0 } ==> true=v.null, false=v.not_null
+        | { v != 0 } ==> true=v.not_null, false=v.null
+        | { free(v) } ==> { err("freed unknown"); }
+        | { c[v] } ==> { err("unknown access"); }
+        ;
+    
+    v.not_null:
+        { v == 0 } ==> true=v.null, false=v.not_null
+        | { v != 0 } ==> true=v.not_null, false=v.null
+        | { free(v) } ==> v.freed
+        ;
+
+    v.null:
+        { v == 0 } ==> true=v.null, false=v.not_null
+        | { v != 0 } ==> true=v.not_null, false=v.null
+        | { free(v) } ==> { err("freed null"); }
+        | { c[v] } ==> { err("null access"); }
+        ;
+
+    v.freed:
+        { c[v] } ==> { err("use-after-free"); }
+        ;
+
+}

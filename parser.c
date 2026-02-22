@@ -781,15 +781,22 @@ static VEC_PTR_Stmt sm_body(Parser *parser) {
         VEC_INIT(matches);
 
         do {
-            Expr *to_match = NULL;
+            Expr *match_expr = NULL;
+            Stmt *match_stmt = NULL;
             Token loc;
             if (match(parser, TOK_END_OF_PATH)) {
-                ALLOC_NODE((ExprSMEndOfPath *)to_match,
+                ALLOC_NODE((ExprSMEndOfPath *)match_expr,
                     parser->previous, ExprSMEndOfPath, (ExprSMEndOfPath){0});
+            } else if (match(parser, TOK_STMT)) {
+                consume(parser, TOK_LEFT_BRACE, SV("Expected '{' before state rule."));
+                loc = parser->previous;
+                match_stmt = declaration(parser);
+    
+                consume(parser, TOK_RIGHT_BRACE, SV("Expected '}' after pattern."));
             } else {
                 consume(parser, TOK_LEFT_BRACE, SV("Expected '{' before state rule."));
                 loc = parser->previous;
-                to_match = expression(parser);
+                match_expr = expression(parser);
     
                 consume(parser, TOK_RIGHT_BRACE, SV("Expected '}' after pattern."));
             }
@@ -798,9 +805,10 @@ static VEC_PTR_Stmt sm_body(Parser *parser) {
             ExprSMMatch *expr;
             if (match(parser, TOK_LEFT_BRACE)) {
                 VEC_PTR_Stmt action = block(parser);
-
+                
                 ALLOC_NODE(expr, loc, ExprSMMatch,
-                    (ExprSMMatch){ .expr_pattern = to_match,
+                    (ExprSMMatch){ .expr_pattern = match_expr,
+                        .stmt_pattern = match_stmt,
                         .next_state_true = SV_NULL, .action = action, });
             } else {
                 bool transition_on_split = false;
@@ -842,8 +850,10 @@ static VEC_PTR_Stmt sm_body(Parser *parser) {
                     state_name_false = parser->previous.text;
                 }
 
+
                 ALLOC_NODE(expr, loc, ExprSMMatch,
-                    (ExprSMMatch){ .expr_pattern = to_match,
+                    (ExprSMMatch){ .expr_pattern = match_expr,
+                        .stmt_pattern = match_stmt,
                         .next_state_var = var_name,
                         .next_state_true = state_name_true,
                         .next_state_false = state_name_false });

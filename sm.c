@@ -194,6 +194,44 @@ static bool expr_match(SMChecker *smc, Expr *expr, Expr *pattern) {
     return false;
 }
 
+static bool stmt_match(SMChecker *smc, Stmt *stmt, Stmt *pattern) {
+    if (stmt->type != pattern->type) return false;
+
+    switch (stmt->type) {
+        case NODE_StmtVarDecl: {
+            fprintf(stderr, "NOTE: Matching variable declarations doesn't quite work yet.\n");
+            return false;
+            // StmtVarDecl *st = (StmtVarDecl *)stmt;
+            // StmtVarDecl *pat = (StmtVarDecl *)pattern;
+
+            // Symbol *sym = env_find(&smc->env, pat->name);
+            // if (sym && sym->type.basetype == TYPE_SM_ANY) {
+            //     SMVar *v = (SMVar *)sym->value;
+            //     if (v->match == NULL) {
+            //         v->match = expr;
+            //         return true;
+            //     } else {
+            //         return expr_match(smc, expr, (Expr *)v->match);
+            //     }
+            // }
+
+            // return expr_match(smc, st->, pat->left)
+            //     && expr_match(smc, st->right, pat->right);
+        }
+        break;
+        case NODE_StmtAssign: {
+            StmtAssign *st = (StmtAssign *)stmt;
+            StmtAssign *pat = (StmtAssign *)pattern;
+
+            return expr_match(smc, st->left, pat->left)
+                && expr_match(smc, st->right, pat->right);
+        }
+        break;
+        default:
+            UNIMPLEMENTED;
+    }
+}
+
 static void visit_Expr(SMChecker *smc, Expr *expr);
 static void visit_Stmt(SMChecker *smc, Stmt *stmt);
 static void visit_cfg_node(SMChecker *smc, CFGNode *node);
@@ -278,7 +316,10 @@ static void sm_action(SMChecker *smc, Token *tok, VEC_PTR_Stmt action) {
 }
 
 // Find first transition in list that matches expr. Return true if found.
-static bool check_matches(SMChecker *smc, Expr *expr, VEC_PTR_ExprSMMatch matches) {
+static bool check_matches(SMChecker *smc, Expr *expr, Stmt *stmt, VEC_PTR_ExprSMMatch matches) {
+    // Should only be checking one thing.
+    assert(!(expr && stmt));
+    
     for (size_t i = 0; i < matches.count; i++) {
         // Reset all bound variables before a transition is made.
         // (A variable bound during one transition shouldn't persist to
@@ -292,8 +333,19 @@ static bool check_matches(SMChecker *smc, Expr *expr, VEC_PTR_ExprSMMatch matche
             }
         }
 
-        if (!expr_match(smc, expr, matches.at[i]->expr_pattern))
+        if ((expr && !matches.at[i]->expr_pattern)
+            || (stmt && !matches.at[i]->stmt_pattern))
             continue;
+            
+        if (expr) {
+            assert(matches.at[i]->expr_pattern);
+            if (!expr_match(smc, expr, matches.at[i]->expr_pattern))
+                continue;
+        } else {
+            assert(matches.at[i]->stmt_pattern);
+            if (!stmt_match(smc, stmt, matches.at[i]->stmt_pattern))
+                continue;
+        }
         
         // If the match was an action.
         if (sv_is_null(matches.at[i]->next_state_true)) {
@@ -368,10 +420,13 @@ static bool check_matches(SMChecker *smc, Expr *expr, VEC_PTR_ExprSMMatch matche
     return false;
 }
 
-static void transition(SMChecker *smc, Expr *expr) {
+static void transition(SMChecker *smc, Expr *expr, Stmt* stmt) {
+    // Should only check one or the other.
+    assert(!(expr && stmt));
+
     smc->false_next = NULL;
 
-    if (check_matches(smc, expr, smc->state->matches))
+    if (check_matches(smc, expr, stmt, smc->state->matches))
         return;
 
     for (size_t var_i = 0; var_i < smc->env.symbols.count; var_i++) {
@@ -388,12 +443,12 @@ static void transition(SMChecker *smc, Expr *expr) {
             matches = v->state->matches;
         }
 
-        check_matches(smc, expr, matches);
+        check_matches(smc, expr, stmt, matches);
     }
 }
 
 static void visit_Expr(SMChecker *smc, Expr *expr) {
-    transition(smc, expr);
+    transition(smc, expr, NULL);
 
     switch (expr->type) {
         case NODE_ExprVar:
@@ -438,6 +493,8 @@ static void visit_Expr(SMChecker *smc, Expr *expr) {
 }
 
 static void visit_Stmt(SMChecker *smc, Stmt *stmt) {
+    transition(smc, NULL, stmt);
+
     switch (stmt->type) {
         case NODE_StmtAssign: {
             StmtAssign *st = (StmtAssign *)stmt;
@@ -447,7 +504,8 @@ static void visit_Stmt(SMChecker *smc, Stmt *stmt) {
         }
         case NODE_StmtVarDecl: {
             StmtVarDecl *st = (StmtVarDecl *)stmt;
-            visit_Expr(smc, st->initializer);
+            if (st->initializer)
+                visit_Expr(smc, st->initializer);
             return;
         }
         case NODE_StmtFuncDecl: {
@@ -524,7 +582,7 @@ static void visit_cfg_node(SMChecker *smc, CFGNode *node) {
             (Expr*)&(ExprSMEndOfPath){ 
             .base.loc = smc->last,
             .base.type = NODE_ExprSMEndOfPath
-        });
+        }, NULL);
         return;
     }
     
