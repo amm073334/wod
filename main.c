@@ -41,17 +41,17 @@ int main(int argc, const char *argv[]) {
     Arena arena;
     arena_init(&arena);
 
-    // char *source = alloc_source(to_sv(argv[1]), &arena);
-    // VEC_PTR_Stmt *ast = generate_ast(to_sv(argv[1]), source, &arena);
+    char *source = alloc_source(to_sv(argv[1]), &arena);
+    VEC_PTR_Stmt *ast = generate_ast(to_sv(argv[1]), source, &arena);
 
-    // for (size_t i = 0; i < ast->count; i++) {
-    //     if (ast->at[i]->type == NODE_StmtFuncDecl) {
-    //         StmtFuncDecl *s = (StmtFuncDecl *)ast->at[i];
-    //         CFGNode *cfg = generate_cfg(&s->body, &arena);
-    //         StringView out = generate_cfg_graph(cfg, &arena);
-    //         printf(SV_FMT "\n", SV_FMT_VAL(out));
-    //     }
-    // }
+    for (size_t i = 0; i < ast->count; i++) {
+        if (ast->at[i]->type == NODE_StmtFuncDecl) {
+            StmtFuncDecl *s = (StmtFuncDecl *)ast->at[i];
+            CFGNode *cfg = generate_cfg(&s->body, &arena);
+            StringView out = generate_cfg_graph(source, cfg, &arena);
+            printf(SV_FMT "\n", SV_FMT_VAL(out));
+        }
+    }
 
     // Environment *e = typecheck(to_sv(argv[1]), &arena);
     // if (!e) exit(1);

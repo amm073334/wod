@@ -108,11 +108,50 @@ static StringView number_to_sv(size_t a, Arena *arena) {
     return to_sv(buf);
 }
 
-static StringView transition(StringView sv, size_t a, size_t b, Arena *arena) {
-    sv = sv_concat(arena, sv, number_to_sv(a, arena));
+static StringView get_line(char *source, size_t line, Arena *arena) {
+    const char *line_start;
+    line_start = source;
+    
+    size_t curr_line = 1;
+    while (curr_line < line) {
+        while (*line_start != '\n' && *line_start != '\0')
+            line_start++;
+
+        line_start++;
+        curr_line++;
+    }
+
+    // remove leading whitespace
+    while (*line_start == ' ' || *line_start == '\t' || *line_start == '\n' || *line_start == '\r')
+        line_start++;
+
+    const char *line_end = line_start;
+    while (line_end[0] != '\r' && line_end[0] != '\n' && line_end[0] != '\0')
+        line_end++;
+
+    char *s = arena_alloc(arena, line_end - line_start);
+    memcpy(s, line_start, line_end - line_start);
+    return (StringView){
+        .data = s,
+        .len = line_end - line_start
+    };
+}
+
+static StringView transition(char *source, StringView sv, size_t a, size_t b, Arena *arena) {
+    sv = sv_concat(arena, sv, SV("\""));
+    sv = sv_concat(arena, sv, get_line(source, a, arena));
+    sv = sv_concat(arena, sv, SV("\\n..."));
+    sv = sv_concat(arena, sv, SV("\""));
     sv = sv_concat(arena, sv, SV("->"));
-    sv = sv_concat(arena, sv, number_to_sv(b, arena));
-    sv = sv_concat(arena, sv, SV(";"));
+    if (b == 9999) {
+        sv = sv_concat(arena, sv, SV("END"));
+    } else {
+        sv = sv_concat(arena, sv, SV("\""));
+        sv = sv_concat(arena, sv, get_line(source, b, arena));
+        sv = sv_concat(arena, sv, SV("\\n..."));
+        sv = sv_concat(arena, sv, SV("\""));
+        sv = sv_concat(arena, sv, SV(";"));
+    }
     return sv;
 }
 
@@ -120,12 +159,12 @@ VEC_PTR_DEF(CFGNode);
 
 // Extremely inefficient since it copies the whole string 
 // each time you append anything, but it will do for now.
-static StringView graph_gen(VEC_PTR_CFGNode *visited, CFGNode *parent, CFGNode *node, StringView sv, Arena *arena) {
+static StringView graph_gen(char *source, VEC_PTR_CFGNode *visited, CFGNode *parent, CFGNode *node, StringView sv, Arena *arena) {
     if (!node) return sv;
 
     if (!node->branch_a) {
         // Node is the end node.
-        sv = transition(sv, parent->block.at[0]->loc.line,
+        sv = transition(source, sv, parent->block.at[0]->loc.line,
             9999, arena);
         return sv;
     }
@@ -136,12 +175,12 @@ static StringView graph_gen(VEC_PTR_CFGNode *visited, CFGNode *parent, CFGNode *
         // to the end node immediately after.
         // Ideally we'd just prune that node since it does nothing, but
         // uhh pain.
-        sv = transition(sv, parent->block.at[0]->loc.line,
-            8888, arena);
+        sv = transition(source, sv, parent->block.at[0]->loc.line,
+            9999, arena);
         return sv;
     }
 
-    sv = transition(sv, parent->block.at[0]->loc.line,
+    sv = transition(source, sv, parent->block.at[0]->loc.line,
         node->block.at[0]->loc.line, arena);
 
     for (size_t i = 0; i < visited->count; i++) {
@@ -150,11 +189,11 @@ static StringView graph_gen(VEC_PTR_CFGNode *visited, CFGNode *parent, CFGNode *
     }
     VEC_PUSH(*visited, node, arena);
 
-    sv = graph_gen(visited, node, node->branch_a, sv, arena);
-    return graph_gen(visited, node, node->branch_b, sv, arena);    
+    sv = graph_gen(source, visited, node, node->branch_a, sv, arena);
+    return graph_gen(source, visited, node, node->branch_b, sv, arena);    
 }
 
-StringView generate_cfg_graph(CFGNode *start, Arena *arena) {
+StringView generate_cfg_graph(char *source, CFGNode *start, Arena *arena) {
     if (start->block.count <= 0)
         return SV_NULL;
 
@@ -164,8 +203,8 @@ StringView generate_cfg_graph(CFGNode *start, Arena *arena) {
     VEC_INIT(visited);
     VEC_PUSH(visited, start, arena);
 
-    sv = graph_gen(&visited, start, start->branch_a, sv, arena);
-    sv = graph_gen(&visited, start, start->branch_b, sv, arena);
+    sv = graph_gen(source, &visited, start, start->branch_a, sv, arena);
+    sv = graph_gen(source, &visited, start, start->branch_b, sv, arena);
 
     sv = sv_concat(arena, sv, SV("}\n"));
 

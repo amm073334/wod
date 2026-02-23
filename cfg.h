@@ -17,6 +17,6 @@ struct CFGNode {
 };
 
 CFGNode *generate_cfg(VEC_PTR_Stmt *func_body, Arena *arena);
-StringView generate_cfg_graph(CFGNode *start, Arena *arena);
+StringView generate_cfg_graph(char *source, CFGNode *start, Arena *arena);
 
 #endif // WOD_CFG_H_
