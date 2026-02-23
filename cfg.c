@@ -138,7 +138,9 @@ static StringView get_line(char *source, size_t line, Arena *arena) {
 }
 
 static StringView transition(char *source, StringView sv, size_t a, size_t b, Arena *arena) {
-    sv = sv_concat(arena, sv, SV("\""));
+    sv = sv_concat(arena, sv, SV("\" line "));
+    sv = sv_concat(arena, sv, number_to_sv(a, arena));
+    sv = sv_concat(arena, sv, SV(":\\n"));
     sv = sv_concat(arena, sv, get_line(source, a, arena));
     sv = sv_concat(arena, sv, SV("\\n..."));
     sv = sv_concat(arena, sv, SV("\""));
@@ -146,7 +148,9 @@ static StringView transition(char *source, StringView sv, size_t a, size_t b, Ar
     if (b == 9999) {
         sv = sv_concat(arena, sv, SV("END"));
     } else {
-        sv = sv_concat(arena, sv, SV("\""));
+        sv = sv_concat(arena, sv, SV("\" line "));
+        sv = sv_concat(arena, sv, number_to_sv(b, arena));
+        sv = sv_concat(arena, sv, SV(":\\n"));
         sv = sv_concat(arena, sv, get_line(source, b, arena));
         sv = sv_concat(arena, sv, SV("\\n..."));
         sv = sv_concat(arena, sv, SV("\""));
