@@ -23,7 +23,11 @@ typedef struct {
     // token, for error reporting.
     Token last;
 
-    // Another hack. Stores the most-recently-seen
+    // Another hack. If a transition branches to two different
+    // states, this variable stores the most-recently-seen
+    // false branch. This is needed because the place where
+    // a transition is checked is different from the place where
+    // the state machine is actually split.
     StmtSMState *false_next;
 
     StringView file_path;
