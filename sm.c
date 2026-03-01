@@ -428,8 +428,6 @@ static void transition(SMChecker *smc, Expr *expr, Stmt* stmt) {
     // Should only check one or the other.
     assert(!(expr && stmt));
 
-    smc->false_next = NULL;
-
     if (check_matches(smc, expr, stmt, smc->state->matches))
         return;
 
@@ -572,6 +570,8 @@ static const int TYPE_TABLE[] = {
 };
 
 static void visit_cfg_node(SMChecker *smc, CFGNode *node) {
+    smc->false_next = NULL;
+
     smc->current_node = node;
     
     for (size_t i = smc->stmt_in_node; i < node->block.count; i++) {
