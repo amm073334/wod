@@ -424,7 +424,7 @@ static bool check_matches(SMChecker *smc, Expr *expr, Stmt *stmt, VEC_PTR_ExprSM
     return false;
 }
 
-static void transition(SMChecker *smc, Expr *expr, Stmt* stmt) {
+static void transition(SMChecker *smc, Expr *expr, Stmt *stmt) {
     // Should only check one or the other.
     assert(!(expr && stmt));
 
