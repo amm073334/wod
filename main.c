@@ -9,7 +9,6 @@
 #include "commonevent.h"
 #include "environment.h"
 
-#include "sm.h"
 #include "cfg.h"
 
 typedef struct {
@@ -53,10 +52,8 @@ int main(int argc, const char *argv[]) {
         }
     }
 
-    // Environment *e = typecheck(to_sv(argv[1]), &arena);
-    // if (!e) exit(1);
-
-    bool success = run_sm_checker(to_sv(argv[1]), &arena);
+    Environment *e = typecheck(to_sv(argv[1]), &arena);
+    if (!e) exit(2);
 
     // Arena wl_arena;
     // arena_init(&wl_arena);
@@ -76,6 +73,6 @@ int main(int argc, const char *argv[]) {
     // gd_write_dir(&gd, "build");
     arena_free(&arena);
 
-    return success ? 0 : 2;
+    return 0;
     // return 0;
 }

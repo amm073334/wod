@@ -1,9 +1,0 @@
-void main() {
-    assert(1 * 2 + 1 * 2);
-}
-
-sm flow_insensitive check_assert {
-    decl { any } expr;
-
-    start: { expr + expr } ==> { err("added expr to self"); };
-}

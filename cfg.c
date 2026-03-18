@@ -75,9 +75,6 @@ static CFGNode *visit_Stmt(CFGNode *parent, Stmt *stmt, CFGNode *end, Arena *are
         case NODE_StmtBreak:
             UNIMPLEMENTED;
 
-        case NODE_StmtSMDecl:
-        case NODE_StmtSMState:
-            UNREACHABLE;
         default:
             VEC_PUSH(parent->block, stmt, arena);
             return parent;

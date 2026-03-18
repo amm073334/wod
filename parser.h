@@ -13,9 +13,6 @@ typedef enum {
     NODE_ExprCall,
     NODE_ExprIntLit,
     NODE_ExprStrLit,
-
-    NODE_ExprSMMatch,
-    NODE_ExprSMEndOfPath,
 } ExprType;
 
 typedef struct {
@@ -74,22 +71,6 @@ typedef struct {
 typedef struct Stmt Stmt;
 VEC_PTR_DEF(Stmt);
 
-typedef struct {
-    Expr base;
-    Expr *expr_pattern;
-    Stmt *stmt_pattern;
-    StringView next_state_var;
-    StringView next_state_true;
-    StringView next_state_false;
-    VEC_PTR_Stmt action;
-} ExprSMMatch;
-
-VEC_PTR_DEF(ExprSMMatch);
-
-typedef struct {
-    Expr base;
-} ExprSMEndOfPath;
-
 typedef enum {
     NODE_StmtImport,
     NODE_StmtAssign,
@@ -105,9 +86,6 @@ typedef enum {
     NODE_StmtCmd,
     NODE_StmtDBDecl,
     NODE_StmtExpr,
-
-    NODE_StmtSMDecl,
-    NODE_StmtSMState,
 } StmtType;
 
 typedef struct Stmt {
@@ -204,20 +182,6 @@ typedef struct {
     Stmt base;
     Expr *expr;
 } StmtExpr;
-
-typedef struct {
-    Stmt base;
-    StringView name;
-    bool flow_insensitive;
-    VEC_PTR_Stmt body;
-} StmtSMDecl;
-
-typedef struct {
-    Stmt base;
-    StringView var;
-    StringView name;
-    VEC_PTR_ExprSMMatch matches;
-} StmtSMState;
 
 VEC_PTR_Stmt *generate_ast(StringView file_path, const char *source, Arena *arena);
 

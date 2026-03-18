@@ -84,7 +84,6 @@ static void synchronize(Parser *parser) {
             case TOK_FOR:
             case TOK_WHILE:
             case TOK_RETURN:
-            case TOK_SM:
                 return;
             default:
                 ;
@@ -727,176 +726,6 @@ static Stmt *function_decl(Parser *parser) {
     return (Stmt *)stmt;
 }
 
-static VEC_PTR_Stmt sm_body(Parser *parser) {
-    VEC_PTR_Stmt stmts;
-    VEC_INIT(stmts);
-
-    // Declarations.
-    while (match(parser, TOK_STATE) || match(parser, TOK_DECL)) {
-        bool has_state = false;
-        if (parser->previous.type == TOK_STATE) {
-            consume(parser, TOK_DECL, SV("Expected 'decl' after 'state'."));
-            has_state = true;
-        }
-        
-        consume(parser, TOK_LEFT_BRACE, SV("Expected '{' before decl type."));
-        
-        Token decl_type = parser->current;
-        if (!match(parser, TOK_ANY) &&
-            !match(parser, TOK_ANY_CALL) &&
-            !match(parser, TOK_ANY_ARGS)) {
-            
-            error_current(parser, SV("Unexpected decl type."));
-        }
-        decl_type = parser->previous;
-
-        consume(parser, TOK_RIGHT_BRACE, SV("Expected '}' after decl type."));
-
-        consume(parser, TOK_IDENTIFIER, SV("Expected decl name."));
-        Token loc = parser->previous;
-
-        consume(parser, TOK_SEMICOLON, SV("Expected ';' after decl."));
-        
-        StmtVarDecl *stmt;
-        ALLOC_NODE(stmt, loc, StmtVarDecl,
-            (StmtVarDecl){ .type = decl_type, .name = loc.text,
-                .smvar_has_state = has_state });
-
-        VEC_PUSH(stmts, (Stmt *)stmt, parser->arena);
-    }
-
-    // States.
-    while (match(parser, TOK_IDENTIFIER)) {
-        StringView state_var = SV_NULL;
-        Token state_loc = parser->previous;
-        if (match(parser, TOK_DOT)) {
-            consume(parser, TOK_IDENTIFIER, SV("Expected state name."));
-            state_var = state_loc.text;
-            state_loc = parser->previous;
-        }
-
-        consume(parser, TOK_COLON, SV("Expected colon after state name."));
-
-        VEC_PTR_ExprSMMatch matches;
-        VEC_INIT(matches);
-
-        do {
-            Expr *match_expr = NULL;
-            Stmt *match_stmt = NULL;
-            Token loc;
-            if (match(parser, TOK_END_OF_PATH)) {
-                ALLOC_NODE((ExprSMEndOfPath *)match_expr,
-                    parser->previous, ExprSMEndOfPath, (ExprSMEndOfPath){0});
-            } else if (match(parser, TOK_STMT)) {
-                consume(parser, TOK_LEFT_BRACE, SV("Expected '{' before state rule."));
-                loc = parser->previous;
-                match_stmt = declaration(parser);
-    
-                consume(parser, TOK_RIGHT_BRACE, SV("Expected '}' after pattern."));
-            } else {
-                consume(parser, TOK_LEFT_BRACE, SV("Expected '{' before state rule."));
-                loc = parser->previous;
-                match_expr = expression(parser);
-    
-                consume(parser, TOK_RIGHT_BRACE, SV("Expected '}' after pattern."));
-            }
-            consume(parser, TOK_SM_ARROW, SV("Expected '==>' after pattern."));
-            
-            ExprSMMatch *expr;
-            if (match(parser, TOK_LEFT_BRACE)) {
-                VEC_PTR_Stmt action = block(parser);
-                
-                ALLOC_NODE(expr, loc, ExprSMMatch,
-                    (ExprSMMatch){ .expr_pattern = match_expr,
-                        .stmt_pattern = match_stmt,
-                        .next_state_true = SV_NULL, .action = action, });
-            } else {
-                bool transition_on_split = false;
-                if (match(parser, TOK_TRUE)) {
-                    transition_on_split = true;
-                    consume(parser, TOK_EQUAL, SV("Expected '='."));
-                }
-
-                bool using_varstate = false;
-
-                StringView state_name_true = SV_NULL;
-                StringView state_name_false = SV_NULL;
-                StringView var_name = SV_NULL;
-
-                consume(parser, TOK_IDENTIFIER, SV("Expected state name."));
-                state_name_true = parser->previous.text;
-                if (match(parser, TOK_DOT)) {
-                    using_varstate = true;
-
-                    var_name = state_name_true;
-
-                    consume(parser, TOK_IDENTIFIER, SV("Expected state name."));
-                    state_name_true = parser->previous.text;
-                }
-
-                if (transition_on_split) {
-                    consume(parser, TOK_COMMA, SV("Expected a second state."));
-                    consume(parser, TOK_FALSE, SV("Expected 'false'."));
-                    consume(parser, TOK_EQUAL, SV("Expected '='."));
-
-                    if (using_varstate) {
-                        consume(parser, TOK_IDENTIFIER, SV("Expected variable name."));
-                        if (!sv_equals(parser->previous.text, var_name))
-                            error_previous(parser, SV("Variable names must match."));
-                        
-                        consume(parser, TOK_DOT, SV("Expected '.'"));
-                    }
-                    consume(parser, TOK_IDENTIFIER, SV("Expected state name."));
-                    state_name_false = parser->previous.text;
-                }
-
-
-                ALLOC_NODE(expr, loc, ExprSMMatch,
-                    (ExprSMMatch){ .expr_pattern = match_expr,
-                        .stmt_pattern = match_stmt,
-                        .next_state_var = var_name,
-                        .next_state_true = state_name_true,
-                        .next_state_false = state_name_false });
-            }
-            VEC_PUSH(matches, expr, parser->arena);   
-        
-        } while (match(parser, TOK_PIPE));
-
-        consume(parser, TOK_SEMICOLON, SV("Expected ';' after state rule."));
-
-
-        StmtSMState *stmt;
-        ALLOC_NODE(stmt, state_loc, StmtSMState,
-            (StmtSMState){ .name = state_loc.text,
-                .var = state_var, .matches = matches, });
-        
-        VEC_PUSH(stmts, (Stmt *)stmt, parser->arena);
-    }
-
-    consume(parser, TOK_RIGHT_BRACE, SV("Expected '}' after SM body."));
-
-    return stmts;
-}
-
-static Stmt *sm_decl(Parser *parser) {
-    bool flow_insensitive = false;
-    if (match(parser, TOK_FLOW_INSENSITIVE))
-        flow_insensitive = true;
-
-    consume(parser, TOK_IDENTIFIER, SV("Expected SM name."));
-    Token loc = parser->previous;
-
-    consume(parser, TOK_LEFT_BRACE, SV("Expected '{' before SM body."));
-    VEC_PTR_Stmt body = sm_body(parser);
-
-    StmtSMDecl *stmt;
-    ALLOC_NODE(stmt, loc, StmtSMDecl,
-        (StmtSMDecl){ .name = loc.text,
-            .flow_insensitive = flow_insensitive, .body = body,});
-    
-    return (Stmt *)stmt;
-}
-
 static Stmt *db_decl(Parser *parser) {
     Token db = parser->previous;
 
@@ -926,10 +755,6 @@ static Stmt *db_decl(Parser *parser) {
 }
 
 static Stmt *top_decl(Parser *parser) {
-    if (match(parser, TOK_SM)) {
-        return sm_decl(parser);
-    }
-
     if (match(parser, TOK_CDB) ||
         match(parser, TOK_UDB)) {
         return db_decl(parser);

@@ -31,17 +31,6 @@ static const Keyword keywords[] = {
     {.name = "cmd",      .type = TOK_CMD},
     {.name = "cdb",      .type = TOK_CDB},
     {.name = "cevtype",  .type = TOK_CEVTYPE},
-
-    {.name = "sm",               .type = TOK_SM},
-    {.name = "flow_insensitive", .type = TOK_FLOW_INSENSITIVE},
-    {.name = "decl",             .type = TOK_DECL},
-    {.name = "pat",              .type = TOK_PAT},
-    {.name = "any",              .type = TOK_ANY},
-    {.name = "any_call",         .type = TOK_ANY_CALL},
-    {.name = "any_args",         .type = TOK_ANY_ARGS},
-    {.name = "__end_of_path",    .type = TOK_END_OF_PATH},
-    {.name = "state",            .type = TOK_STATE},
-    {.name = "__stmt",            .type = TOK_STMT},
 };
 
 void lexer_init(Lexer *lexer, const char *source) {
@@ -236,7 +225,6 @@ Token scan_token(Lexer *lexer) {
                 match(lexer, '.') ? TOK_DOT_DOT : TOK_DOT);
         case '^': return make_token(lexer, TOK_CARET);
         case ';': return make_token(lexer, TOK_SEMICOLON);
-        case ':': return make_token(lexer, TOK_COLON);
         case '+':
             return make_token(lexer,
                 match(lexer, '=') ? TOK_PLUS_EQUAL : TOK_PLUS);
@@ -256,12 +244,9 @@ Token scan_token(Lexer *lexer) {
             return make_token(lexer,
                 match(lexer, '=') ? TOK_BANG_EQUAL : TOK_BANG);
         case '=':
-            if (match(lexer, '=')) {
-                if (match(lexer, '>'))
-                    return make_token(lexer, TOK_SM_ARROW);
-                else
-                    return make_token(lexer, TOK_EQUAL_EQUAL);
-            } else return make_token(lexer, TOK_EQUAL);
+            if (match(lexer, '='))
+                return make_token(lexer, TOK_EQUAL_EQUAL);
+            else return make_token(lexer, TOK_EQUAL);
         case '<':
             if (match(lexer, '='))
                 return make_token(lexer, TOK_LESS_EQUAL);
