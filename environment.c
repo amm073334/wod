@@ -12,38 +12,37 @@ Environment *env_new(Environment *parent, Arena *arena) {
     if (!env)
         return NULL;
 
+    env->parent = parent;
     env->symbols.count = 0;
     env->symbols.capacity = 0;
     env->symbols.at = NULL;
 
-    env->parent = parent;
-
     return env;
 }
 
-Symbol *env_insert(Environment *env, StringView name, BaseType basetype, void *value, Arena *arena) {
+Symbol *env_insert(Environment *env, StringView name, WodType type, size_t offset, Arena *arena) {
     Symbol *entry = env_find(env, name);
     
     if (entry) return NULL;
 
     Symbol sym;
     sym.name = name;
-    sym.value = value;
-    sym.type.basetype = basetype;
+    sym.type = type;
+    sym.offset = offset;
 
     VEC_PUSH(env->symbols, sym, arena);
     return &env->symbols.at[env->symbols.count - 1];
 }
 
 // TODO: This would be more efficient with a hash table.
-Symbol *env_find(Environment *env, StringView name) {
+WodType *env_find(Environment *env, StringView name) {
     if (!env) return NULL;
     
     for (size_t i = 0; i < env->symbols.count; i++) {
         if (!sv_equals(name, env->symbols.at[i].name))
             continue;
 
-        return &env->symbols.at[i];
+        return &env->symbols.at[i].type;
     }
 
     return env_find(env->parent, name);

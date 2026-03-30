@@ -12,7 +12,7 @@ static CFGNode *alloc_node(Arena *arena) {
 // Return the node at the _end_ of the path starting from stmt;
 // return NULL if path ends in a return.
 static CFGNode *visit_Stmt(CFGNode *parent, Stmt *stmt, CFGNode *end, Arena *arena) {
-    switch (stmt->type) {
+    switch (stmt->kind) {
         case NODE_StmtBlock: {
             StmtBlock *s = (StmtBlock *)stmt;
             for (size_t i = 0; i < s->stmts.count; i++) {
@@ -86,7 +86,7 @@ static CFGNode *visit_Stmt(CFGNode *parent, Stmt *stmt, CFGNode *end, Arena *are
 CFGNode *generate_cfg(VEC_PTR_Stmt *func_body, Arena *arena) {
     CFGNode *start = alloc_node(arena);
     StmtBlock fake_block = {
-        .base.type = NODE_StmtBlock,
+        .base.kind = NODE_StmtBlock,
         .stmts = *func_body };
     
     CFGNode *end = alloc_node(arena);

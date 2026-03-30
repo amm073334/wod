@@ -13,7 +13,7 @@
         } \
         *var = __VA_ARGS__; \
         (var)->base.loc = (token); \
-        (var)->base.type = NODE_##type_; \
+        (var)->base.kind = NODE_##type_; \
     } while (0)
 
 typedef struct {
@@ -91,66 +91,19 @@ static void synchronize(Parser *parser) {
     }
 }
 
-static bool sv_to_int(StringView s, int32_t *out) {
+static bool sv_to_int(StringView s, int32_t *out, Arena *arena) {
+    char *dup = sv_dup(arena, s);
 
-    // Hexadecimal.
-    if (s.data[0] == '0' &&
-        (s.data[1] == 'x' || s.data[1] == 'X')) {
+    errno = 0;
+    int64_t n = strtoll(dup, NULL, 0);
+    if (errno == ERANGE)
+        return false;
+    
+    if (n > 2147483647 || n < (-2147483647 - 1))
+        return false;
 
-        int32_t total = 0;
-        int32_t multiplier = 1;
-        for (size_t i = s.len - 1; i >= 2; i--) {
-            int32_t digit;
-            if (s.data[i] >= 'A' && s.data[i] <= 'F')
-                digit = s.data[i] - 'A' + 10;
-            else if (s.data[i] >= 'a' && s.data[i] <= 'f')
-                digit = s.data[i] - 'a' + 10;
-            else
-                digit = s.data[i] - '0';
-            
-            total += digit * multiplier;
-            
-            multiplier *= 16;
-        }
-
-        *out = total;
-        return true;
-    }
-
-    // Binary.
-    if (s.data[0] == '0' &&
-        (s.data[1] == 'b' || s.data[1] == 'B')) {
-
-        int32_t total = 0;
-        int32_t multiplier = 1;
-        for (size_t i = s.len - 1; i >= 2; i--) {
-            int32_t digit = s.data[i] - '0';
-            
-            total += digit * multiplier;
-            
-            multiplier *= 2;
-        }
-
-        *out = total;
-        return true;
-    }
-
-    // Decimal.
-    {
-        int32_t total = 0;
-        int32_t multiplier = 1;
-        for (size_t i = s.len - 1; i != -1; i--) {
-            int32_t digit = s.data[i] - '0';
-            
-            total += digit * multiplier;
-            if (total < 0) return false;
-            
-            multiplier *= 10;
-        }
-
-        *out = total;
-        return true;
-    }
+    *out = (int32_t)n;
+    return true;
 }
 
 static Expr *expression(Parser *parser);
@@ -158,8 +111,8 @@ static Expr *expression(Parser *parser);
 static Expr *primary(Parser *parser) {
     if (match(parser, TOK_NUMBER)) {
         int32_t number;
-        if (!sv_to_int(parser->previous.text, &number))
-            error_previous(parser, SV("Value cannot be stored in 32-bit integer."));
+        if (!sv_to_int(parser->previous.text, &number, parser->arena))
+            error_previous(parser, SV("Value cannot be stored in a 32-bit integer."));
 
         ExprIntLit *expr;
         ALLOC_NODE(expr, parser->previous, ExprIntLit, 
@@ -171,6 +124,13 @@ static Expr *primary(Parser *parser) {
         ExprStrLit *expr;
         ALLOC_NODE(expr, parser->previous, ExprStrLit, 
             (ExprStrLit){ .value = parser->previous.text });
+        return (Expr *)expr;
+    }
+
+    if (match(parser, TOK_TRUE) || match(parser, TOK_FALSE)) {
+        ExprBoolLit *expr;
+        ALLOC_NODE(expr, parser->previous, ExprBoolLit, 
+            (ExprBoolLit){ .value = parser->previous.type == TOK_TRUE });
         return (Expr *)expr;
     }
 
@@ -413,10 +373,17 @@ static Expr *expression(Parser *parser) {
 
 static Stmt *import(Parser *parser) {
     consume(parser, TOK_STRING, SV("Expected file path."));
-    
+
+    StringView alias = SV_NULL;
+
+    if (match(parser, TOK_AS)) {
+        consume(parser, TOK_IDENTIFIER, SV("Expected an alias."));
+        alias = parser->previous.text;
+    }
+
     StmtImport *stmt;
     ALLOC_NODE(stmt, parser->previous, StmtImport,
-        (StmtImport){ .path = parser->previous.text });
+        (StmtImport){ .path = parser->previous.text, .alias = alias });
 
     consume(parser, TOK_SEMICOLON, SV("Expected ';' after import."));
 
@@ -488,7 +455,8 @@ static Stmt *var_decl(Parser *parser, bool parse_const, bool parse_initializer) 
     StmtVarDecl *stmt;
     ALLOC_NODE(stmt, parser->previous, StmtVarDecl, 
         (StmtVarDecl){ .type = var_type, .name = param_name,
-            .array_length = array_length, .initializer = initializer });
+            .array_length = array_length, .initializer = initializer,
+            .is_const = is_const });
 
     return (Stmt *)stmt;
 }
@@ -616,7 +584,7 @@ static Stmt *cmd_stmt(Parser *parser) {
 
 static Stmt *assign_stmt(Parser *parser) {
     Expr *lhs = expression(parser);
-    if (lhs && lhs->type == NODE_ExprCall &&
+    if (lhs && lhs->kind == NODE_ExprCall &&
         match(parser, TOK_SEMICOLON)) {
 
         StmtExpr *stmt;
@@ -771,12 +739,17 @@ static Stmt *top_decl(Parser *parser) {
     if (match(parser, TOK_CONST)) {
         return var_decl(parser, true, true);
     }
+
+    if (match(parser, TOK_IMPORT)) {
+        error_previous(parser, SV("Imports must go at the top of a file."));
+        return NULL;
+    }
     
     error_current(parser, SV("Unexpected declaration."));
     return NULL;
 }
 
-VEC_PTR_Stmt *generate_ast(StringView file_path, const char *source, Arena *arena) {
+ProgramAST *generate_ast(StringView file_path, const char *source, Arena *arena) {
     Parser parser;
     lexer_init(&parser.lexer, source);
 
@@ -787,24 +760,27 @@ VEC_PTR_Stmt *generate_ast(StringView file_path, const char *source, Arena *aren
     parser.source = source;
     parser.file_path = file_path;
 
-    VEC_PTR_Stmt *stmts = arena_alloc(arena, sizeof(VEC_PTR_Stmt));
-    if (!stmts) {
+    ProgramAST *ast = arena_alloc(arena, sizeof(ProgramAST));
+    if (!ast) {
         fprintf(stderr, "Could not allocate AST.");
         return NULL;
     }
-    VEC_INIT(*stmts);
+    ast->file = file_path;
+    ast->source = source;
+    VEC_INIT(ast->imports);
+    VEC_INIT(ast->stmts);
     
     advance(&parser);
 
     while (match(&parser, TOK_IMPORT)) {
-        VEC_PUSH(*stmts, import(&parser), arena);
+        VEC_PUSH(ast->imports, import(&parser), arena);
         if (parser.panic_mode) synchronize(&parser);
     }
 
     while (!match(&parser, TOK_EOF)) {
-        VEC_PUSH(*stmts, top_decl(&parser), arena);
+        VEC_PUSH(ast->stmts, top_decl(&parser), arena);
         if (parser.panic_mode) synchronize(&parser);
     }
 
-    return parser.had_error ? NULL : stmts;
+    return parser.had_error ? NULL : ast;
 }

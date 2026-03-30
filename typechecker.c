@@ -5,13 +5,31 @@
 #include "error.h"
 
 typedef struct {
-    Environment modules;
-    Environment *global_env;
+    // Used to avoid analyzing a file more than once.
+    Environment *global_module_list;
+
+    // Tracks environments for the current file.
+    Environment *top_level_env;
     Environment *current_env;
-    int32_t function_offset;
+
+    // Offsets.
+    size_t global_int_offset;
+    size_t global_str_offset;
+    size_t cev_offset;
+    size_t udb_offset;
+    size_t cdb_offset;
+
+    // Used to make sure that return types are right, etc.
+    StmtFuncDecl *current_func;
+
+    // Used to make sure that continue/break statements are
+    // only used within loops.
+    size_t loop_depth;
+
     Arena *arena;
-    const char *source;
     StringView file_path;
+    const char *source;
+
     bool had_error;
 } Typechecker;
 
@@ -27,189 +45,657 @@ static void close_scope(Typechecker *tc) {
     tc->current_env = tc->current_env->parent;
 }
 
+static size_t new_g_int_offset(Typechecker *tc) {
+    return tc->global_int_offset++;
+}
+
+static size_t new_g_str_offset(Typechecker *tc) {
+    return tc->global_str_offset++;
+}
+
+static size_t new_cev_offset(Typechecker *tc) {
+    return tc->cev_offset++;
+}
+
+static Environment *env_new_assert(Environment *parent, Arena *arena) {
+    Environment *env = env_new(parent, arena);
+    if (!env) {
+        fprintf(stderr, "Fatal: Out of memory.\n");
+        exit(1);
+    }
+    return env;
+}
+
+static void *alloc_assert(Arena *arena, size_t size) {
+    void *out = arena_alloc(arena, size);
+    if (!out) {
+        fprintf(stderr, "Fatal: Out of memory.\n");
+        exit(1);
+    }
+    return out;
+}
+
+static bool wt_equal(WodType a, WodType b) {
+    // TODO: handle other types
+    return a.basetype == b.basetype;
+}
+
 static void tc_error(Typechecker *tc, Token *token, StringView message) {
     tc->had_error = true;
     error(tc->file_path, tc->source, token, message);
 }
 
-static void globals() {
-
+static void tc_expr_error(Typechecker *tc, Expr *expr, Token *token, StringView message) {
+    if (expr->type.basetype == TYPE_ERROR) return;
+    expr->type.basetype = TYPE_ERROR;
+    tc_error(tc, token, message);
 }
 
-static char *alloc_source(StringView path, Arena *arena) {
-    char *path_cstr = arena_alloc(arena, path.len + 1);
-    if (!path_cstr) {
-        fprintf(stderr, "Not enough memory to read '" SV_FMT "'.", SV_FMT_VAL(path));
-        exit(1);
+static void visit_Expr(Typechecker *tc, Expr *expr) {
+    // Initialize node's type to TYPE_NONE. If an error occurs somewhere,
+    // the type gets set to TYPE_ERROR; this makes it possible to check
+    // whether or not an error has occurred before doing something.
+    expr->type.basetype = TYPE_NONE;
+    
+    switch (expr->kind) {
+    case NODE_ExprVar: {
+        ExprVar *e = (ExprVar *)expr;
+        Symbol *sym = env_find(tc->current_env, e->name);
+        if (!sym) {
+            tc_expr_error(tc, expr, &e->base.loc, SV("Undeclared identifier."));
+        } else {
+            expr->type = sym->type;
+        }
+        return;
     }
-    memcpy(path_cstr, path.data, path.len);
-    path_cstr[path.len] = '\0';
+    case NODE_ExprArray: {
+        ExprArray *e = (ExprArray *)expr;
 
-    FILE *file = fopen(path_cstr, "rb");
-    if (!file) {
-        fprintf(stderr, "Could not open file '%s'.", path_cstr);
-        exit(1);
+        visit_Expr(tc, e->left);
+
+        if (e->left->type.array_length == 0) {
+            tc_expr_error(tc, expr, &e->left->loc,
+                SV("Tried to index into non-array type."));
+        }
+
+        visit_Expr(tc, e->index);
+
+        if (e->index->type.basetype != TYPE_INT) {
+            tc_expr_error(tc, expr, &e->index->loc,
+                SV("Array index must be integer type."));
+        }
+        
+        if (e->left->type.basetype != TYPE_DBTYPE
+            && !e->index->type.is_compile_time) {
+
+            tc_expr_error(tc, expr, &e->index->loc,
+                SV("Currently, indices of array accesses must be constant expressions."));
+        }
+
+        if (expr->type.basetype != TYPE_ERROR) {
+            if (e->left->type.basetype == TYPE_DBTYPE) {
+                expr->type = (WodType){
+                    .is_assignable = false,
+                    .basetype = TYPE_DBDATA,
+                    .is_compile_time = false,
+                    .array_length = 0 };
+            } else {
+                expr->type = e->left->type;
+                expr->type.array_length = 0;
+
+                if (!expr->type.is_compile_time)
+                    expr->type.is_assignable = true;
+            }
+        }
+        return;
     }
+    case NODE_ExprAccess: {
+        ExprAccess *e = (ExprAccess *)expr;
+        
+        Symbol *search = NULL;
 
-    fseek(file, 0L, SEEK_END);
-    size_t file_size = ftell(file);
-    rewind(file);
+        switch (e->left->type.basetype) {
+        case TYPE_DBDATA: {
+            Symbol *sym = env_find(tc->current_env, e->left->type.db_name);
 
-    char *buf = arena_alloc(arena, file_size + 1);
-    if (!buf) {
-        fprintf(stderr, "Not enough memory to read '%s'.", path_cstr);
-        exit(1);
+            // If we have successfully resolved an expression to be of type
+            // TYPE_DBDATA, then a check that the DB name was valid should have
+            // already been done.
+            assert(sym && sym->type.basetype == TYPE_DBTYPE);
+            
+            search = env_find(sym->type.db_env, e->name.text);
+            break;
+        }
+
+        case TYPE_MODULE:
+            assert(e->left->type.module_env);
+            search = env_find(e->left->type.module_env, e->name.text);
+            break;
+
+        case TYPE_DBTYPE:
+            tc_expr_error(tc, expr, &e->left->loc,
+                SV("Tried to access member of DB directly."));
+            break;
+
+        default:
+            tc_expr_error(tc, expr, &e->left->loc,
+                SV("Tried to access member of type that has no members."));
+            break;
+        }
+
+        if (search)
+            expr->type = search->type;
+        else
+            tc_expr_error(tc, expr, &e->name, SV("No such member found."));
+
+        return;
     }
+    case NODE_ExprBinary: {
+        ExprBinary *e = (ExprBinary *)expr;
 
-    size_t n = fread(buf, sizeof(char), file_size, file);
-    if (n < file_size) {
-        fprintf(stderr, "Could not read '%s'.", path_cstr);
-        exit(1);
+        visit_Expr(tc, e->left);
+        if (e->left->type.basetype != TYPE_INT)
+            tc_expr_error(tc, expr, &e->left->loc,
+                SV("Operand of binary operation must be integer type."));
+
+        visit_Expr(tc, e->right);
+        if (e->right->type.basetype != TYPE_INT)
+            tc_expr_error(tc, expr, &e->right->loc,
+                SV("Operand of binary operation must be integer type."));
+
+        if (expr->type.basetype != TYPE_ERROR) {
+            expr->type = (WodType){
+                .basetype = TYPE_INT,
+                .is_assignable = false,
+                .is_compile_time =
+                    e->left->type.is_compile_time
+                    && e->right->type.is_compile_time,
+                .array_length = 0
+            };
+        }
+
+        return;
     }
+    case NODE_ExprUnary: {
+        ExprUnary *e = (ExprUnary *)expr;
 
-    buf[n] = '\0';
+        visit_Expr(tc, e->right);
+        if (e->right->type.basetype != TYPE_INT)
+            tc_expr_error(tc, expr, &e->right->loc,
+                SV("Operand of unary operation must be integer type."));
 
-    fclose(file);
-    return buf;
+        if (expr->type.basetype != TYPE_ERROR) {
+            expr->type = (WodType){
+                .basetype = TYPE_INT,
+                .is_assignable = false,
+                .is_compile_time = e->right->type.is_compile_time,
+                .array_length = 0
+            };
+        }
+        return;
+    }
+    case NODE_ExprCall: {
+        ExprCall *e = (ExprCall *)expr;
+        if (e->callee->type.basetype != TYPE_FUNC) {
+            tc_expr_error(tc, expr, &e->callee->loc,
+                SV("Tried to call non-callable type."));
+        } else if (e->callee->type.params.count != e->args.count) {
+            tc_expr_error(tc, expr, &e->args.at[e->args.count - 1]->loc,
+                SV("Insufficient number of arguments to function call."));
+        } else {
+            for (size_t i = 0; i < e->args.count; i++) {
+                if (!wt_equal(e->callee->type.params.at[i], e->args.at[i]->type))
+                    tc_expr_error(tc, expr, &e->args.at[i]->loc,
+                        SV("Type mismatch in call."));
+            }
+        }
+
+        if (expr->type.basetype != TYPE_ERROR) {
+            expr->type = *e->callee->type.return_type;
+        }
+
+        return;
+    }
+    case NODE_ExprIntLit: {
+        ExprIntLit *e = (ExprIntLit *)expr;
+        expr->type = (WodType){
+            .basetype = TYPE_INT,
+            .is_assignable = false,
+            .is_compile_time = true,
+            .array_length = 0
+        };
+        return;
+    }
+    case NODE_ExprStrLit: {
+        ExprStrLit *e = (ExprStrLit *)expr;
+        expr->type = (WodType){
+            .basetype = TYPE_STR,
+            .is_assignable = false,
+            .is_compile_time = true,
+            .array_length = 0
+        };
+        return;
+    }
+    case NODE_ExprBoolLit: {
+        ExprBoolLit *e = (ExprBoolLit *)expr;
+        expr->type = (WodType){
+            .basetype = TYPE_BOOL,
+            .is_assignable = false,
+            .is_compile_time = true,
+            .array_length = 0
+        };
+        return;
+    }
+    default: UNREACHABLE;
+    }
 }
 
-static Environment *typecheck_file(Typechecker *typechecker, StringView path, bool is_main_file, Arena *arena) {
-    char *source = alloc_source(path, arena);
-    VEC_PTR_Stmt *ast = generate_ast(path, source, arena);
+static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
+    switch (stmt->kind) {
+    case NODE_StmtAssign: {
+        StmtAssign *s = (StmtAssign *)stmt;
+
+        visit_Expr(tc, s->left);
+
+        if (!s->left->type.is_assignable)
+            tc_error(tc, &s->left->loc, SV("Cannot assign to this expression."));
+
+        visit_Expr(tc, s->right);
+
+        if (!wt_equal(s->left->type, s->right->type))
+            tc_error(tc, &stmt->loc, SV("Assignment of incompatible types."));
+
+        return;
+    }
+    case NODE_StmtVarDecl: {
+        StmtVarDecl *s = (StmtVarDecl *)stmt;
+
+        // If declaration has some array length, initialize it to a dummy
+        // value and fix later when we can evaluate constant expressions.
+        size_t array_length = 0;
+        if (s->array_length) {
+            visit_Expr(tc, s->array_length);
+            if (!s->array_length->type.is_compile_time)
+                tc_error(tc, &s->array_length->loc,
+                    SV("Array length must be a constant expression."));
+            array_length = 1;
+        }
+
+        BaseType type;
+        switch (s->type.type) {
+            case TOK_INT:  type = TYPE_INT; break;
+            case TOK_STR:  type = TYPE_STR; break;
+            case TOK_BOOL: type = TYPE_BOOL; break;
+            // TODO: other variable types
+            default: UNREACHABLE;
+        }
+
+        if (s->is_const && !s->initializer)
+            tc_error(tc, &s->base.loc,
+                SV("Variable marked 'const' must have initializer."));
+
+        if (s->initializer) {
+            visit_Expr(tc, s->initializer);
+            if (type != s->initializer->type.basetype)
+                tc_error(tc, &s->initializer->loc,
+                    SV("Initializer does not match declared type of variable."));
+
+            if (s->is_const && !s->initializer->type.is_compile_time)
+                tc_error(tc, &s->initializer->loc,
+                    SV("Used non-constant expression to initialize 'const' variable."));
+        }
+
+        Symbol *sym = env_insert(tc->current_env, s->name,
+            (WodType){ .basetype = type, .is_assignable = true,
+                .is_compile_time = s->is_const, .array_length = array_length },
+                0, tc->arena);
+
+        if (!sym)
+            tc_error(tc, &s->base.loc, SV("Redeclaration of name."));
+        
+        return;
+    }
+    case NODE_StmtFuncDecl: {
+        StmtFuncDecl *s = (StmtFuncDecl *)stmt;
+        
+        open_scope(tc);
+
+        tc->current_func = s;
+
+        for (size_t i = 0; i < s->params.count; i++)
+            visit_Stmt(tc, s->params.at[i]);
+        for (size_t i = 0; i < s->body.count; i++)
+            visit_Stmt(tc, s->body.at[i]);
+
+        tc->current_func = NULL;
+
+        close_scope(tc);
+        return;
+    }
+    case NODE_StmtBlock: {
+        StmtBlock *s = (StmtBlock *)stmt;
+        open_scope(tc);
+        for (size_t i = 0; i < s->stmts.count; i++)
+            visit_Stmt(tc, s->stmts.at[i]);
+        close_scope(tc);
+        return;
+    }
+    case NODE_StmtReturn: {
+        StmtReturn *s = (StmtReturn *)stmt;
+        visit_Expr(tc, s->expr);
+        
+        Symbol *f = env_find(tc->top_level_env, tc->current_func->name);
+        assert(f);
+
+        if (!wt_equal(*f->type.return_type, s->expr->type))
+            tc_error(tc, &s->expr->loc, SV("Return type mismatch."));
+
+        return;
+    }
+    case NODE_StmtIf: {
+        StmtIf *s = (StmtIf *)stmt;
+        visit_Expr(tc, s->condition);
+        if (s->condition->type.basetype != TYPE_BOOL);
+            tc_error(tc, &s->condition->loc, SV("'if' condition must be boolean type."));
+
+        open_scope(tc);
+        visit_Stmt(tc, s->then_branch);
+        close_scope(tc);
+
+        open_scope(tc);
+        visit_Stmt(tc, s->else_branch);
+        close_scope(tc);
+        return;
+    }
+    case NODE_StmtLoop: {
+        StmtLoop *s = (StmtLoop *)stmt;
+        if (s->count) {
+            visit_Expr(tc, s->count);
+            if (s->count->type.basetype != TYPE_INT)
+                tc_error(tc, &s->count->loc,
+                    SV("Loop count must be integer type."));
+        }
+
+        tc->loop_depth++;
+        open_scope(tc);
+        visit_Stmt(tc, s->body);
+        close_scope(tc);
+        tc->loop_depth--;
+        return;
+    }
+    case NODE_StmtFor: {
+        StmtFor *s = (StmtFor *)stmt;
+        open_scope(tc);
+
+        Symbol *sym = env_insert(tc->current_env, s->iterator,
+            (WodType){ .basetype = TYPE_INT, .is_assignable = false,
+                .is_compile_time = false, .array_length = 0 }, 0, tc->arena);
+        
+        if (!sym)
+            tc_error(tc, &s->base.loc, SV("Redeclaration of iterator name."));
+
+        visit_Expr(tc, s->left_bound);
+        if (s->left_bound->type.basetype != TYPE_INT)
+            tc_error(tc, &s->left_bound->loc,
+                SV("Iteration bound must be of integer type."));
+        
+        visit_Expr(tc, s->right_bound);
+        if (s->right_bound->type.basetype != TYPE_INT)
+            tc_error(tc, &s->right_bound->loc,
+                SV("Iteration bound must be of integer type."));
+
+        tc->loop_depth++;
+        visit_Stmt(tc, s->body);
+        tc->loop_depth--;
+
+        close_scope(tc);
+        return;
+    }
+    case NODE_StmtContinue: {
+        StmtContinue *s = (StmtContinue *)stmt;
+        if (tc->loop_depth == 0) 
+            tc_error(tc, &stmt->loc,
+                SV("A 'continue' statement can only be used within a loop."));
+        return;
+    }
+    case NODE_StmtBreak: {
+        StmtBreak *s = (StmtBreak *)stmt;
+        if (tc->loop_depth == 0) 
+            tc_error(tc, &stmt->loc,
+                SV("A 'break' statement can only be used within a loop."));
+        return;
+    }
+    case NODE_StmtCmd: {
+        StmtCmd *s = (StmtCmd *)stmt;
+        visit_Expr(tc, s->id);
+        if (s->id->type.basetype != TYPE_INT)
+            tc_error(tc, &s->id->loc, SV("Command ID must be integer type."));
+        
+        if (!s->id->type.is_compile_time)
+            tc_error(tc, &s->id->loc, SV("Command ID must be constant expression."));
+
+        for (size_t i = 0; i < s->int_operands.count; i++) {
+            if (s->int_operands.at[i]->type.basetype != TYPE_INT
+                && s->int_operands.at[i]->type.basetype != TYPE_PTR)
+                tc_error(tc, &s->int_operands.at[i]->loc,
+                    SV("Argument must be integer or pointer type."));
+
+            if (!s->int_operands.at[i]->type.is_compile_time)
+                tc_error(tc, &s->int_operands.at[i]->loc,
+                    SV("Argument must be constant expression."));
+        }
+
+        for (size_t i = 0; i < s->str_operands.count; i++) {
+            if (s->str_operands.at[i]->type.basetype != TYPE_STR)
+                tc_error(tc, &s->str_operands.at[i]->loc,
+                    SV("Argument must be string type."));
+
+            if (!s->str_operands.at[i]->type.is_compile_time)
+                tc_error(tc, &s->str_operands.at[i]->loc,
+                    SV("Argument must be constant expression."));
+        }
+        return;
+    }
+    case NODE_StmtDBDecl: {
+        StmtDBDecl *s = (StmtDBDecl *)stmt;
+        Environment *db_env = env_new_assert(NULL, tc->arena);
+
+        int db_kind;
+        switch (s->db.type) {
+            case TOK_UDB: db_kind = DB_UDB; break;
+            case TOK_CDB: db_kind = DB_CDB; break;
+            default: UNREACHABLE;
+        }
+
+        Symbol *sym = env_insert(tc->current_env, s->name,
+            (WodType){ .basetype = TYPE_DBTYPE, .is_assignable = false,
+                .db_kind = db_kind, .db_env = db_env },
+            tc->cdb_offset++, tc->arena);
+
+        if (!sym) {
+            tc_error(tc, &stmt->loc, SV("Redeclaration of name."));
+            return;
+        }
+
+        assert(tc->current_env = tc->top_level_env);
+        tc->current_env = db_env;
+        for (size_t i = 0; i < s->fields.count; i++) {
+            if (s->fields.at[i]->is_const)
+                tc_error(tc, &s->fields.at[i]->base.loc,
+                    SV("Cannot mark DB field as 'const'."));
+            else {
+                visit_Stmt(tc, s->fields.at[i]);
+                if (s->fields.at[i]->initializer
+                    && !s->fields.at[i]->initializer->type.is_compile_time)
+                    tc_error(tc, &s->fields.at[i]->initializer->loc,
+                        SV("DB field initializer must be constant expression."));
+            }
+        }
+        tc->current_env = tc->top_level_env;
+
+        return;
+    }
+    case NODE_StmtExpr: {
+        StmtExpr *s = (StmtExpr *)stmt;
+        visit_Expr(tc, s->expr);
+        return;
+    }
+    default: UNREACHABLE;
+    }
+}
+
+static Environment *typecheck_file(Typechecker *tc, StringView path, const char *source, bool is_main_file, Arena *arena) {
+    ProgramAST *ast = generate_ast(path, source, arena);
     if (!ast) return NULL;
     
+    // TODO: try to make typechecking per-module, and handle recursive import stuff
+    //       elsewhere
     Environment imports;
     env_init(&imports);
     
-    Environment *globals = arena_alloc(arena, sizeof(Environment));
-    if (!globals) {
-        fprintf(stderr, "Could not allocate globals.");
-        return NULL;
-    }
-    env_init(globals);
+    // Handle imports. If an import isn't in the global table, then recursively
+    // check through that file first.
+    for (size_t i = 0; i < ast->imports.count; i++) {
+        StmtImport *s = (StmtImport *)ast->imports.at[i];
+        StringView module_path = get_full_path(s->path, arena);
 
-    // Handle imports.
-    bool import_failed = false;
-    size_t i = 0;
-    for (; i < ast->count; i++) {
-        if (ast->at[i]->type != NODE_StmtImport)
-            break;
+        // First, insert into the file's environment with a NULL environment.
+        Symbol *local_sym = env_insert(&imports, module_path,
+            (WodType){ .basetype = TYPE_MODULE,
+                .is_assignable = false, .module_env = NULL }, 0, arena);
 
-        StringView module_path =
-            get_full_path(((StmtImport *)ast->at[i])->path, arena);
-        Environment *module_env;
+        if (!local_sym) {
+            tc_error(tc, &s->base.loc, SV("Duplicate import."));
+            continue;
+        }
 
-        // Only check each file once.
-        Symbol *search = env_find(&typechecker->modules, module_path);
-        if (search) {
-            module_env = search->type.env;
+        // Insert into the global list of modules. Only handle each file once.
+        // Then go back and update the environments to be the module's
+        // (non-null) environment. 
+        Symbol *global_sym = env_insert(tc->global_module_list, module_path,
+            (WodType){ .basetype = TYPE_MODULE,
+                .is_assignable = false, .module_env = NULL }, 0, arena);
+
+        if (global_sym) {
+            // TODO: this source is wrong
+            Environment *sub_env =
+                typecheck_file(tc, module_path, source, false, arena);
+
+            if (!sub_env) tc->had_error = true;
+
+            global_sym->type.module_env = sub_env;
+            local_sym->type.module_env = sub_env;
         } else {
-            Symbol *sym = env_insert(&typechecker->modules, module_path, TYPE_MODULE, 0, arena);
-            assert(sym);
+            global_sym = env_find(tc->global_module_list, module_path);
+            local_sym->type.module_env = global_sym->type.module_env;
+        }
 
-            module_env = typecheck_file(typechecker, module_path, false, arena);
-            if (!module_env) import_failed = true;
+        if (!tc->had_error)
+            assert(local_sym->type.module_env && global_sym->type.module_env);
+    }
+
+    // If any imports failed, just exit early to avoid errors later on
+    // with a bunch of symbols not being found.
+    if (tc->had_error) return NULL;
+
+    tc->source = source;
+
+    // Do a pass to add all the top-level symbols.
+    tc->top_level_env = env_new_assert(NULL, arena);
+    tc->current_env = tc->top_level_env;
+
+    for (size_t i = 0; i < ast->stmts.count; i++) {
+        Stmt *stmt = ast->stmts.at[i];
+        switch (stmt->kind) {
+        case NODE_StmtVarDecl: {
+            StmtVarDecl *s = (StmtVarDecl *)stmt;
         
-            sym->type.env = module_env;
+            if (!s->is_const && s->initializer)
+                tc_error(tc, &s->base.loc,
+                    SV("Non-constant globals cannot have initializers."));
+
+            if (s->is_const && !s->initializer)
+                tc_error(tc, &s->base.loc,
+                    SV("Constant variables must be initialized."));
+        
+            visit_Stmt(tc, stmt);
+            break;
         }
+        case NODE_StmtFuncDecl: {
+            StmtFuncDecl *s = (StmtFuncDecl *)stmt;
 
-        Symbol *sym = env_insert(&imports, module_path, TYPE_MODULE, 0, arena);
-        if (sym) sym->type.env = module_env;
-    }
+            WodType wt = { .basetype = TYPE_FUNC,
+                .is_assignable = false, .is_compile_time = s->is_inline };
 
-    if (import_failed) return NULL;
+            WodType *ret = alloc_assert(tc->arena, sizeof(WodType));
+            wt.return_type = ret;
 
-    // Compile the rest of the statements.
-    for (; i < ast->count; i++) {
-        Stmt *stmt = ast->at[i];
-        switch (stmt->type) {
-            case NODE_StmtVarDecl: {
-                StmtVarDecl *var = (StmtVarDecl *)stmt;
-
-                BaseType type;
-                switch (var->type.type) {
-                    case TOK_INT:
-                        type = TYPE_INT;
-                        break;
-                    case TOK_STR:
-                        type = TYPE_STR;
-                        break;
-                    case TOK_BOOL:
-                        type = TYPE_BOOL;
-                        break;
-                    default: UNREACHABLE;
-                }
-
-                Symbol *sym = env_insert(globals, var->name, type,
-                                0, arena);
-                if (!sym)
-                    tc_error(typechecker, &var->base.loc,
-                        SV("Redeclaration of name."));
-                break;
-            }
-            case NODE_StmtFuncDecl: {
-                StmtFuncDecl *func = (StmtFuncDecl *)stmt;
-                
-                Symbol *sym = env_insert(globals, func->name, TYPE_FUNC,
-                                typechecker->function_offset++, arena);
-                if (!sym)
-                    tc_error(typechecker, &func->base.loc,
-                        SV("Redeclaration of name."));
-
-                switch (func->ret.type) {
-                    case TOK_VOID:
-                        sym->type.return_type = TYPE_VOID;
-                        break;
-                    case TOK_INT:
-                        sym->type.return_type = TYPE_INT;
-                        break;
-                    case TOK_STR:
-                        sym->type.return_type = TYPE_STR;
-                        break;
-                    case TOK_BOOL:
-                        sym->type.return_type = TYPE_BOOL;
-                        break;
-                    default: UNREACHABLE;
-                }
-
-                for (size_t param = 0; param < func->params.count; param++) {
-                    switch (func->params.at[param]->type.type) {
-                        case TOK_INT:
-                            VEC_PUSH(sym->type.params,
-                                (WodType){TYPE_INT}, arena);
-                            break;
-                        case TOK_STR:
-                            VEC_PUSH(sym->type.params,
-                                (WodType){TYPE_STR}, arena);
-                            break;
-                        case TOK_BOOL:
-                            VEC_PUSH(sym->type.params,
-                                (WodType){TYPE_BOOL}, arena);
-                            break;
-                        default: UNREACHABLE;
-                    }
-                }
-
-                break;
-            }
+            switch (s->ret.type) {
+            case TOK_VOID: ret->basetype = TYPE_VOID; break;
+            case TOK_INT:  ret->basetype = TYPE_INT; break;
+            case TOK_STR:  ret->basetype = TYPE_STR; break;
+            case TOK_BOOL: ret->basetype = TYPE_BOOL; break;
             default: UNREACHABLE;
+            }
+
+            for (size_t param = 0; param < s->params.count; param++) {
+                visit_Stmt(tc, s->params.at[param]);
+
+                switch (s->params.at[param]->type.type) {
+                case TOK_INT:
+                    VEC_PUSH(wt.params,
+                        (WodType){ .basetype = TYPE_INT }, tc->arena);
+                    break;
+                case TOK_STR:
+                    VEC_PUSH(wt.params,
+                        (WodType){ .basetype = TYPE_STR }, tc->arena);
+                    break;
+                case TOK_BOOL:
+                    VEC_PUSH(wt.params,
+                        (WodType){ .basetype = TYPE_BOOL }, tc->arena);
+                    break;
+                default: UNREACHABLE;
+                }
+            }
+
+            Symbol *sym = env_insert(tc->current_env, s->name,
+                wt, s->is_inline ? 0 : new_cev_offset(tc), tc->arena);
+
+            if (!sym)
+                tc_error(tc, &s->base.loc,
+                    SV("Redeclaration of name."));
+
+            break;
+        }
+        case NODE_StmtDBDecl:
+            visit_Stmt(tc, stmt);
+            break;
+        default: UNREACHABLE;
         }
     }
 
-    if (is_main_file && !env_find(globals, SV("main")))
-        tc_error(typechecker, NULL, SV("No 'main' function."));
+    if (is_main_file && !env_find(tc->top_level_env, SV("main")))
+        tc_error(tc, NULL, SV("No 'main' function."));
 
-    return typechecker->had_error ? NULL : globals;
+    // Do a second pass to look inside top-level statements.
+    for (size_t i = 0; i < ast->stmts.count; i++)
+        visit_Stmt(tc, ast->stmts.at[i]);
+
+    return tc->had_error ? NULL : tc->top_level_env;
 }
 
-Environment *typecheck(StringView path, Arena *arena) {
+Environment *typecheck(StringView path, const char *source, Arena *arena) {
     Typechecker tc;
-    // tc.current_env = NULL;
-    // tc.source = source;
     tc.arena = arena;
     tc.had_error = false;
-    tc.function_offset = 0;
-    env_init(&tc.modules);
+    tc.global_int_offset = 0;
+    tc.global_str_offset = 0;
+    tc.cev_offset = 0;
+    tc.udb_offset = 0;
+    tc.cdb_offset = 0;
+    tc.loop_depth = 0;
+    tc.current_func = NULL;
+    env_init(tc.global_module_list);
 
-    return typecheck_file(&tc, get_full_path(path, arena), true, arena);
+    return typecheck_file(&tc, get_full_path(path, arena), source, true, arena);
 }

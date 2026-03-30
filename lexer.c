@@ -11,6 +11,7 @@ typedef struct {
 
 static const Keyword keywords[] = {
     {.name = "import",   .type = TOK_IMPORT},
+    {.name = "as",       .type = TOK_AS},
     {.name = "void",     .type = TOK_VOID},
     {.name = "int",      .type = TOK_INT},
     {.name = "str",      .type = TOK_STR},
@@ -208,6 +209,8 @@ Token scan_token(Lexer *lexer) {
                 return hexadecimal(lexer);
             else if (match(lexer, 'b'))
                 return binary(lexer);
+
+            return error_token(lexer, "Decimal numbers cannot start with '0'.");
         }
         return decimal(lexer);
     }

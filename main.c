@@ -9,28 +9,6 @@
 #include "commonevent.h"
 #include "environment.h"
 
-#include "cfg.h"
-
-typedef struct {
-    // Table of modules compiled for the entire program so far.
-    Environment modules;
-
-    int32_t function_offset;
-} Compiler;
-
-static Symbol *find(Environment *env, Environment *imports, StringView name) {
-    Symbol *search = env_find(env, name);
-    if (search) return search;
-
-    for (size_t i = 0; i < imports->symbols.count; i++) {
-        search = env_find(imports->symbols.at[i].type.env, name);
-        if (search) return search;
-    }
-
-    return NULL;
-}
-
-
 int main(int argc, const char *argv[]) {
     if (argc != 2) {
         fprintf(stderr, "Usage: %s <file>\n", argv[0]);
@@ -41,19 +19,10 @@ int main(int argc, const char *argv[]) {
     arena_init(&arena);
 
     char *source = alloc_source(to_sv(argv[1]), &arena);
-    VEC_PTR_Stmt *ast = generate_ast(to_sv(argv[1]), source, &arena);
+    ProgramAST *ast = generate_ast(to_sv(argv[1]), source, &arena);
 
-    for (size_t i = 0; i < ast->count; i++) {
-        if (ast->at[i]->type == NODE_StmtFuncDecl) {
-            StmtFuncDecl *s = (StmtFuncDecl *)ast->at[i];
-            CFGNode *cfg = generate_cfg(&s->body, &arena);
-            StringView out = generate_cfg_graph(source, cfg, &arena);
-            printf(SV_FMT "\n", SV_FMT_VAL(out));
-        }
-    }
-
-    Environment *e = typecheck(to_sv(argv[1]), &arena);
-    if (!e) exit(2);
+    // Environment *e = typecheck(to_sv(argv[1]), &arena);
+    // if (!e) exit(2);
 
     // Arena wl_arena;
     // arena_init(&wl_arena);

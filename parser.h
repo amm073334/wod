@@ -3,6 +3,7 @@
 
 #include "common.h"
 #include "lexer.h"
+#include "environment.h"
 
 typedef enum {
     NODE_ExprVar,
@@ -13,14 +14,47 @@ typedef enum {
     NODE_ExprCall,
     NODE_ExprIntLit,
     NODE_ExprStrLit,
-} ExprType;
+    NODE_ExprBoolLit,
+} ExprKind;
+
+typedef struct Expr {
+    ExprKind kind;
+    Token loc;
+
+    // For use during the typechecking phase.
+    WodType type;
+} Expr;
+VEC_PTR_DEF(Expr);
+
+typedef enum {
+    NODE_StmtImport,
+    NODE_StmtAssign,
+    NODE_StmtVarDecl,
+    NODE_StmtFuncDecl,
+    NODE_StmtBlock,
+    NODE_StmtReturn,
+    NODE_StmtIf,
+    NODE_StmtLoop,
+    NODE_StmtFor,
+    NODE_StmtContinue,
+    NODE_StmtBreak,
+    NODE_StmtCmd,
+    NODE_StmtDBDecl,
+    NODE_StmtExpr,
+} StmtKind;
+
+typedef struct Stmt {
+    StmtKind kind;
+    Token loc;
+} Stmt;
+VEC_PTR_DEF(Stmt);
 
 typedef struct {
-    ExprType type;
-    Token loc;
-} Expr;
-
-VEC_PTR_DEF(Expr);
+    StringView file;
+    const char *source;
+    VEC_PTR_Stmt imports;
+    VEC_PTR_Stmt stmts;
+} ProgramAST;
 
 typedef struct {
     Expr base;
@@ -68,34 +102,18 @@ typedef struct {
     StringView value;
 } ExprStrLit;
 
-typedef struct Stmt Stmt;
-VEC_PTR_DEF(Stmt);
+typedef struct {
+    Expr base;
+    bool value;
+} ExprBoolLit;
 
-typedef enum {
-    NODE_StmtImport,
-    NODE_StmtAssign,
-    NODE_StmtVarDecl,
-    NODE_StmtFuncDecl,
-    NODE_StmtBlock,
-    NODE_StmtReturn,
-    NODE_StmtIf,
-    NODE_StmtLoop,
-    NODE_StmtFor,
-    NODE_StmtContinue,
-    NODE_StmtBreak,
-    NODE_StmtCmd,
-    NODE_StmtDBDecl,
-    NODE_StmtExpr,
-} StmtType;
-
-typedef struct Stmt {
-    StmtType type;
-    Token loc;
-} Stmt;
 
 typedef struct {
     Stmt base;
     StringView path;
+
+    // SV_NULL means unqualified.
+    StringView alias;
 } StmtImport;
 
 typedef struct {
@@ -111,7 +129,7 @@ typedef struct {
     StringView name;
     Expr *array_length;
     Expr *initializer;
-    bool smvar_has_state;
+    bool is_const;
 } StmtVarDecl;
 
 VEC_PTR_DEF(StmtVarDecl);
@@ -183,6 +201,6 @@ typedef struct {
     Expr *expr;
 } StmtExpr;
 
-VEC_PTR_Stmt *generate_ast(StringView file_path, const char *source, Arena *arena);
+ProgramAST *generate_ast(StringView file_path, const char *source, Arena *arena);
 
 #endif // WOD_PARSER_H_
