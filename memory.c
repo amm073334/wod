@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <stdio.h>
 
 #include "common.h"
 #include "memory.h"
@@ -57,6 +58,15 @@ void *arena_alloc(Arena *arena, size_t size) {
     size_t old_size = head->size;
     head->size += padding + size;
     return head->data + old_size + padding;
+}
+
+void *arena_alloc_assert(Arena *arena, size_t size) {
+    void *out = arena_alloc(arena, size);
+    if (!out) {
+        fprintf(stderr, "Fatal error: Out of memory.\n");
+        exit(1);
+    }
+    return out;
 }
 
 void arena_free(Arena *arena) {

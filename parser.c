@@ -6,11 +6,7 @@
 
 #define ALLOC_NODE(var, token, type_, ...) \
     do { \
-        (var) = arena_alloc(parser->arena, sizeof(type_)); \
-        if (!(var)) { \
-            fprintf(stderr, "Fatal error: Out of memory."); \
-            exit(1); \
-        } \
+        (var) = arena_alloc_assert(parser->arena, sizeof(type_)); \
         *var = __VA_ARGS__; \
         (var)->base.loc = (token); \
         (var)->base.kind = NODE_##type_; \

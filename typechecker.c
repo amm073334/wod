@@ -66,15 +66,6 @@ static Environment *env_new_assert(Environment *parent, Arena *arena) {
     return env;
 }
 
-static void *alloc_assert(Arena *arena, size_t size) {
-    void *out = arena_alloc(arena, size);
-    if (!out) {
-        fprintf(stderr, "Fatal: Out of memory.\n");
-        exit(1);
-    }
-    return out;
-}
-
 static bool wt_equal(WodType a, WodType b) {
     // TODO: handle other types
     return a.basetype == b.basetype;
@@ -627,7 +618,7 @@ static Environment *typecheck_file(Typechecker *tc, StringView path, const char 
             WodType wt = { .basetype = TYPE_FUNC,
                 .is_assignable = false, .is_compile_time = s->is_inline };
 
-            WodType *ret = alloc_assert(tc->arena, sizeof(WodType));
+            WodType *ret = arena_alloc_assert(tc->arena, sizeof(WodType));
             wt.return_type = ret;
 
             switch (s->ret.type) {
