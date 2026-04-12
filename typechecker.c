@@ -12,13 +12,6 @@ typedef struct {
     Environment *top_level_env;
     Environment *current_env;
 
-    // Offsets.
-    size_t global_int_offset;
-    size_t global_str_offset;
-    size_t cev_offset;
-    size_t udb_offset;
-    size_t cdb_offset;
-
     // Whether or not typechecking has finished the pass for top-level symbols.
     bool finished_top_level_pass;
 
@@ -46,18 +39,6 @@ static void open_scope(Typechecker *tc) {
 
 static void close_scope(Typechecker *tc) {
     tc->current_env = tc->current_env->parent;
-}
-
-static size_t new_g_int_offset(Typechecker *tc) {
-    return tc->global_int_offset++;
-}
-
-static size_t new_g_str_offset(Typechecker *tc) {
-    return tc->global_str_offset++;
-}
-
-static size_t new_cev_offset(Typechecker *tc) {
-    return tc->cev_offset++;
 }
 
 static Environment *env_new_assert(Environment *parent, Arena *arena) {
@@ -250,7 +231,6 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
         return;
     }
     case NODE_ExprIntLit: {
-        ExprIntLit *e = (ExprIntLit *)expr;
         expr->type = (WodType){
             .basetype = TYPE_INT,
             .is_assignable = false,
@@ -259,7 +239,6 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
         return;
     }
     case NODE_ExprStrLit: {
-        ExprStrLit *e = (ExprStrLit *)expr;
         expr->type = (WodType){
             .basetype = TYPE_STR,
             .is_assignable = false,
@@ -268,7 +247,6 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
         return;
     }
     case NODE_ExprBoolLit: {
-        ExprBoolLit *e = (ExprBoolLit *)expr;
         expr->type = (WodType){
             .basetype = TYPE_BOOL,
             .is_assignable = false,
@@ -276,7 +254,6 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
         };
         return;
     }
-    default: UNREACHABLE;
     }
 }
 
@@ -309,7 +286,7 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
                     SV("Array length must be a constant expression."));
         }
 
-        BaseType type;
+        BaseType type = TYPE_NONE;
         switch (s->type.type) {
             case TOK_INT:  type = TYPE_INT; break;
             case TOK_STR:  type = TYPE_STR; break;
@@ -342,12 +319,12 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
             sym = env_insert(tc->current_env, s->name,
                 (WodType){ .basetype = TYPE_ARRAY, .is_assignable = !s->is_const,
                     .is_compile_time = s->is_const, .array_of = array_of },
-                    0, tc->arena);
+                    tc->arena);
         } else {
             sym = env_insert(tc->current_env, s->name,
                 (WodType){ .basetype = type, .is_assignable = true,
                     .is_compile_time = s->is_const },
-                    0, tc->arena);
+                    tc->arena);
         }
 
         if (!sym)
@@ -429,7 +406,7 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
 
         Symbol *sym = env_insert(tc->current_env, s->iterator,
             (WodType){ .basetype = TYPE_INT, .is_assignable = false,
-                .is_compile_time = false }, 0, tc->arena);
+                .is_compile_time = false }, tc->arena);
         
         if (!sym)
             tc_error(tc, &s->base.loc, SV("Redeclaration of iterator name."));
@@ -452,14 +429,12 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
         return;
     }
     case NODE_StmtContinue: {
-        StmtContinue *s = (StmtContinue *)stmt;
         if (tc->loop_depth == 0) 
             tc_error(tc, &stmt->loc,
                 SV("A 'continue' statement can only be used within a loop."));
         return;
     }
     case NODE_StmtBreak: {
-        StmtBreak *s = (StmtBreak *)stmt;
         if (tc->loop_depth == 0) 
             tc_error(tc, &stmt->loc,
                 SV("A 'break' statement can only be used within a loop."));
@@ -500,7 +475,7 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
         StmtDBDecl *s = (StmtDBDecl *)stmt;
         Environment *db_env = env_new_assert(NULL, tc->arena);
 
-        int db_kind;
+        int db_kind = 0;
         switch (s->db.type) {
             case TOK_UDB: db_kind = DB_UDB; break;
             case TOK_CDB: db_kind = DB_CDB; break;
@@ -509,8 +484,7 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
 
         Symbol *sym = env_insert(tc->current_env, s->name,
             (WodType){ .basetype = TYPE_DBTYPE, .is_assignable = false,
-                .db_kind = db_kind, .db_env = db_env },
-            tc->cdb_offset++, tc->arena);
+                .db_kind = db_kind, .db_env = db_env }, tc->arena);
 
         if (!sym) {
             tc_error(tc, &stmt->loc, SV("Redeclaration of name."));
@@ -540,7 +514,6 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
         visit_Expr(tc, s->expr);
         return;
     }
-    default: UNREACHABLE;
     }
 }
 
@@ -556,16 +529,16 @@ static Environment *typecheck_file(Typechecker *tc, StringView path, const char 
     // Handle imports. If an import isn't in the global table, then recursively
     // check through that file first.
     for (size_t i = 0; i < ast->imports.count; i++) {
-        StmtImport *s = (StmtImport *)ast->imports.at[i];
-        StringView module_path = get_full_path(s->path, arena);
+        Import s = ast->imports.at[i];
+        StringView module_path = get_full_path(s.path, arena);
 
         // First, insert into the file's environment with a NULL environment.
         Symbol *local_sym = env_insert(&imports, module_path,
             (WodType){ .basetype = TYPE_MODULE,
-                .is_assignable = false, .module_env = NULL }, 0, arena);
+                .is_assignable = false, .module_env = NULL }, arena);
 
         if (!local_sym) {
-            tc_error(tc, &s->base.loc, SV("Duplicate import."));
+            tc_error(tc, &s.loc, SV("Duplicate import."));
             continue;
         }
 
@@ -574,7 +547,7 @@ static Environment *typecheck_file(Typechecker *tc, StringView path, const char 
         // (non-null) environment.
         Symbol *global_sym = env_insert(tc->global_module_list, module_path,
             (WodType){ .basetype = TYPE_MODULE,
-                .is_assignable = false, .module_env = NULL }, 0, arena);
+                .is_assignable = false, .module_env = NULL }, arena);
 
         if (global_sym) {
             // TODO: this source is wrong
@@ -659,7 +632,7 @@ static Environment *typecheck_file(Typechecker *tc, StringView path, const char 
             }
 
             Symbol *sym = env_insert(tc->current_env, s->name,
-                wt, s->is_inline ? 0 : new_cev_offset(tc), tc->arena);
+                wt, tc->arena);
 
             if (!sym)
                 tc_error(tc, &s->base.loc,
@@ -694,13 +667,10 @@ Environment *typecheck(StringView path, const char *source, Arena *arena) {
     tc.arena = arena;
     tc.had_error = false;
     tc.finished_top_level_pass = false;
-    tc.global_int_offset = 0;
-    tc.global_str_offset = 0;
-    tc.cev_offset = 0;
-    tc.udb_offset = 0;
-    tc.cdb_offset = 0;
     tc.loop_depth = 0;
     tc.current_func = NULL;
+
+    tc.global_module_list = arena_alloc_assert(arena, sizeof(Environment));
     env_init(tc.global_module_list);
 
     return typecheck_file(&tc, get_full_path(path, arena), source, true, arena);

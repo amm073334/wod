@@ -368,7 +368,7 @@ static Expr *expression(Parser *parser) {
     return or(parser);
 }
 
-static Stmt *import(Parser *parser) {
+static Import import(Parser *parser) {
     consume(parser, TOK_STRING, SV("Expected file path."));
 
     StringView alias = SV_NULL;
@@ -378,13 +378,15 @@ static Stmt *import(Parser *parser) {
         alias = parser->previous.text;
     }
 
-    StmtImport *stmt;
-    ALLOC_NODE(stmt, parser->previous, StmtImport,
-        (StmtImport){ .path = parser->previous.text, .alias = alias });
+    Import imp = (Import){
+        .loc = parser->previous,
+        .path = parser->previous.text,
+        .alias = alias
+    };
 
     consume(parser, TOK_SEMICOLON, SV("Expected ';' after import."));
 
-    return (Stmt *)stmt;
+    return imp;
 }
 
 static Stmt *statement(Parser *parser);

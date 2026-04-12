@@ -15,7 +15,7 @@ typedef enum {
     NODE_ExprIntLit,
     NODE_ExprStrLit,
     NODE_ExprBoolLit,
-    NODE_ExprArrayLit,
+    // NODE_ExprArrayLit,
 } ExprKind;
 
 typedef struct Expr {
@@ -29,7 +29,6 @@ typedef struct Expr {
 VEC_PTR_DEF(Expr);
 
 typedef enum {
-    NODE_StmtImport,
     NODE_StmtAssign,
     NODE_StmtVarDecl,
     NODE_StmtFuncDecl,
@@ -55,9 +54,18 @@ typedef struct Stmt {
 VEC_PTR_DEF(Stmt);
 
 typedef struct {
+    Token loc;
+    StringView path;
+
+    // SV_NULL means unqualified.
+    StringView alias;
+} Import;
+VEC_DEF(Import);
+
+typedef struct {
     StringView file;
     const char *source;
-    VEC_PTR_Stmt imports;
+    VEC_Import imports;
     VEC_PTR_Stmt stmts;
 } ProgramAST;
 
@@ -117,14 +125,6 @@ typedef struct {
     VEC_PTR_Expr value;
 } ExprArrayLit;
 
-
-typedef struct {
-    Stmt base;
-    StringView path;
-
-    // SV_NULL means unqualified.
-    StringView alias;
-} StmtImport;
 
 typedef struct {
     Stmt base;

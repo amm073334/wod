@@ -4,14 +4,16 @@ MAINS := main.c test.c
 
 TESTS := $(wildcard test/*.wod)
 
+WARNINGS = /Wall /wd5045 /wd4820 /wd4061 /wd4668 /wd4201
+
 release: wodc.exe
 
-debug: CFLAGS = /Zi /Wall /wd5045 /wd4820 /wd4061 /wd4668 /wd4201
+debug: CFLAGS = /Zi
 debug: wodc.exe
 
 wodc.exe: $(HEADERS) $(SOURCES)
 	@ if not exist build mkdir build
-	@ cl $(CFLAGS) /Fobuild\ main.c $(filter-out $(MAINS),$(SOURCES)) /link /out:$@
+	@ cl $(CFLAGS) $(WARNINGS) /Fobuild\ main.c $(filter-out $(MAINS),$(SOURCES)) /link /out:$@
 
 test: wodc.exe test.c sv.c memory.c
 	@ cl test.c sv.c memory.c > nul

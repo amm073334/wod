@@ -95,7 +95,7 @@ struct Symbol {
 
 void env_init(Environment *env);
 Environment *env_new(Environment *parent, Arena *arena);
-Symbol *env_insert(Environment *env, StringView name, WodType type, size_t offset, Arena *arena);
+Symbol *env_insert(Environment *env, StringView name, WodType type, Arena *arena);
 Symbol *env_find(Environment *env, StringView name);
 
 #endif // WOD_ENVIRONMENT_H_

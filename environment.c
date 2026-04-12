@@ -20,7 +20,7 @@ Environment *env_new(Environment *parent, Arena *arena) {
     return env;
 }
 
-Symbol *env_insert(Environment *env, StringView name, WodType type, size_t offset, Arena *arena) {
+Symbol *env_insert(Environment *env, StringView name, WodType type, Arena *arena) {
     Symbol *entry = env_find(env, name);
     
     if (entry) return NULL;
@@ -28,7 +28,7 @@ Symbol *env_insert(Environment *env, StringView name, WodType type, size_t offse
     Symbol sym;
     sym.name = name;
     sym.type = type;
-    sym.offset = offset;
+    sym.offset = 0;
 
     VEC_PUSH(env->symbols, sym, arena);
     return &env->symbols.at[env->symbols.count - 1];

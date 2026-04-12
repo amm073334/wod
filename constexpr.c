@@ -147,7 +147,6 @@ static void *visit_Expr(Arena *arena, Expr *expr) {
     case NODE_ExprBoolLit:
         assert(expr->type.is_compile_time);
         return expr;
-    default: UNREACHABLE;
     }
 
     return NULL;
@@ -230,8 +229,6 @@ static void visit_Stmt(Arena *arena, Stmt *stmt) {
         visit_Expr(arena, s->expr);
         return;
     }
-    
-    default: UNREACHABLE;
     }
 }
 
