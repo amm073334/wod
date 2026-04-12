@@ -7,7 +7,7 @@ typedef enum {
     TYPE_NONE,
     TYPE_ERROR,
 
-    // Uses is_compile_time and array_length.
+    // Uses is_compile_time.
     TYPE_VOID,
     TYPE_INT,
     TYPE_STR,
@@ -15,8 +15,9 @@ typedef enum {
     TYPE_PTR,
     TYPE_FUNC,
     TYPE_DBDATA,
+    TYPE_ARRAY,
 
-    // Doesn't use is_compile_time and array_length.
+    // Doesn't use is_compile_time.
     TYPE_DBTYPE,
     TYPE_CEVTYPE,
     TYPE_MODULE,
@@ -43,10 +44,13 @@ struct WodType {
     // If constant value, inline function, etc.
     bool is_compile_time;
 
-    // 0 means not an array type.
-    size_t array_length;
-
     union {
+        // If TYPE_ARRAY:
+        struct {
+            size_t array_len;
+            WodType *array_of;
+        };
+
         // If TYPE_PTR:
         WodType *ptr_to;
 
@@ -76,10 +80,17 @@ struct WodType {
 struct Symbol {
     StringView name;
     WodType type;
+    
+    union {
+        // This is for example the common event ID, or the CSelf ID.
+        // Values are relative to the current file, not across all files.
+        size_t offset;
 
-    // This is for example the common event ID, or the CSelf ID.
-    // Values are relative to the current file, not across all files.
-    size_t offset;
+        // Used to store compile-time values.
+        int32_t const_i;
+        StringView const_s;
+        bool const_b;
+    };
 };
 
 void env_init(Environment *env);

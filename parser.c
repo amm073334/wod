@@ -10,6 +10,7 @@
         *var = __VA_ARGS__; \
         (var)->base.loc = (token); \
         (var)->base.kind = NODE_##type_; \
+        (var)->base.env = NULL; \
     } while (0)
 
 typedef struct {
@@ -659,6 +660,7 @@ static Stmt *function_decl(Parser *parser) {
         case TOK_VOID:
         case TOK_INT:
         case TOK_STR:
+        case TOK_BOOL:
             break;
         default:
             error_current(parser, SV("Unexpected return type."));

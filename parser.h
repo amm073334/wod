@@ -15,14 +15,16 @@ typedef enum {
     NODE_ExprIntLit,
     NODE_ExprStrLit,
     NODE_ExprBoolLit,
+    NODE_ExprArrayLit,
 } ExprKind;
 
 typedef struct Expr {
     ExprKind kind;
     Token loc;
 
-    // For use during the typechecking phase.
+    // For use during/after typechecking.
     WodType type;
+    Environment* env;
 } Expr;
 VEC_PTR_DEF(Expr);
 
@@ -46,6 +48,9 @@ typedef enum {
 typedef struct Stmt {
     StmtKind kind;
     Token loc;
+
+    // For use during/after typechecking.
+    Environment* env;
 } Stmt;
 VEC_PTR_DEF(Stmt);
 
@@ -106,6 +111,11 @@ typedef struct {
     Expr base;
     bool value;
 } ExprBoolLit;
+
+typedef struct {
+    Expr base;
+    VEC_PTR_Expr value;
+} ExprArrayLit;
 
 
 typedef struct {

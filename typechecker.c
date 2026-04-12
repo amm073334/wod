@@ -83,11 +83,13 @@ static void tc_expr_error(Typechecker *tc, Expr *expr, Token *token, StringView 
 }
 
 static void visit_Expr(Typechecker *tc, Expr *expr) {
+    expr->env = tc->current_env;
+
     // Initialize node's type to TYPE_NONE. If an error occurs somewhere,
     // the type gets set to TYPE_ERROR; this makes it possible to check
     // whether or not an error has occurred before doing something.
     expr->type.basetype = TYPE_NONE;
-    
+
     switch (expr->kind) {
     case NODE_ExprVar: {
         ExprVar *e = (ExprVar *)expr;
@@ -104,7 +106,7 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
 
         visit_Expr(tc, e->left);
 
-        if (e->left->type.array_length == 0) {
+        if (e->left->type.basetype != TYPE_ARRAY) {
             tc_expr_error(tc, expr, &e->left->loc,
                 SV("Tried to index into non-array type."));
         }
@@ -126,13 +128,12 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
         if (expr->type.basetype != TYPE_ERROR) {
             if (e->left->type.basetype == TYPE_DBTYPE) {
                 expr->type = (WodType){
-                    .is_assignable = false,
                     .basetype = TYPE_DBDATA,
-                    .is_compile_time = false,
-                    .array_length = 0 };
+                    .is_assignable = false,
+                    .is_compile_time = false
+                };
             } else {
-                expr->type = e->left->type;
-                expr->type.array_length = 0;
+                expr->type = *e->left->type.array_of;
 
                 if (!expr->type.is_compile_time)
                     expr->type.is_assignable = true;
@@ -200,8 +201,7 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
                 .is_assignable = false,
                 .is_compile_time =
                     e->left->type.is_compile_time
-                    && e->right->type.is_compile_time,
-                .array_length = 0
+                    && e->right->type.is_compile_time
             };
         }
 
@@ -219,8 +219,7 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
             expr->type = (WodType){
                 .basetype = TYPE_INT,
                 .is_assignable = false,
-                .is_compile_time = e->right->type.is_compile_time,
-                .array_length = 0
+                .is_compile_time = e->right->type.is_compile_time
             };
         }
         return;
@@ -252,8 +251,7 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
         expr->type = (WodType){
             .basetype = TYPE_INT,
             .is_assignable = false,
-            .is_compile_time = true,
-            .array_length = 0
+            .is_compile_time = true
         };
         return;
     }
@@ -262,8 +260,7 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
         expr->type = (WodType){
             .basetype = TYPE_STR,
             .is_assignable = false,
-            .is_compile_time = true,
-            .array_length = 0
+            .is_compile_time = true
         };
         return;
     }
@@ -272,8 +269,7 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
         expr->type = (WodType){
             .basetype = TYPE_BOOL,
             .is_assignable = false,
-            .is_compile_time = true,
-            .array_length = 0
+            .is_compile_time = true
         };
         return;
     }
@@ -282,6 +278,8 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
 }
 
 static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
+    stmt->env = tc->current_env;
+    
     switch (stmt->kind) {
     case NODE_StmtAssign: {
         StmtAssign *s = (StmtAssign *)stmt;
@@ -301,15 +299,11 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
     case NODE_StmtVarDecl: {
         StmtVarDecl *s = (StmtVarDecl *)stmt;
 
-        // If declaration has some array length, initialize it to a dummy
-        // value and fix later when we can evaluate constant expressions.
-        size_t array_length = 0;
         if (s->array_length) {
             visit_Expr(tc, s->array_length);
             if (!s->array_length->type.is_compile_time)
                 tc_error(tc, &s->array_length->loc,
                     SV("Array length must be a constant expression."));
-            array_length = 1;
         }
 
         BaseType type;
@@ -336,10 +330,19 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
                     SV("Used non-constant expression to initialize 'const' variable."));
         }
 
-        Symbol *sym = env_insert(tc->current_env, s->name,
-            (WodType){ .basetype = type, .is_assignable = true,
-                .is_compile_time = s->is_const, .array_length = array_length },
-                0, tc->arena);
+        Symbol *sym = NULL;
+        if (s->array_length) {
+            WodType *array_of = arena_alloc_assert(tc->arena, sizeof(WodType));
+            sym = env_insert(tc->current_env, s->name,
+                (WodType){ .basetype = TYPE_ARRAY, .is_assignable = !s->is_const,
+                    .is_compile_time = s->is_const, .array_of = array_of },
+                    0, tc->arena);
+        } else {
+            sym = env_insert(tc->current_env, s->name,
+                (WodType){ .basetype = type, .is_assignable = true,
+                    .is_compile_time = s->is_const },
+                    0, tc->arena);
+        }
 
         if (!sym)
             tc_error(tc, &s->base.loc, SV("Redeclaration of name."));
@@ -420,7 +423,7 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
 
         Symbol *sym = env_insert(tc->current_env, s->iterator,
             (WodType){ .basetype = TYPE_INT, .is_assignable = false,
-                .is_compile_time = false, .array_length = 0 }, 0, tc->arena);
+                .is_compile_time = false }, 0, tc->arena);
         
         if (!sym)
             tc_error(tc, &s->base.loc, SV("Redeclaration of iterator name."));
@@ -562,7 +565,7 @@ static Environment *typecheck_file(Typechecker *tc, StringView path, const char 
 
         // Insert into the global list of modules. Only handle each file once.
         // Then go back and update the environments to be the module's
-        // (non-null) environment. 
+        // (non-null) environment.
         Symbol *global_sym = env_insert(tc->global_module_list, module_path,
             (WodType){ .basetype = TYPE_MODULE,
                 .is_assignable = false, .module_env = NULL }, 0, arena);
