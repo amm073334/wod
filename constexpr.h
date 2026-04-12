@@ -8,4 +8,4 @@
 
 void constexpr_pass(ProgramAST *ast, Arena *arena);
 
-#endif
+#endif // WOD_CONSTEXPR_H_

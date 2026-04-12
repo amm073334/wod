@@ -62,19 +62,19 @@ static void *visit_Expr(Arena *arena, Expr *expr) {
     }
     case NODE_ExprArray: {
         ExprArray *e = (ExprArray *)expr;
-        e->index = visit_Expr(e->index, arena);
-        e->left = visit_Expr(e->left, arena);
+        e->index = visit_Expr(arena, e->index);
+        e->left = visit_Expr(arena, e->left);
         return expr;
     }
     case NODE_ExprAccess: {
         ExprAccess *e = (ExprAccess *)expr;
-        e->left = visit_Expr(e->left, arena);
+        e->left = visit_Expr(arena, e->left);
         return expr;
     }
     case NODE_ExprBinary: {
         ExprBinary *e = (ExprBinary *)expr;
-        e->left = visit_Expr(e->left, arena);
-        e->right = visit_Expr(e->right, arena);
+        e->left = visit_Expr(arena, e->left);
+        e->right = visit_Expr(arena, e->right);
 
         if (!e->left->type.is_compile_time
             || !e->right->type.is_compile_time)
@@ -115,7 +115,7 @@ static void *visit_Expr(Arena *arena, Expr *expr) {
     }
     case NODE_ExprUnary: {
         ExprUnary *e = (ExprUnary *)expr;
-        e->right = visit_Expr(e->right, arena);
+        e->right = visit_Expr(arena, e->right);
         
         if (!e->right->type.is_compile_time)
             return expr;
@@ -136,9 +136,9 @@ static void *visit_Expr(Arena *arena, Expr *expr) {
     }
     case NODE_ExprCall: {
         ExprCall *e = (ExprCall *)expr;
-        e->callee = visit_Expr(e->callee, arena);
+        e->callee = visit_Expr(arena, e->callee);
         for (size_t i = 0; i < e->args.count; i++)
-            e->args.at[i] = visit_Expr(e->args.at[i], arena);
+            e->args.at[i] = visit_Expr(arena, e->args.at[i]);
         return expr;
     }
 
@@ -222,7 +222,7 @@ static void visit_Stmt(Arena *arena, Stmt *stmt) {
     case NODE_StmtDBDecl: {
         StmtDBDecl *s = (StmtDBDecl *)stmt;
         for (size_t i = 0; i < s->fields.count; i++)
-            visit_Stmt(arena, s->fields.at[i]);
+            visit_Stmt(arena, (Stmt *)s->fields.at[i]);
         return;
     }
     case NODE_StmtExpr: {

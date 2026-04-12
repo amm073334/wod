@@ -19,6 +19,9 @@ typedef struct {
     size_t udb_offset;
     size_t cdb_offset;
 
+    // Whether or not typechecking has finished the pass for top-level symbols.
+    bool finished_top_level_pass;
+
     // Used to make sure that return types are right, etc.
     StmtFuncDecl *current_func;
 
@@ -330,6 +333,9 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
                     SV("Used non-constant expression to initialize 'const' variable."));
         }
 
+        // Don't make symbols for parameters on the top-level pass.
+        if (!tc->finished_top_level_pass) return;
+
         Symbol *sym = NULL;
         if (s->array_length) {
             WodType *array_of = arena_alloc_assert(tc->arena, sizeof(WodType));
@@ -357,7 +363,7 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
         tc->current_func = s;
 
         for (size_t i = 0; i < s->params.count; i++)
-            visit_Stmt(tc, s->params.at[i]);
+            visit_Stmt(tc, (Stmt *)s->params.at[i]);
         for (size_t i = 0; i < s->body.count; i++)
             visit_Stmt(tc, s->body.at[i]);
 
@@ -518,7 +524,7 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
                 tc_error(tc, &s->fields.at[i]->base.loc,
                     SV("Cannot mark DB field as 'const'."));
             else {
-                visit_Stmt(tc, s->fields.at[i]);
+                visit_Stmt(tc, (Stmt *)s->fields.at[i]);
                 if (s->fields.at[i]->initializer
                     && !s->fields.at[i]->initializer->type.is_compile_time)
                     tc_error(tc, &s->fields.at[i]->initializer->loc,
@@ -633,7 +639,7 @@ static Environment *typecheck_file(Typechecker *tc, StringView path, const char 
             }
 
             for (size_t param = 0; param < s->params.count; param++) {
-                visit_Stmt(tc, s->params.at[param]);
+                visit_Stmt(tc, (Stmt *)s->params.at[param]);
 
                 switch (s->params.at[param]->type.type) {
                 case TOK_INT:
@@ -671,9 +677,14 @@ static Environment *typecheck_file(Typechecker *tc, StringView path, const char 
     if (is_main_file && !env_find(tc->top_level_env, SV("main")))
         tc_error(tc, NULL, SV("No 'main' function."));
 
-    // Do a second pass to look inside top-level statements.
-    for (size_t i = 0; i < ast->stmts.count; i++)
-        visit_Stmt(tc, ast->stmts.at[i]);
+    tc->finished_top_level_pass = true;
+
+    // Do a second pass to look inside functions.
+    for (size_t i = 0; i < ast->stmts.count; i++) {
+        Stmt *stmt = ast->stmts.at[i];
+        if (stmt->kind == NODE_StmtFuncDecl)
+            visit_Stmt(tc, stmt);
+    }
 
     return tc->had_error ? NULL : tc->top_level_env;
 }
@@ -682,6 +693,7 @@ Environment *typecheck(StringView path, const char *source, Arena *arena) {
     Typechecker tc;
     tc.arena = arena;
     tc.had_error = false;
+    tc.finished_top_level_pass = false;
     tc.global_int_offset = 0;
     tc.global_str_offset = 0;
     tc.cev_offset = 0;

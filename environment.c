@@ -35,14 +35,14 @@ Symbol *env_insert(Environment *env, StringView name, WodType type, size_t offse
 }
 
 // TODO: This would be more efficient with a hash table.
-WodType *env_find(Environment *env, StringView name) {
+Symbol *env_find(Environment *env, StringView name) {
     if (!env) return NULL;
     
     for (size_t i = 0; i < env->symbols.count; i++) {
         if (!sv_equals(name, env->symbols.at[i].name))
             continue;
 
-        return &env->symbols.at[i].type;
+        return &env->symbols.at[i];
     }
 
     return env_find(env->parent, name);

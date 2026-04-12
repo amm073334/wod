@@ -5,6 +5,10 @@
 #include "commonevent.h"
 
 typedef enum {
+    // For handling scopes.
+    WL_PUSH_LOCAL,
+    WL_POP_LOCAL,
+
     WL_VAR, // (dest, a, b, op)
     
     WL_INT_IF_HEAD,
