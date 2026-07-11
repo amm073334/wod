@@ -4,7 +4,9 @@
 #include "lexer.h"
 #include "parser.h"
 #include "typechecker.h"
-#include "ast2wl.h"
+#include "ast2wir.h"
+#include "wir.h"
+#include "constexpr.h"
 #include "gamedata.h"
 #include "commonevent.h"
 #include "environment.h"
@@ -18,22 +20,28 @@ int main(int argc, const char *argv[]) {
     Arena arena;
     arena_init(&arena);
 
-    char *source = alloc_source(to_sv(argv[1]), &arena);
-    ProgramAST *ast = generate_ast(to_sv(argv[1]), source, &arena);
+    StringView input_file = to_sv(argv[1]);
 
-    // Environment *e = typecheck(to_sv(argv[1]), &arena);
-    // if (!e) exit(2);
+    char *source = alloc_source(input_file, &arena);
+    
+    ProgramAST *ast = generate_ast(input_file, source, &arena);
+    if (!ast) exit(2);
+
+    Environment *e = typecheck(ast, source, &arena);
+    if (!e) exit(2);
+
+    constexpr_pass(ast, &arena);
 
     // Arena wl_arena;
     // arena_init(&wl_arena);
-    // arena_alloc(&wl_arena, 16384);
 
-    // // TODO: This probably should generate a different set of instructions per cev,
-    // //       and compile each of them separately.
-    // VEC_WLInst *wl = generate_wl(ast, &wl_arena);
+    // TODO: This probably should generate a different set of instructions per cev,
+    //       and compile each of them separately.
+    WIR wir = ast2wir_pass(ast, &arena);
+    print_wir(&wir);
 
     // Arena gd_arena;
-    // CommonEvent cev = compile_wl_to_cev(wl, &gd_arena);
+    // CommonEvent cev = compile_wir_to_cev(wl, &gd_arena);
 
     // GameData gd;
     // gd_init(&gd);
@@ -43,5 +51,4 @@ int main(int argc, const char *argv[]) {
     arena_free(&arena);
 
     return 0;
-    // return 0;
 }

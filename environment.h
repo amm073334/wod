@@ -80,6 +80,7 @@ struct WodType {
 struct Symbol {
     StringView name;
     WodType type;
+    bool is_top_level;
     
     union {
         // This is for example the common event ID, or the CSelf ID.

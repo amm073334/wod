@@ -39,11 +39,11 @@ static ExprBoolLit *make_bool(Arena *arena, Token tok, bool value) {
     return out;
 }
 
-#define MAKE_INT(value) make_int(arena, expr->loc, (value))
-#define MAKE_STR(value) make_str(arena, expr->loc, (value))
-#define MAKE_BOOL(value) make_bool(arena, expr->loc, (value))
+#define MAKE_INT(value) (Expr *)make_int(arena, expr->loc, (value))
+#define MAKE_STR(value) (Expr *)make_str(arena, expr->loc, (value))
+#define MAKE_BOOL(value) (Expr *)make_bool(arena, expr->loc, (value))
 
-static void *visit_Expr(Arena *arena, Expr *expr) {
+static Expr *visit_Expr(Arena *arena, Expr *expr) {
     switch (expr->kind) {
     case NODE_ExprVar: {
         ExprVar *e = (ExprVar *)expr;
@@ -123,7 +123,7 @@ static void *visit_Expr(Arena *arena, Expr *expr) {
         if (e->right->kind == NODE_ExprIntLit) {
             int32_t right = ((ExprIntLit *)e->right)->value;
             switch(e->op.type) {
-            case TOK_MINUS: return MAKE_BOOL(-right);
+            case TOK_MINUS: return MAKE_INT(-right);
             default: UNREACHABLE;
             }
         } else if (e->right->kind == NODE_ExprBoolLit) {
@@ -153,6 +153,7 @@ static void *visit_Expr(Arena *arena, Expr *expr) {
 }
 
 #undef MAKE_INT
+#undef MAKE_STR
 #undef MAKE_BOOL
 
 static void visit_Stmt(Arena *arena, Stmt *stmt) {
@@ -165,7 +166,15 @@ static void visit_Stmt(Arena *arena, Stmt *stmt) {
     }
     case NODE_StmtVarDecl: {
         StmtVarDecl *s = (StmtVarDecl *)stmt;
-        visit_Expr(arena, s->array_length);
+
+        if (s->array_length) {
+            s->array_length = visit_Expr(arena, s->array_length);
+            assert(s->array_length->kind == NODE_ExprIntLit);
+    
+            s->array_length->type.array_len
+                = ((ExprIntLit *)s->array_length)->value;
+        }
+        
         if (s->initializer)
             visit_Expr(arena, s->initializer);
         return;
@@ -184,14 +193,17 @@ static void visit_Stmt(Arena *arena, Stmt *stmt) {
     }
     case NODE_StmtReturn: {
         StmtReturn *s = (StmtReturn *)stmt;
-        visit_Expr(arena, s->expr);
+        if (s->expr)
+            visit_Expr(arena, s->expr);
         return;
     }
     case NODE_StmtIf: {
         StmtIf *s = (StmtIf *)stmt;
         visit_Expr(arena, s->condition);
         visit_Stmt(arena, s->then_branch);
-        visit_Stmt(arena, s->else_branch);
+
+        if (s->else_branch)
+            visit_Stmt(arena, s->else_branch);
         return;
     }
     case NODE_StmtLoop: {

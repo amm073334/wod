@@ -29,6 +29,8 @@
         (vec).at = NULL; \
     } while (0)
 
+#define VEC_EMPTY { .capacity = 0, .count = 0, .at = NULL }
+
 #define VEC_PUSH(vec, item, arena) \
     do { \
         if ((vec).count >= (vec).capacity) { \

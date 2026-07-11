@@ -430,7 +430,7 @@ static Stmt *var_decl(Parser *parser, bool parse_const, bool parse_initializer) 
         advance(parser);
     }
 
-    if (!match(parser, TOK_INT) && !match(parser, TOK_STR))
+    if (!match(parser, TOK_INT) && !match(parser, TOK_STR) && !match(parser, TOK_BOOL))
         error_current(parser, SV("Invalid declaration type."));
 
     Token var_type = parser->previous;
@@ -608,6 +608,7 @@ static Stmt *declaration(Parser *parser) {
     if (parser->panic_mode) synchronize(parser);
     if (check(parser, TOK_INT) || 
         check(parser, TOK_STR) ||
+        check(parser, TOK_BOOL) ||
         check(parser, TOK_CONST)) {
 
         Stmt *stmt = var_decl(parser, true, true);
