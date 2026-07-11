@@ -1,5 +1,0 @@
-import "fib";
-
-void test() {
-    fib(30);
-}
