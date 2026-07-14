@@ -69,6 +69,17 @@ static bool check(Parser *parser, TokenType type) {
     return parser->current.type == type;
 }
 
+static bool check_vartype(Parser *parser) {
+    switch (parser->current.type) {
+    case TOK_INT:
+    case TOK_STR:
+    case TOK_BOOL:
+        return true;
+    default:
+        return false;
+    }
+}
+
 static void synchronize(Parser *parser) {
     parser->panic_mode = false;
 
@@ -606,9 +617,7 @@ static Stmt *assign_stmt(Parser *parser) {
 
 static Stmt *declaration(Parser *parser) {
     if (parser->panic_mode) synchronize(parser);
-    if (check(parser, TOK_INT) || 
-        check(parser, TOK_STR) ||
-        check(parser, TOK_BOOL) ||
+    if (check_vartype(parser) || 
         check(parser, TOK_CONST)) {
 
         Stmt *stmt = var_decl(parser, true, true);
@@ -705,9 +714,7 @@ static Stmt *db_decl(Parser *parser) {
 
     VEC_PTR_StmtVarDecl fields;
     VEC_INIT(fields);
-    while (check(parser, TOK_INT) || 
-        check(parser, TOK_STR)) {
-
+    while (check_vartype(parser)) {
         StmtVarDecl *stmt = (StmtVarDecl *)var_decl(parser, false, false);
         consume(parser, TOK_SEMICOLON, SV("Expected ';' after declaration."));
         VEC_PUSH(fields, stmt, parser->arena);

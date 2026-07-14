@@ -10,6 +10,7 @@ VEC_DEF(TwoStack);
 typedef struct {
     Arena *arena;
     VEC_WIRFunc cevs;
+    VEC_WIRDB cdbs;
 
     TwoStack tmp;
     TwoStack global;
@@ -62,6 +63,12 @@ static void emit_simple(Ast2Wir *aw, int op) {
     emit_to_current_cev(aw, (WIRInst){ .op = op, .operands = VEC_EMPTY });
 }
 
+static void emit_single(Ast2Wir *aw, int op, WIROperand operand) {
+    VEC_WIROperand operands = VEC_EMPTY;
+    VEC_PUSH(operands, operand, aw->arena);
+    emit_to_current_cev(aw, (WIRInst){ .op = op, .operands = operands });
+}
+
 static WIROperand tmp_int(Ast2Wir *aw) {
     return (WIROperand){
         .kind = OPKIND_TMP, .type = OPTYPE_INT,
@@ -104,6 +111,62 @@ static size_t new_local_str(Ast2Wir *aw) {
     return top->str_top++;
 }
 
+static void visit_db_field_decl(Ast2Wir *aw, Stmt *stmt) {
+    assert(stmt->kind == NODE_StmtVarDecl);
+
+    StmtVarDecl *s = (StmtVarDecl *)stmt;
+    assert(!s->is_const);
+
+    WIRDB *last = &aw->cdbs.at[aw->cdbs.count - 1];
+
+    Symbol *sym = env_find(stmt->env, s->name);
+    assert(sym);
+
+    WIRDBField wdbf = {
+        .debug_name = s->name,
+        .type = sym->type,
+        .has_initializer = false
+    };
+
+    if (s->initializer) {
+        assert(s->initializer->type.is_compile_time);
+        wdbf.has_initializer = true;
+
+        switch (s->initializer->kind) {
+        case NODE_ExprStrLit: {
+            ExprStrLit *lit = (ExprStrLit *)s->initializer;
+            wdbf.initializer = (WIROperand){
+                .kind = OPKIND_IMM,
+                .type = OPTYPE_STR,
+                .as.imm_str = lit->value
+            };
+            break;
+        }
+        case NODE_ExprIntLit: {
+            ExprIntLit *lit = (ExprIntLit *)s->initializer;
+            wdbf.initializer = (WIROperand){
+                .kind = OPKIND_IMM,
+                .type = OPTYPE_INT,
+                .as.imm_str = lit->value
+            };
+            break;
+        }
+        case NODE_ExprBoolLit: {
+            ExprBoolLit *lit = (ExprBoolLit *)s->initializer;
+            wdbf.initializer = (WIROperand){
+                .kind = OPKIND_IMM,
+                .type = OPTYPE_INT,
+                .as.imm_str = lit->value
+            };
+            break;
+        }
+        default: UNREACHABLE;
+        }
+    }
+
+    VEC_PUSH(last->fields, wdbf, aw->arena);
+}
+
 static WIROperand visit_Expr(Ast2Wir *aw, Expr *expr);
 
 static WIROperand _visit_Expr(Ast2Wir *aw, Expr *expr) {
@@ -121,9 +184,16 @@ static WIROperand _visit_Expr(Ast2Wir *aw, Expr *expr) {
             default: UNREACHABLE;
             }
         }
-        return (WIROperand){
-            .kind = sym->is_top_level ? OPKIND_GLOBAL : OPKIND_LOCAL,
-            .as.offset = sym->offset };
+
+        if (sv_is_null(sym->path)) {
+            return (WIROperand){
+                .kind = OPKIND_LOCAL,
+                .as.offset = sym->offset };
+        } else {
+            return (WIROperand){
+                .kind = OPKIND_GLOBAL,
+                .as.imm_str = get_globally_qualified_name(aw->arena, sym) };
+        }
     }
     case NODE_ExprArray: {
         ExprArray *e = (ExprArray *)expr;
@@ -356,17 +426,32 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
     }
     case NODE_StmtIf: {
         StmtIf *s = (StmtIf *)stmt;
-        visit_Expr(aw, s->condition);
+        WIROperand cond = visit_Expr(aw, s->condition);
+
+        emit_single(aw, WIR_IF_BEGIN, cond);
         visit_Stmt(aw, s->then_branch);
 
-        if (s->else_branch)
+        if (s->else_branch) {
+            emit_simple(aw, WIR_ELSE);
             visit_Stmt(aw, s->else_branch);
+        }
+
+        emit_simple(aw, WIR_IF_END);
+
         return;
     }
     case NODE_StmtLoop: {
         StmtLoop *s = (StmtLoop *)stmt;
-        visit_Expr(aw, s->count);
+
+        if (s->count) {
+            WIROperand count = visit_Expr(aw, s->count);
+            emit_single(aw, WIR_LOOP_BEGIN_N, count);
+        } else {
+            emit_simple(aw, WIR_LOOP_BEGIN);
+        }
         visit_Stmt(aw, s->body);
+
+        emit_simple(aw, WIR_LOOP_END);
         return;
     }
     case NODE_StmtFor: {
@@ -397,8 +482,13 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
     }
     case NODE_StmtDBDecl: {
         StmtDBDecl *s = (StmtDBDecl *)stmt;
+        VEC_PUSH(aw->cdbs,
+            ((WIRDB){
+                .debug_name = s->name,
+                .fields = VEC_EMPTY
+            }), aw->arena);
         for (size_t i = 0; i < s->fields.count; i++)
-            visit_Stmt(aw, (Stmt *)s->fields.at[i]);
+            visit_db_field_decl(aw, (Stmt *)s->fields.at[i]);
         return;
     }
     }
@@ -410,6 +500,7 @@ WIR ast2wir_pass(ProgramAST *ast, Arena *arena) {
         .tmp = { 0 },
         .global = { 0 },
         .cevs = VEC_EMPTY,
+        .cdbs = VEC_EMPTY,
         .local_frames = VEC_EMPTY,
     };
 
@@ -418,5 +509,5 @@ WIR ast2wir_pass(ProgramAST *ast, Arena *arena) {
         assert(aw.local_frames.count == 0);
     }
 
-    return (WIR){.cevs = aw.cevs};
+    return (WIR){.cevs = aw.cevs, .dbs = aw.cdbs};
 }

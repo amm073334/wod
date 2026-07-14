@@ -80,11 +80,12 @@ struct WodType {
 struct Symbol {
     StringView name;
     WodType type;
-    bool is_top_level;
     
+    // Is SV_NULL if symbol is not top-level.
+    StringView path;
+
     union {
         // This is for example the common event ID, or the CSelf ID.
-        // Values are relative to the current file, not across all files.
         size_t offset;
 
         // Used to store compile-time values.
@@ -98,5 +99,7 @@ void env_init(Environment *env);
 Environment *env_new(Environment *parent, Arena *arena);
 Symbol *env_insert(Environment *env, StringView name, WodType type, Arena *arena);
 Symbol *env_find(Environment *env, StringView name);
+StringView get_globally_qualified_name(Arena *arena, Symbol *sym);
+
 
 #endif // WOD_ENVIRONMENT_H_

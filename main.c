@@ -40,8 +40,8 @@ int main(int argc, const char *argv[]) {
     WIR wir = ast2wir_pass(ast, &arena);
     print_wir(&wir);
 
-    // Arena gd_arena;
-    // CommonEvent cev = compile_wir_to_cev(wl, &gd_arena);
+    Arena gd_arena;
+    CommonEvent cev = compile_wir_to_cev(wir, &gd_arena);
 
     // GameData gd;
     // gd_init(&gd);

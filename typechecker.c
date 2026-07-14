@@ -569,7 +569,7 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
         }
 
         assert(tc->current_env = tc->top_level_env);
-        sym->is_top_level = true;
+        sym->path = tc->file_path;
         tc->current_env = db_env;
         for (size_t i = 0; i < s->fields.count; i++) {
             if (s->fields.at[i]->is_const)
@@ -676,7 +676,7 @@ static Environment *typecheck_file(Typechecker *tc, ProgramAST *ast, const char 
             // TODO: This doesn't work if the insert failed, since it
             //       might get the symbol for a different declaration.
             Symbol *sym = env_find(tc->current_env, s->name);
-            if (sym) sym->is_top_level = true;
+            if (sym) sym->path = tc->file_path;
 
             break;
         }
@@ -721,7 +721,7 @@ static Environment *typecheck_file(Typechecker *tc, ProgramAST *ast, const char 
 
             if (!sym)
                 tc_error(tc, &s->base.loc, SV("Redeclaration of name."));
-            else sym->is_top_level = true;
+            else sym->path = tc->file_path;
 
             break;
         }
@@ -754,6 +754,7 @@ Environment *typecheck(ProgramAST *ast, const char *source, Arena *arena) {
     tc.finished_top_level_pass = false;
     tc.loop_depth = 0;
     tc.current_func = NULL;
+    tc.file_path = ast->file;
 
     tc.global_module_list = arena_alloc_assert(arena, sizeof(Environment));
     env_init(tc.global_module_list);

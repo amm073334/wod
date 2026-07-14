@@ -1,4 +1,5 @@
 #include "environment.h"
+#include <stdio.h>
 
 void env_init(Environment *env) {
     env->parent = NULL;
@@ -29,7 +30,7 @@ Symbol *env_insert(Environment *env, StringView name, WodType type, Arena *arena
     sym.name = name;
     sym.type = type;
     sym.offset = 0;
-    sym.is_top_level = false;
+    sym.path = SV_NULL;
 
     VEC_PUSH(env->symbols, sym, arena);
     return &env->symbols.at[env->symbols.count - 1];
@@ -47,4 +48,17 @@ Symbol *env_find(Environment *env, StringView name) {
     }
 
     return env_find(env->parent, name);
+}
+
+StringView get_globally_qualified_name(Arena *arena, Symbol *sym) {
+    size_t new_len = sym->path.len + sym->name.len + 1;
+    char *new_str = arena_alloc(arena, new_len);
+    if (!new_str) {
+        fprintf(stderr, "Fatal error: Out of memory.\n");
+        exit(1);
+    }
+    memcpy(new_str, sym->path.data, sym->path.len);
+    new_str[sym->path.len] = ':';
+    memcpy(new_str + sym->path.len + 1, sym->name.data, sym->name.len);
+    return (StringView){.data = new_str, .len = new_len};
 }

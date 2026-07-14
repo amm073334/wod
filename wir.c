@@ -38,16 +38,16 @@ static int32_t disable_rc(Arena *arena, CommonEvent *cev, WIROperand wop) {
     return 0;
 }
 
-CommonEvent compile_wir_to_cev(VEC_WIRInst *arr, Arena *arena) {
+CommonEvent compile_wir_to_cev(WIR wir, Arena *arena) {
 
     CommonEvent cev;
     cev_init(&cev, arena);
 
-    for (size_t i = 0; i < arr->count; i++) {
+    for (size_t i = 0; i < wir.cevs.count; i++) {
         VEC_int32_t i_vec;
         VEC_StringView s_vec;
     
-        WIROperand *operands = arr->at[i].operands.at;
+        // WIROperand *operands = wir.cevs.at[i];
         // switch (arr->at[i].op) {
         //     case WIR_VAR: {
         //         assert(operands[0].kind == OPKIND_LOCAL ||
@@ -77,10 +77,10 @@ CommonEvent compile_wir_to_cev(VEC_WIRInst *arr, Arena *arena) {
         //         cev_push_simple_cmd(&cev, indent, CMD_IF_INT);
         //         break;
 
-        //     case WIR_LOOP:
+        //     case WIR_LOOP_BEGIN:
         //         cev_push_simple_cmd(&cev, indent, CMD_LOOP);
         //         break;
-        //     case WIR_LOOP_N: {
+        //     case WIR_LOOP_BEGIN_N: {
         //         VEC_INIT(i_vec);
         //         int32_t n = disable_rc(arena, &cev, operands[0]);
         //         VEC_PUSH(i_vec, n, arena);
@@ -120,7 +120,7 @@ void print_wir(WIR *wir) {
                         printf(" \"" SV_FMT "\"", SV_FMT_VAL(operand.as.imm_str));
                     break;
                 case OPKIND_GLOBAL:
-                    printf(" $G%zu", operand.as.offset);
+                    printf(" " SV_FMT, SV_FMT_VAL(operand.as.imm_str));
                     break;
                 case OPKIND_LOCAL:
                     printf(" $L%zu", operand.as.offset);
@@ -133,6 +133,17 @@ void print_wir(WIR *wir) {
             printf("\n");
         }
         printf("\n");
+    }
+
+    for (size_t i = 0; i < wir->dbs.count; i++) {
+        WIRDB *db = &wir->dbs.at[i];
+
+        printf("(DB) " SV_FMT ":\n", SV_FMT_VAL(db->debug_name));
+        for (int j = 0; j < db->fields.count; j++) {
+            WIRDBField *field = &db->fields.at[j];
+            
+            printf(SV_FMT "\n", SV_FMT_VAL(field->debug_name));
+        }
     }
 
 }

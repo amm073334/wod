@@ -3,6 +3,7 @@
 
 #include "common.h"
 #include "commonevent.h"
+#include "environment.h"
 
 #define WIR_IMM_I(i) (WIROperand){ .kind = OPKIND_IMM, .type = OPTYPE_INT, .as.imm_int = (i) }
 #define WIR_IMM_S(s) (WIROperand){ .kind = OPKIND_IMM, .type = OPTYPE_STR, .as.imm_str = (s) }
@@ -12,12 +13,17 @@ typedef struct WIROperand {
         // Immediate.
         OPKIND_IMM,
 
-        // Uses the offset member; basically a virtual register.
+        // Uses the `imm_str` field to qualify a globally-scoped identifier.
+        // For example, `example/file.wod:global_name`.
         OPKIND_GLOBAL,
+
+        // Uses the offset member; basically a virtual register.
         OPKIND_LOCAL,
         OPKIND_TMP,
     } kind;
 
+    // Type of the operand (not of the union). For example,
+    // an integer global would still use the `imm_str` field.
     enum {
         OPTYPE_INT,
         OPTYPE_STR,
@@ -48,18 +54,21 @@ typedef struct {
         WIR_STR_ASSIGN,
 
         // (cond)
-        WIR_INT_IF_HEAD, WIR_STR_IF_HEAD, WIR_BRANCH,
-        
+        WIR_IF_BEGIN,
+
         WIR_ELSE, WIR_IF_END,
 
-        WIR_LOOP,
-        WIR_LOOP_N, // (n)
+        WIR_LOOP_BEGIN,
+        WIR_LOOP_BEGIN_N, // (n)
         WIR_LOOP_END,
 
         // (src/dst, type, data, field)
         WIR_DB_LOAD, WIR_DB_STORE,
 
         // (dest, cev, iargs..., sargs...)
+        // `cev` is either a globally qualified name
+        //    (like `directory/file.wod:cev_name`)
+        // or a virtual register containing the cev address.
         WIR_CALL,
 
         WIR_CONTINUE, WIR_BREAK,
@@ -87,10 +96,28 @@ typedef struct {
 VEC_DEF(WIRFunc);
 
 typedef struct {
+    StringView debug_name;
+    WodType type;
+
+    bool has_initializer;
+    WIROperand initializer;
+} WIRDBField;
+
+VEC_DEF(WIRDBField);
+
+typedef struct {
+    StringView debug_name;
+    VEC_WIRDBField fields;
+} WIRDB;
+
+VEC_DEF(WIRDB);
+
+typedef struct {
     VEC_WIRFunc cevs;
+    VEC_WIRDB dbs;
 } WIR;
 
-CommonEvent compile_wir_to_cev(VEC_WIRInst *arr, Arena *arena);
+CommonEvent compile_wir_to_cev(WIR arr, Arena *arena);
 void print_wir(WIR *wir);
 
 #endif // WOD_WIR_H_
