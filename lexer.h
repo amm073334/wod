@@ -37,6 +37,8 @@ typedef enum {
     TOK_CMD,
     TOK_UDB, TOK_CDB, TOK_CEVTYPE,
 
+    TOK_APPLY,
+
     // Literals.
     TOK_IDENTIFIER, TOK_NUMBER, TOK_STRING,
 

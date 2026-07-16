@@ -4,6 +4,7 @@
 #include "common.h"
 #include "commonevent.h"
 #include "environment.h"
+#include "gamedata.h"
 
 #define WIR_IMM_I(i) (WIROperand){ .kind = OPKIND_IMM, .type = OPTYPE_INT, .as.imm_int = (i) }
 #define WIR_IMM_S(s) (WIROperand){ .kind = OPKIND_IMM, .type = OPTYPE_STR, .as.imm_str = (s) }
@@ -91,9 +92,9 @@ VEC_DEF(WIRInst);
 typedef struct {
     StringView debug_name;
     VEC_WIRInst insts;
-} WIRFunc;
+} WIRCev;
 
-VEC_DEF(WIRFunc);
+VEC_DEF(WIRCev);
 
 typedef struct {
     StringView debug_name;
@@ -113,11 +114,12 @@ typedef struct {
 VEC_DEF(WIRDB);
 
 typedef struct {
-    VEC_WIRFunc cevs;
-    VEC_WIRDB dbs;
+    VEC_WIRCev cevs;
+    VEC_WIRDB udb_types;
+    VEC_WIRDB cdb_types;
 } WIR;
 
-CommonEvent compile_wir_to_cev(WIR arr, Arena *arena);
+GameData compile_wir_to_gd(WIR arr, Arena *arena);
 void print_wir(WIR *wir);
 
 #endif // WOD_WIR_H_

@@ -65,6 +65,7 @@ VEC_DEF(Import);
 typedef struct {
     StringView file;
     const char *source;
+    StringView apply;
     VEC_Import imports;
     VEC_PTR_Stmt stmts;
 } ProgramAST;

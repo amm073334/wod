@@ -37,3 +37,18 @@ char *sv_dup(Arena *arena, StringView s) {
     new_str[s.len] = '\0';
     return new_str;
 }
+
+bool sv_to_int(Arena *arena, StringView s, int32_t *out) {
+    char *dup = sv_dup(arena, s);
+
+    errno = 0;
+    int64_t n = strtoll(dup, NULL, 0);
+    if (errno == ERANGE)
+        return false;
+    
+    if (n > 2147483647 || n < (-2147483647 - 1))
+        return false;
+
+    *out = (int32_t)n;
+    return true;
+}

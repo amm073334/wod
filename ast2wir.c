@@ -9,7 +9,7 @@ VEC_DEF(TwoStack);
 
 typedef struct {
     Arena *arena;
-    VEC_WIRFunc cevs;
+    VEC_WIRCev cevs;
     VEC_WIRDB cdbs;
 
     TwoStack tmp;
@@ -20,7 +20,7 @@ typedef struct {
 static void emit_to_current_cev(Ast2Wir *aw, WIRInst inst) {
     assert(aw->cevs.count > 0);
 
-    WIRFunc *last = &aw->cevs.at[aw->cevs.count - 1];
+    WIRCev *last = &aw->cevs.at[aw->cevs.count - 1];
     VEC_PUSH(last->insts, inst, aw->arena);
 }
 
@@ -147,7 +147,7 @@ static void visit_db_field_decl(Ast2Wir *aw, Stmt *stmt) {
             wdbf.initializer = (WIROperand){
                 .kind = OPKIND_IMM,
                 .type = OPTYPE_INT,
-                .as.imm_str = lit->value
+                .as.imm_int = lit->value
             };
             break;
         }
@@ -156,7 +156,7 @@ static void visit_db_field_decl(Ast2Wir *aw, Stmt *stmt) {
             wdbf.initializer = (WIROperand){
                 .kind = OPKIND_IMM,
                 .type = OPTYPE_INT,
-                .as.imm_str = lit->value
+                .as.imm_int = lit->value
             };
             break;
         }
@@ -393,7 +393,7 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
 
         sym->offset = aw->cevs.count;
         VEC_PUSH(aw->cevs,
-            ((WIRFunc){
+            ((WIRCev){
                 .debug_name = s->name,
                 .insts = VEC_EMPTY,
             }), aw->arena);
@@ -509,5 +509,5 @@ WIR ast2wir_pass(ProgramAST *ast, Arena *arena) {
         assert(aw.local_frames.count == 0);
     }
 
-    return (WIR){.cevs = aw.cevs, .dbs = aw.cdbs};
+    return (WIR){.cevs = aw.cevs, .cdb_types = aw.cdbs};
 }

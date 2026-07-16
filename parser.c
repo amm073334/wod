@@ -99,27 +99,12 @@ static void synchronize(Parser *parser) {
     }
 }
 
-static bool sv_to_int(StringView s, int32_t *out, Arena *arena) {
-    char *dup = sv_dup(arena, s);
-
-    errno = 0;
-    int64_t n = strtoll(dup, NULL, 0);
-    if (errno == ERANGE)
-        return false;
-    
-    if (n > 2147483647 || n < (-2147483647 - 1))
-        return false;
-
-    *out = (int32_t)n;
-    return true;
-}
-
 static Expr *expression(Parser *parser);
 
 static Expr *primary(Parser *parser) {
     if (match(parser, TOK_NUMBER)) {
         int32_t number;
-        if (!sv_to_int(parser->previous.text, &number, parser->arena))
+        if (!sv_to_int(parser->arena, parser->previous.text, &number))
             error_previous(parser, SV("Value cannot be stored in a 32-bit integer."));
 
         ExprIntLit *expr;
@@ -779,6 +764,11 @@ ProgramAST *generate_ast(StringView file_path, const char *source, Arena *arena)
     VEC_INIT(ast->stmts);
     
     advance(&parser);
+
+    if (match(&parser, TOK_APPLY)) {
+        consume(&parser, TOK_STRING, SV("Expected apply path."));
+        ast->apply = parser.previous.text;
+    }
 
     while (match(&parser, TOK_IMPORT)) {
         VEC_PUSH(ast->imports, import(&parser), arena);

@@ -38,67 +38,94 @@ static int32_t disable_rc(Arena *arena, CommonEvent *cev, WIROperand wop) {
     return 0;
 }
 
-CommonEvent compile_wir_to_cev(WIR wir, Arena *arena) {
+#define CEV_BINOP(op) do { \
+        assert(wi->operands.at[0].kind == OPKIND_LOCAL \
+                || wi->operands.at[0].kind == OPKIND_TMP); \
+ \
+        int32_t dest = wi->operands.at[0].as.offset + I_BASE; \
+        int32_t a = disable_rc(arena, &cev, wi->operands.at[1]); \
+        int32_t b = disable_rc(arena, &cev, wi->operands.at[2]); \
+ \
+        VEC_PUSH(i_vec, dest, arena); \
+        VEC_PUSH(i_vec, a, arena); \
+        VEC_PUSH(i_vec, b, arena); \
+        VEC_PUSH(i_vec, op, arena); \
+         \
+        cev_push_cmd(&cev, CMD_VAR, indent, i_vec, s_vec); \
+    } while (0)
 
-    CommonEvent cev;
-    cev_init(&cev, arena);
-
-    for (size_t i = 0; i < wir.cevs.count; i++) {
-        VEC_int32_t i_vec;
-        VEC_StringView s_vec;
+GameData compile_wir_to_gd(WIR wir, Arena *arena) {
+    GameData gd;
+    gd_init(&gd);
     
-        // WIROperand *operands = wir.cevs.at[i];
-        // switch (arr->at[i].op) {
-        //     case WIR_VAR: {
-        //         assert(operands[0].kind == OPKIND_LOCAL ||
-        //                operands[0].kind == OPKIND_TMP);
+    for (size_t i = 0; i < wir.cevs.count; i++) {
+        CommonEvent cev;
+        cev_init(&cev, arena);
+
+        WIRCev *wc = &wir.cevs.at[i];
+        
+        for (size_t j = 0; j < wc->insts.count; j++) {
+            VEC_int32_t i_vec = VEC_EMPTY;
+            VEC_StringView s_vec = VEC_EMPTY;
             
-        //         // set_last_i_vself(operands[0].as.vself);
-            
-        //         int32_t dest = operands[0].as.vself + I_BASE;
+            WIRInst *wi = &wc->insts.at[j];
+            switch (wi->op) {
+            case WIR_ADD: CEV_BINOP(VAR_OP_PLUS); break;
+            case WIR_SUB: CEV_BINOP(VAR_OP_MINUS); break;
+            case WIR_MUL: CEV_BINOP(VAR_OP_TIMES); break;
+            case WIR_DIV: CEV_BINOP(VAR_OP_DIV); break;
+            case WIR_MOD: CEV_BINOP(VAR_OP_MOD); break;
+            case WIR_XOR: CEV_BINOP(VAR_OP_XOR); break;
+            case WIR_LSH: CEV_BINOP(VAR_OP_LSHIFT); break;
+            case WIR_AND: CEV_BINOP(VAR_OP_AND); break;
+            case WIR_OR:  CEV_BINOP(VAR_OP_OR); break;
 
-        //         VEC_INIT(i_vec);
+            case WIR_EQ: UNIMPLEMENTED;
+            case WIR_NEQ: UNIMPLEMENTED;
+            case WIR_LT: UNIMPLEMENTED;
+            case WIR_LTE: UNIMPLEMENTED;
+            case WIR_GT: UNIMPLEMENTED;
+            case WIR_GTE: UNIMPLEMENTED;
+            case WIR_LAND: UNIMPLEMENTED;
+            case WIR_LOR: UNIMPLEMENTED;
+            // TODO
+            case WIR_IF_BEGIN:
+                cev_push_simple_cmd(&cev, indent, CMD_IF_INT);
+                break;
 
-        //         int32_t a = disable_rc(arena, &cev, operands[1]);
-        //         int32_t b = disable_rc(arena, &cev, operands[2]);
-
-        //         VEC_PUSH(i_vec, operands[0].as.vself, arena);
-        //         VEC_PUSH(i_vec, a, arena);
-        //         VEC_PUSH(i_vec, b, arena);
-        //         VEC_PUSH(i_vec, operands[3].as.integer, arena);
+            case WIR_LOOP_BEGIN:
+                cev_push_simple_cmd(&cev, indent, CMD_LOOP);
+                break;
+            case WIR_LOOP_BEGIN_N: {
+                VEC_INIT(i_vec);
+                int32_t n = disable_rc(arena, &cev, wi->operands.at[0]);
+                VEC_PUSH(i_vec, n, arena);
                 
-        //         VEC_INIT(s_vec);
+                VEC_INIT(s_vec);
 
-        //         cev_push_cmd(&cev, CMD_VAR, indent, i_vec, s_vec);
-        //         break;
-        //     }
-        //     // TODO
-        //     case WIR_INT_IF_HEAD:
-        //         cev_push_simple_cmd(&cev, indent, CMD_IF_INT);
-        //         break;
-
-        //     case WIR_LOOP_BEGIN:
-        //         cev_push_simple_cmd(&cev, indent, CMD_LOOP);
-        //         break;
-        //     case WIR_LOOP_BEGIN_N: {
-        //         VEC_INIT(i_vec);
-        //         int32_t n = disable_rc(arena, &cev, operands[0]);
-        //         VEC_PUSH(i_vec, n, arena);
-                
-        //         VEC_INIT(s_vec);
-
-        //         cev_push_cmd(&cev, indent, CMD_LOOP, i_vec, s_vec);
-        //         break;
-        //     }
-        //     case WIR_LOOP_END:
-        //         cev_push_simple_cmd(&cev, indent, CMD_LOOP_END);
-        //         break;
-        //     default:
-        //         UNREACHABLE;
-        // }
+                cev_push_cmd(&cev, indent, CMD_LOOP, i_vec, s_vec);
+                break;
+            }
+            case WIR_LOOP_END:
+                cev_push_simple_cmd(&cev, indent, CMD_LOOP_END);
+                break;
+            case WIR_RETURN_VAL:
+                cev_push_simple_cmd(&cev, indent, CMD_RETURN);
+                break;
+            default:
+                UNIMPLEMENTED;
+        }
+        }
+        VEC_PUSH(gd.cevs, cev, arena);
     }
-    return cev;
+    
+    for (size_t i = 0; i < wir.cdb_types.count; i++) {
+
+    }
+    return gd;
 }
+
+#undef CEV_BINOP
 
 void print_wir(WIR *wir) {
 
@@ -135,11 +162,11 @@ void print_wir(WIR *wir) {
         printf("\n");
     }
 
-    for (size_t i = 0; i < wir->dbs.count; i++) {
-        WIRDB *db = &wir->dbs.at[i];
+    for (size_t i = 0; i < wir->cdb_types.count; i++) {
+        WIRDB *db = &wir->cdb_types.at[i];
 
         printf("(DB) " SV_FMT ":\n", SV_FMT_VAL(db->debug_name));
-        for (int j = 0; j < db->fields.count; j++) {
+        for (size_t j = 0; j < db->fields.count; j++) {
             WIRDBField *field = &db->fields.at[j];
             
             printf(SV_FMT "\n", SV_FMT_VAL(field->debug_name));

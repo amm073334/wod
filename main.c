@@ -10,6 +10,7 @@
 #include "gamedata.h"
 #include "commonevent.h"
 #include "environment.h"
+#include "path.h"
 
 int main(int argc, const char *argv[]) {
     if (argc != 2) {
@@ -32,23 +33,27 @@ int main(int argc, const char *argv[]) {
 
     constexpr_pass(ast, &arena);
 
-    // Arena wl_arena;
-    // arena_init(&wl_arena);
-
     // TODO: This probably should generate a different set of instructions per cev,
     //       and compile each of them separately.
     WIR wir = ast2wir_pass(ast, &arena);
     print_wir(&wir);
 
     Arena gd_arena;
-    CommonEvent cev = compile_wir_to_cev(wir, &gd_arena);
+    arena_init(&gd_arena);
 
-    // GameData gd;
-    // gd_init(&gd);
-    // VEC_PUSH(gd.cevs, cev, &gd_arena);
+    GameData gd = compile_wir_to_gd(wir, &gd_arena);
 
-    // gd_write_dir(&gd, "build");
+    for (size_t i = 0; i < gd.cevs.count; i++) {
+        cev_write_txt(&gd.cevs.at[i], stdout);
+        printf("\n");
+    }
+
+    StringView directory = get_directory(input_file, &gd_arena);
+
+    gd_write_dir(&gd, sv_concat(&gd_arena, directory, ast->apply));
+    
     arena_free(&arena);
+    arena_free(&gd_arena);
 
     return 0;
 }

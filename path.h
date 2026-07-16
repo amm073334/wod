@@ -4,5 +4,6 @@
 #include "common.h"
 
 StringView get_full_path(StringView path, Arena *arena);
+StringView get_directory(StringView path, Arena *arena);
 
 #endif

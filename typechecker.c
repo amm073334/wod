@@ -228,6 +228,7 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
             break;
         }
         default:
+            bt = TYPE_ERROR;
             tc_expr_error(tc, expr, &e->right->loc, SV("Unsupported operation."));
             break;
         }

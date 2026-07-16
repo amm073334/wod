@@ -104,9 +104,11 @@ void gd_init(GameData *gd) {
     gd->entry = 500000;
 }
 
-void gd_write_dir(GameData *gd, const char *outdir) {
+void gd_write_dir(GameData *gd, StringView out) {
     Arena arena;
     arena_init(&arena);
+
+    char *outdir = sv_dup(&arena, out);
 
     if (!CreateDirectoryA(outdir, NULL) && ERROR_ALREADY_EXISTS != GetLastError()) {
         fprintf(stderr, "Failed to create directory for game data.\n");

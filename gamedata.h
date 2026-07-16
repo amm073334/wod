@@ -16,6 +16,6 @@ typedef struct {
 } GameData;
 
 void gd_init(GameData *gd);
-void gd_write_dir(GameData *gd, const char *outdir);
+void gd_write_dir(GameData *gd, StringView out);
 
 #endif // WOD_GAMEDATA_H_
