@@ -768,6 +768,8 @@ ProgramAST *generate_ast(StringView file_path, const char *source, Arena *arena)
     if (match(&parser, TOK_APPLY)) {
         consume(&parser, TOK_STRING, SV("Expected apply path."));
         ast->apply = parser.previous.text;
+    } else {
+        ast->apply = SV_NULL;
     }
 
     while (match(&parser, TOK_IMPORT)) {

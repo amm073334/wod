@@ -48,10 +48,14 @@ int main(int argc, const char *argv[]) {
         printf("\n");
     }
 
-    StringView directory = get_directory(input_file, &gd_arena);
+    if (sv_is_null(ast->apply)) {
+        StringView directory = get_directory(to_sv(argv[0]), &gd_arena);
+        gd_write_dir(&gd, directory);
+    } else {
+        StringView directory = get_directory(input_file, &gd_arena);
+        gd_write_dir(&gd, sv_concat(&gd_arena, directory, ast->apply));
+    }
 
-    gd_write_dir(&gd, sv_concat(&gd_arena, directory, ast->apply));
-    
     arena_free(&arena);
     arena_free(&gd_arena);
 
