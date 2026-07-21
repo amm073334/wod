@@ -289,7 +289,7 @@ Token scan_token(Lexer *lexer) {
 char *alloc_source(StringView path, Arena *arena) {
     char *path_cstr = arena_alloc(arena, path.len + 1);
     if (!path_cstr) {
-        fprintf(stderr, "Not enough memory to read '" SV_FMT "'.", SV_FMT_VAL(path));
+        fprintf(stderr, "Not enough memory to read '" SV_FMT "'.\n", SV_FMT_VAL(path));
         exit(1);
     }
     memcpy(path_cstr, path.data, path.len);
@@ -297,7 +297,7 @@ char *alloc_source(StringView path, Arena *arena) {
 
     FILE *file = fopen(path_cstr, "rb");
     if (!file) {
-        fprintf(stderr, "Could not open file '%s'.", path_cstr);
+        fprintf(stderr, "Could not open file '%s'.\n", path_cstr);
         exit(1);
     }
 
@@ -307,13 +307,13 @@ char *alloc_source(StringView path, Arena *arena) {
 
     char *buf = arena_alloc(arena, file_size + 1);
     if (!buf) {
-        fprintf(stderr, "Not enough memory to read '%s'.", path_cstr);
+        fprintf(stderr, "Not enough memory to read '%s'.\n", path_cstr);
         exit(1);
     }
 
     size_t n = fread(buf, sizeof(char), file_size, file);
     if (n < file_size) {
-        fprintf(stderr, "Could not read '%s'.", path_cstr);
+        fprintf(stderr, "Could not read '%s'.\n", path_cstr);
         exit(1);
     }
 

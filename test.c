@@ -2,11 +2,13 @@
 #include <stdlib.h>
 
 #include "common.h"
+#include "windows.h"
 
 #define C_RED "\x1b[31m"
 #define C_GRN "\x1b[32m"
 #define C_RESET "\x1b[m"
 #define EXPECT_STR "// EXPECT: "
+#define TEST_OUTPUT "test\\bin\\test_output"
 
 static bool starts_with(const char *str, const char *substr) {
     for (size_t i = 0; substr[i] != '\0'; i++) {
@@ -27,7 +29,7 @@ static void passed(const char *name) {
 static StringView read_file(const char *path, Arena *arena) {
     FILE *file = fopen(path, "rb");
     if (!file) {
-        fprintf(stderr, "Could not open file '%s'.", path);
+        fprintf(stderr, "Could not open file '%s'.\n", path);
         return SV_NULL;
     }
 
@@ -37,13 +39,13 @@ static StringView read_file(const char *path, Arena *arena) {
 
     char *buf = arena_alloc(arena, file_size + 1);
     if (!buf) {
-        fprintf(stderr, "Not enough memory to read '%s'.", path);
+        fprintf(stderr, "Not enough memory to read '%s'.\n", path);
         return SV_NULL;
     }
 
     size_t n = fread(buf, sizeof(char), file_size, file);
     if (n < file_size) {
-        fprintf(stderr, "Could not read '%s'.", path);
+        fprintf(stderr, "Could not read '%s'.\n", path);
         return SV_NULL;
     }
 
@@ -64,7 +66,7 @@ int main(int argc, char **argv) {
     StringView command = 
         sv_concat(&arena, SV(".\\wodc.exe "), to_sv(path));
     
-    command = sv_concat(&arena, command, to_sv(" 2> nul"));
+    command = sv_concat(&arena, command, to_sv(" 2> nul 1> nul"));
 
     if (sv_is_null(command)) {
         fprintf(stderr, "Failed to allocate memory.");
@@ -91,6 +93,7 @@ int main(int argc, char **argv) {
     if (sv_is_null(f)) goto end;
 
     if (!starts_with(f.data, EXPECT_STR)) {
+        printf("(compile only) ");
         passed(path);
         goto end;
     }
@@ -105,7 +108,46 @@ int main(int argc, char **argv) {
         .len = newline_pos - sizeof(EXPECT_STR)
     };
 
-    // TODO: apply changes, run Game.exe, compare
+    {
+        STARTUPINFO si;
+        PROCESS_INFORMATION pi;
+        ZeroMemory(&si, sizeof(si));
+        si.cb = sizeof(si);
+        ZeroMemory(&pi, sizeof(pi));
+    
+        if (!CreateProcessA("test\\bin\\Game.exe",
+            NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+    
+            fprintf(stderr, "Failed to create process.");
+            goto end;
+        }
+    
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+    }
+
+    StringView test_output = read_file(TEST_OUTPUT, &arena);
+    if (sv_is_null(test_output)) {
+        printf("(no output) ");
+        failed(path);
+        goto end;
+    }
+
+    if (!sv_equals(expected, test_output)) {
+        failed(path);
+        printf("Expected: " SV_FMT "; Actual: " SV_FMT "\n",
+            SV_FMT_VAL(expected), SV_FMT_VAL(test_output));
+        goto end;
+    }
+
+    if (!DeleteFile(TEST_OUTPUT)) {
+        printf("(delete failed) ");
+        failed(path);
+        goto end;
+    }
+
+    passed(path);
 
     end:
     arena_free(&arena);
