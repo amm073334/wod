@@ -18,4 +18,7 @@ typedef struct {
 void gd_init(GameData *gd);
 void gd_write_dir(GameData *gd, StringView out);
 
+// `txt_path` should be a relative path from the `editor_path`.
+bool gd_apply(Arena *arena, StringView editor_path, StringView txt_path);
+
 #endif // WOD_GAMEDATA_H_

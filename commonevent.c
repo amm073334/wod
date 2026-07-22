@@ -34,7 +34,7 @@ void cev_init(CommonEvent *cev, Arena *arena) {
 }
 
 Command *cev_push_simple_cmd(CommonEvent *cev,
-    uint8_t indent, int32_t command_id) {
+    int32_t command_id, uint8_t indent) {
 
     Command c;
     c.id = command_id;

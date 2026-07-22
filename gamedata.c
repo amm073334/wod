@@ -191,7 +191,7 @@ void gd_write_dir(GameData *gd, StringView out) {
 
     {
         StringView path = 
-            sv_concat(&arena, basic_data_dir, SV("SampleMap.mps.Auto.txt"));
+            sv_concat(&arena, map_data_dir, SV("SampleMap.mps.Auto.txt"));
         if (!path.data)
             goto alloc_error;
 
@@ -212,4 +212,24 @@ void gd_write_dir(GameData *gd, StringView out) {
 
     cleanup:
     arena_free(&arena);
+}
+
+bool gd_apply(Arena *arena, StringView editor_path, StringView txt_path) {
+    StringView command = sv_concat(arena, sv_concat(arena, sv_concat(arena,
+        editor_path, SV(" -txtinput -txt_folder ")), txt_path), SV(" -target ALL"));
+
+    STARTUPINFO si;
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    ZeroMemory(&pi, sizeof(pi));
+
+    bool success = CreateProcessA(NULL, command.data,
+        NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+
+    return success;
 }

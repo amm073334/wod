@@ -12,6 +12,7 @@ typedef enum {
     CMD_LOOP         = 170,
     CMD_BREAK        = 171,
     CMD_RETURN       = 172,
+    CMD_QUIT_GAME    = 175,
     CMD_CONTINUE     = 176,
     CMD_LOOP_COUNT   = 179,
     CMD_CALL_ID      = 210,

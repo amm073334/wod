@@ -78,7 +78,10 @@ typedef struct {
         // (src)
         WIR_RETURN_VAL,
 
-        // (op, indent, iargs..., sargs...)
+        // (op, open/close, iargs..., sargs...)
+        // `open/close` can be 1 for `open` or -1 for `close`;
+        // or 0 for no change. Indicates commands with block-like
+        // structures, like loops and conditionals.
         WIR_CMD,
 
         // (name)

@@ -43,17 +43,33 @@ int main(int argc, const char *argv[]) {
 
     GameData gd = compile_wir_to_gd(wir, &gd_arena);
 
-    for (size_t i = 0; i < gd.cevs.count; i++) {
-        cev_write_txt(&gd.cevs.at[i], stdout);
-        printf("\n");
-    }
-
+    // If an `apply` directory is specified, then apply the text output there.
+    // Otherwise, just compile output into the directory the source file is in.
     if (sv_is_null(ast->apply)) {
         StringView directory = get_directory(to_sv(argv[0]), &gd_arena);
         gd_write_dir(&gd, directory);
     } else {
-        StringView directory = get_directory(input_file, &gd_arena);
-        gd_write_dir(&gd, sv_concat(&gd_arena, directory, ast->apply));
+        StringView input_directory = get_directory(input_file, &gd_arena);
+
+        StringView editor_directory = sv_concat(&gd_arena,
+            input_directory, ast->apply);
+
+        char last = ast->apply.data[ast->apply.len - 1];
+        if (last != '/' && last != '\\')
+            editor_directory = sv_concat(&gd_arena,
+                editor_directory, SV("\\"));
+
+        StringView build_directory = sv_concat(&gd_arena,
+            editor_directory, SV("build"));
+
+        gd_write_dir(&gd, build_directory);
+        if (!gd_apply(&gd_arena,
+                sv_concat(&gd_arena, editor_directory, SV("Editor.exe")),
+                SV("build"))) {
+        
+            fprintf(stderr, "Failed to apply game data.");
+            exit(2);
+        }
     }
 
     arena_free(&arena);

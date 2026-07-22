@@ -469,10 +469,29 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
         return;
     case NODE_StmtCmd: {
         StmtCmd *s = (StmtCmd *)stmt;
+
+        VEC_WIROperand ops = VEC_EMPTY;
+
+        {
+            assert(s->id->kind == NODE_ExprIntLit);
+            ExprIntLit *cmd_id = (ExprIntLit *)s->id;
+            VEC_PUSH(ops, WIR_IMM_I(cmd_id->value), aw->arena);
+
+            // TODO: Currently, let all relative indent values be 0.
+            VEC_PUSH(ops, WIR_IMM_I(0), aw->arena);
+        }
+
         for (size_t i = 0; i < s->int_operands.count; i++)
-            visit_Expr(aw, s->int_operands.at[i]);
+            VEC_PUSH(ops, visit_Expr(aw, s->int_operands.at[i]), aw->arena);
         for (size_t i = 0; i < s->str_operands.count; i++)
-            visit_Expr(aw, s->str_operands.at[i]);
+            VEC_PUSH(ops, visit_Expr(aw, s->str_operands.at[i]), aw->arena);
+
+        WIRInst inst = (WIRInst) {
+            .op = WIR_CMD,
+            .operands = ops
+        };
+
+        emit_to_current_cev(aw, inst);
         return;
     }
     case NODE_StmtExpr: {

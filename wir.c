@@ -3,8 +3,6 @@
 #define I_BASE 1600010
 #define S_BASE 1600005
 
-static uint8_t indent = 0;
-
 // TODO: It seems like disabling rc isn't really viable at the wir layer,
 //       because allocating space for temporaries requires knowledge
 //       of the state of the compile-time stack (which means it should
@@ -63,7 +61,8 @@ GameData compile_wir_to_gd(WIR wir, Arena *arena) {
         cev_init(&cev, arena);
 
         WIRCev *wc = &wir.cevs.at[i];
-        
+
+        uint8_t indent = 0;
         for (size_t j = 0; j < wc->insts.count; j++) {
             VEC_int32_t i_vec = VEC_EMPTY;
             VEC_StringView s_vec = VEC_EMPTY;
@@ -90,11 +89,15 @@ GameData compile_wir_to_gd(WIR wir, Arena *arena) {
             case WIR_LOR: UNIMPLEMENTED;
             // TODO
             case WIR_IF_BEGIN:
-                cev_push_simple_cmd(&cev, indent, CMD_IF_INT);
+                cev_push_simple_cmd(&cev, CMD_IF_INT, indent);
+                
+                indent++;
                 break;
 
             case WIR_LOOP_BEGIN:
-                cev_push_simple_cmd(&cev, indent, CMD_LOOP);
+                cev_push_simple_cmd(&cev, CMD_LOOP, indent);
+                
+                indent++;
                 break;
             case WIR_LOOP_BEGIN_N: {
                 VEC_INIT(i_vec);
@@ -103,15 +106,62 @@ GameData compile_wir_to_gd(WIR wir, Arena *arena) {
                 
                 VEC_INIT(s_vec);
 
-                cev_push_cmd(&cev, indent, CMD_LOOP, i_vec, s_vec);
+                cev_push_cmd(&cev, CMD_LOOP_COUNT, indent, i_vec, s_vec);
+                
+                indent++;
                 break;
             }
             case WIR_LOOP_END:
-                cev_push_simple_cmd(&cev, indent, CMD_LOOP_END);
+                indent--;
+
+                cev_push_simple_cmd(&cev, CMD_LOOP_END, indent);
                 break;
             case WIR_RETURN_VAL:
-                cev_push_simple_cmd(&cev, indent, CMD_RETURN);
+                cev_push_simple_cmd(&cev, CMD_RETURN, indent);
                 break;
+            case WIR_CMD: {
+                assert(wi->operands.count >= 2);
+                assert(wi->operands.at[0].kind == OPKIND_IMM);
+                assert(wi->operands.at[1].kind == OPKIND_IMM);
+                assert(wi->operands.at[1].as.imm_int >= -1
+                       && wi->operands.at[1].as.imm_int <= 1);
+
+                size_t str_op_pos;
+                {
+                    size_t o = 2;
+                    while (o < wi->operands.count
+                           && wi->operands.at[o].type == OPTYPE_INT)
+                        o++;
+                    
+                    str_op_pos = o;
+                }
+
+                VEC_int32_t int_fields = VEC_EMPTY;
+                for (size_t o = 2; o < str_op_pos; o++) {
+                    VEC_PUSH(int_fields, wi->operands.at[o].as.imm_int, arena);
+                }
+
+                VEC_StringView str_fields = VEC_EMPTY;
+                for (size_t o = str_op_pos; o < wi->operands.count; o++) {
+                    assert(wi->operands.at[o].type == OPTYPE_STR);
+                    VEC_PUSH(str_fields, wi->operands.at[o].as.imm_str, arena);
+                }
+
+                if (wi->operands.at[1].as.imm_int == -1)
+                    indent--;
+
+                cev_push_cmd(&cev,
+                    wi->operands.at[0].as.imm_int,
+                    indent,
+                    int_fields, str_fields);
+
+                if (wi->operands.at[1].as.imm_int == 1)
+                    indent++;
+                
+                break;
+            }
+
+
             default:
                 UNIMPLEMENTED;
         }
