@@ -62,6 +62,13 @@ GameData compile_wir_to_gd(WIR wir, Arena *arena) {
 
         WIRCev *wc = &wir.cevs.at[i];
 
+        // TODO: This is a bandaid to specify the entry point,
+        //       but if WIR is to be a file-local concept then it doesn't
+        //       make sense to specify a global entry point here.
+        if (sv_equals(wc->debug_name, SV("main"))) {
+            gd.entry = 500000 + i;
+        }
+
         uint8_t indent = 0;
         for (size_t j = 0; j < wc->insts.count; j++) {
             VEC_int32_t i_vec = VEC_EMPTY;
@@ -166,12 +173,23 @@ GameData compile_wir_to_gd(WIR wir, Arena *arena) {
                 UNIMPLEMENTED;
         }
         }
+        assert(indent == 0);
+
+        cev_push_cmd(&cev, 0, indent,
+            (VEC_int32_t)VEC_EMPTY, (VEC_StringView)VEC_EMPTY);
+
         VEC_PUSH(gd.cevs, cev, arena);
     }
-    
+
     for (size_t i = 0; i < wir.cdb_types.count; i++) {
 
     }
+
+    DB db;
+    db_init(&db);
+    VEC_PUSH(gd.cdb, db, arena);
+
+
     return gd;
 }
 

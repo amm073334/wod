@@ -528,23 +528,27 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
             tc_error(tc, &s->id->loc, SV("Command ID must be constant expression."));
 
         for (size_t i = 0; i < s->int_operands.count; i++) {
-            if (s->int_operands.at[i]->type.basetype != TYPE_INT
-                && s->int_operands.at[i]->type.basetype != TYPE_PTR)
-                tc_error(tc, &s->int_operands.at[i]->loc,
+            Expr *op = s->int_operands.at[i];
+            visit_Expr(tc, op);
+            if (op->type.basetype != TYPE_INT
+                && op->type.basetype != TYPE_PTR)
+                tc_error(tc, &op->loc,
                     SV("Argument must be integer or pointer type."));
 
-            if (!s->int_operands.at[i]->type.is_compile_time)
-                tc_error(tc, &s->int_operands.at[i]->loc,
+            if (!op->type.is_compile_time)
+                tc_error(tc, &op->loc,
                     SV("Argument must be constant expression."));
         }
 
         for (size_t i = 0; i < s->str_operands.count; i++) {
-            if (s->str_operands.at[i]->type.basetype != TYPE_STR)
-                tc_error(tc, &s->str_operands.at[i]->loc,
+            Expr *op = s->str_operands.at[i];
+            visit_Expr(tc, op);
+            if (op->type.basetype != TYPE_STR)
+                tc_error(tc, &op->loc,
                     SV("Argument must be string type."));
 
-            if (!s->str_operands.at[i]->type.is_compile_time)
-                tc_error(tc, &s->str_operands.at[i]->loc,
+            if (!op->type.is_compile_time)
+                tc_error(tc, &op->loc,
                     SV("Argument must be constant expression."));
         }
         return;

@@ -153,7 +153,7 @@ void cev_write_txt(CommonEvent *cev, FILE *stream) {
         }
         fprintf(stream, ")(");
         for (size_t j = 0; j < c->str_list.count; j++) {
-            fprintf(stream, SV_FMT, SV_FMT_VAL(c->str_list.at[j]));
+            fprintf(stream, "\"" SV_FMT "\"", SV_FMT_VAL(c->str_list.at[j]));
             if (j < c->str_list.count - 1)
                 fprintf(stream, ",");
         }

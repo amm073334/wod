@@ -211,7 +211,8 @@ Token scan_token(Lexer *lexer) {
             else if (match(lexer, 'b'))
                 return binary(lexer);
 
-            return error_token(lexer, "Decimal numbers cannot start with '0'.");
+            if (is_dec_digit(peek(lexer)))
+                return error_token(lexer, "Decimal numbers cannot start with '0'.");
         }
         return decimal(lexer);
     }

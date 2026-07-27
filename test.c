@@ -18,8 +18,8 @@ static bool starts_with(const char *str, const char *substr) {
     return true;
 }
 
-static void failed(const char *name) {
-    fprintf(stderr, C_RED "Failed: %s\n" C_RESET, name);
+static void failed(const char *name, const char *message) {
+    fprintf(stderr, C_RED "Failed: %s" C_RESET " (%s)\n", name, message);
 }
 
 static void passed(const char *name) {
@@ -76,14 +76,14 @@ int main(int argc, char **argv) {
     // If test should fail, just check exit code.
     int ret = system(command.data);
     if (starts_with(path, "test/fail")) {
-        if (ret != 2) failed(path);
+        if (ret != 2) failed(path, "Test that should fail to compile compiled successfully.");
         else passed(path);
         goto end;
     }
 
     // If test should compile successfully, exit code should be 0.
     if (ret != 0) {
-        failed(path);
+        failed(path, "Test failed to compile.");
         goto end;
     }
 
@@ -93,7 +93,7 @@ int main(int argc, char **argv) {
     if (sv_is_null(f)) goto end;
 
     if (!starts_with(f.data, EXPECT_STR)) {
-        printf("(compile only) ");
+        printf("(Note: Compiled only.) ");
         passed(path);
         goto end;
     }
@@ -104,7 +104,7 @@ int main(int argc, char **argv) {
     }
 
     StringView expected = (StringView){
-        .data = f.data + sizeof(EXPECT_STR),
+        .data = f.data + sizeof(EXPECT_STR) - 1,
         .len = newline_pos - sizeof(EXPECT_STR)
     };
 
@@ -129,25 +129,21 @@ int main(int argc, char **argv) {
 
     StringView test_output = read_file(TEST_OUTPUT, &arena);
     if (sv_is_null(test_output)) {
-        printf("(no output) ");
-        failed(path);
+        failed(path, "No output.");
         goto end;
     }
 
-    if (!sv_equals(expected, test_output)) {
-        failed(path);
+    if (sv_equals(expected, test_output)) {
+        passed(path);
+    } else {
+        failed(path, "Unexpected output.");
         printf("Expected: " SV_FMT "; Actual: " SV_FMT "\n",
             SV_FMT_VAL(expected), SV_FMT_VAL(test_output));
-        goto end;
     }
 
-    if (!DeleteFile(TEST_OUTPUT)) {
-        printf("(delete failed) ");
-        failed(path);
-        goto end;
-    }
-
-    passed(path);
+    // if (!DeleteFile(TEST_OUTPUT)) {
+    //     fprintf(stderr, "Failed to delete the test output file.");
+    // }
 
     end:
     arena_free(&arena);
