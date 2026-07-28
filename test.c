@@ -4,11 +4,13 @@
 #include "common.h"
 #include "windows.h"
 
+#define EXPECT_STR      "// EXPECT: "
+#define TEST_OUTPUT     "test\\bin\\test_output"
+#define TEST_TIMEOUT_MS 10000
+
 #define C_RED "\x1b[31m"
 #define C_GRN "\x1b[32m"
 #define C_RESET "\x1b[m"
-#define EXPECT_STR "// EXPECT: "
-#define TEST_OUTPUT "test\\bin\\test_output"
 
 static bool starts_with(const char *str, const char *substr) {
     for (size_t i = 0; substr[i] != '\0'; i++) {
@@ -26,7 +28,7 @@ static void passed(const char *name) {
     fprintf(stderr, C_GRN "Passed: %s\n" C_RESET, name);
 }
 
-static StringView read_file(const char *path, Arena *arena) {
+static StringView read_from_path(const char *path, Arena *arena) {
     FILE *file = fopen(path, "rb");
     if (!file) {
         fprintf(stderr, "Could not open file '%s'.\n", path);
@@ -55,6 +57,26 @@ static StringView read_file(const char *path, Arena *arena) {
     return (StringView){ .data = buf, .len = n };
 }
 
+static StringView read_from_handle(HANDLE handle, Arena *arena) {
+    DWORD file_size = GetFileSize(handle, NULL);
+    char *buf = arena_alloc(arena, file_size + 1);
+    if (!buf) {
+        fprintf(stderr, "Not enough memory to read file.\n");
+        return SV_NULL;
+    }
+
+    DWORD n;
+    if (!ReadFile(handle, buf, file_size, &n, NULL)) {
+        fprintf(stderr, "Could not read file.\n");
+        return SV_NULL;
+    }
+
+    assert(n == file_size);
+
+    buf[n] = '\0';
+    return (StringView){ .data = buf, .len = n };
+}
+
 int main(int argc, char **argv) {
     if (argc != 2) exit(1);
 
@@ -69,7 +91,7 @@ int main(int argc, char **argv) {
     command = sv_concat(&arena, command, to_sv(" 2> nul 1> nul"));
 
     if (sv_is_null(command)) {
-        fprintf(stderr, "Failed to allocate memory.");
+        fprintf(stderr, "Failed to allocate memory.\n");
         exit(1);
     }
 
@@ -89,7 +111,7 @@ int main(int argc, char **argv) {
 
     // If test should compile, and contains expected
     // output in first line, check that output matches.
-    StringView f = read_file(path, &arena);
+    StringView f = read_from_path(path, &arena);
     if (sv_is_null(f)) goto end;
 
     if (!starts_with(f.data, EXPECT_STR)) {
@@ -108,9 +130,22 @@ int main(int argc, char **argv) {
         .len = newline_pos - sizeof(EXPECT_STR)
     };
 
+    // Get a handle to the test output file.
+    HANDLE file_handle;
+    {
+        file_handle = CreateFileA(TEST_OUTPUT,
+            GENERIC_READ, FILE_SHARE_WRITE, NULL,
+            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+
+        if (file_handle == INVALID_HANDLE_VALUE) {
+            fprintf(stderr, "Failed to obtain a handle for the test output file.\n");
+            goto end;
+        }
+    }
+
+    PROCESS_INFORMATION pi;
     {
         STARTUPINFO si;
-        PROCESS_INFORMATION pi;
         ZeroMemory(&si, sizeof(si));
         si.cb = sizeof(si);
         ZeroMemory(&pi, sizeof(pi));
@@ -118,19 +153,29 @@ int main(int argc, char **argv) {
         if (!CreateProcessA("test\\bin\\Game.exe",
             NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
     
-            fprintf(stderr, "Failed to create process.");
+            fprintf(stderr, "Failed to create process.\n");
             goto end;
         }
-    
-        WaitForSingleObject(pi.hProcess, INFINITE);
-        CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
+
+        DWORD event = WaitForSingleObject(pi.hProcess, TEST_TIMEOUT_MS);
+        if (event == WAIT_TIMEOUT) {
+            failed(path, "Timed out.");
+        } else if (event != WAIT_OBJECT_0) {
+            fprintf(stderr, "WaitForSingleObject failed.\n");
+        }
+
+        if (event != WAIT_OBJECT_0) {
+            if (!TerminateProcess(pi.hProcess, 1)) {
+                fprintf(stderr, "TerminateProcess failed.\n");
+            }
+            goto close_proc;
+        }
     }
 
-    StringView test_output = read_file(TEST_OUTPUT, &arena);
+    StringView test_output = read_from_handle(file_handle, &arena);
     if (sv_is_null(test_output)) {
         failed(path, "No output.");
-        goto end;
+        goto close_proc;
     }
 
     if (sv_equals(expected, test_output)) {
@@ -141,9 +186,9 @@ int main(int argc, char **argv) {
             SV_FMT_VAL(expected), SV_FMT_VAL(test_output));
     }
 
-    // if (!DeleteFile(TEST_OUTPUT)) {
-    //     fprintf(stderr, "Failed to delete the test output file.");
-    // }
+    close_proc:
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
 
     end:
     arena_free(&arena);

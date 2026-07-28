@@ -1,0 +1,9 @@
+// EXPECT: a
+
+apply "bin"
+
+void main() {
+    cmd [122](1600005,0,0)("a");
+    cmd [122](1600005,1536,0,0)("test_output");
+    cmd [175]()();
+}

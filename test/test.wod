@@ -1,3 +1,5 @@
+apply "bin"
+
 cdb SomeCDB {
     int a;
     bool ghghj;
