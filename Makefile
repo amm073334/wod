@@ -16,7 +16,8 @@ wodc.exe: $(HEADERS) $(SOURCES)
 	@ cl $(CFLAGS) $(WARNINGS) /Fobuild\ main.c $(filter-out $(MAINS),$(SOURCES)) /link /out:$@
 
 test.exe: wodc.exe test.c sv.c memory.c
-	@ cl $(CFLAGS) $(WARNINGS) test.c sv.c memory.c
+	@ if not exist build mkdir build
+	@ cl $(CFLAGS) $(WARNINGS) /Fobuild\ test.c sv.c memory.c /link /out:$@
 
 test: test.exe
 	@ -$(foreach test,$(TESTS),.\test.exe $(test)&)
