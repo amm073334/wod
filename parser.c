@@ -2,21 +2,22 @@
 #include <stdlib.h>
 
 #include "parser.h"
+#include "source.h"
 #include "error.h"
+#include "path.h"
 
 #define ALLOC_NODE(var, token, type_, ...) \
     do { \
         (var) = arena_alloc_assert(parser->arena, sizeof(type_)); \
         *var = __VA_ARGS__; \
-        (var)->base.loc = (token); \
+        (var)->base.tok = (token); \
         (var)->base.kind = NODE_##type_; \
         (var)->base.env = NULL; \
     } while (0)
 
 typedef struct {
     Lexer lexer;
-    const char *source;
-    StringView file_path;
+    Source source;
     Arena *arena;
     Token previous;
     Token current;
@@ -29,7 +30,7 @@ static void parse_error(Parser *parser, Token *token, StringView message) {
     parser->panic_mode = true;
     parser->had_error = true;
 
-    error(parser->file_path, parser->source, token, message);
+    error(token->loc, token->text.len, message);
 }
 
 static void error_previous(Parser *parser, StringView message) {
@@ -38,6 +39,10 @@ static void error_previous(Parser *parser, StringView message) {
 
 static void error_current(Parser *parser, StringView message) {
     parse_error(parser, &parser->current, message);
+}
+
+static StringView remove_quotes(StringView sv) {
+    return (StringView){ .data = sv.data + 1, .len = sv.len - 2 };
 }
 
 static void advance(Parser *parser) {
@@ -116,7 +121,7 @@ static Expr *primary(Parser *parser) {
     if (match(parser, TOK_STRING)) {
         ExprStrLit *expr;
         ALLOC_NODE(expr, parser->previous, ExprStrLit, 
-            (ExprStrLit){ .value = parser->previous.text });
+            (ExprStrLit){ .value = remove_quotes(parser->previous.text) });
         return (Expr *)expr;
     }
 
@@ -159,7 +164,7 @@ static Expr *call(Parser *parser) {
             consume(parser, TOK_RIGHT_PAREN, SV("Expected ')' after argument list."));
     
             ExprCall *e;
-            ALLOC_NODE(e, expr->loc, ExprCall,
+            ALLOC_NODE(e, expr->tok, ExprCall,
                 (ExprCall){ .callee = expr, .args = args });
         
             expr = (Expr *)e;
@@ -167,7 +172,7 @@ static Expr *call(Parser *parser) {
             consume(parser, TOK_IDENTIFIER, SV("Expected field name."));
 
             ExprAccess *e;
-            ALLOC_NODE(e, expr->loc, ExprAccess,
+            ALLOC_NODE(e, expr->tok, ExprAccess,
                 (ExprAccess){ .left = expr, .name = parser->previous });
 
             expr = (Expr *)e;
@@ -176,7 +181,7 @@ static Expr *call(Parser *parser) {
             consume(parser, TOK_RIGHT_BRACK, SV("Expected ']' after array index."));
 
             ExprArray *e;
-            ALLOC_NODE(e, expr->loc, ExprArray,
+            ALLOC_NODE(e, expr->tok, ExprArray,
                 (ExprArray){ .left = expr, .index = index });
             
             expr = (Expr *)e;
@@ -367,18 +372,16 @@ static Expr *expression(Parser *parser) {
 static Import import(Parser *parser) {
     consume(parser, TOK_STRING, SV("Expected file path."));
 
-    StringView alias = SV_NULL;
+    Import imp = (Import){
+        .tok = parser->previous,
+        .path = remove_quotes(parser->previous.text),
+        .alias = SV_NULL
+    };
 
     if (match(parser, TOK_AS)) {
         consume(parser, TOK_IDENTIFIER, SV("Expected an alias."));
-        alias = parser->previous.text;
+        imp.alias = parser->previous.text;
     }
-
-    Import imp = (Import){
-        .loc = parser->previous,
-        .path = parser->previous.text,
-        .alias = alias
-    };
 
     consume(parser, TOK_SEMICOLON, SV("Expected ';' after import."));
 
@@ -583,7 +586,7 @@ static Stmt *assign_stmt(Parser *parser) {
         match(parser, TOK_SEMICOLON)) {
 
         StmtExpr *stmt;
-        ALLOC_NODE(stmt, lhs->loc, StmtExpr,
+        ALLOC_NODE(stmt, lhs->tok, StmtExpr,
             (StmtExpr){ .expr = lhs });
         return (Stmt *)stmt;
     }
@@ -742,7 +745,7 @@ static Stmt *top_decl(Parser *parser) {
     return NULL;
 }
 
-ProgramAST *generate_ast(StringView file_path, const char *source, Arena *arena) {
+static ProgramAST *generate_ast(Source source, Arena *arena) {
     Parser parser;
     lexer_init(&parser.lexer, source);
 
@@ -751,14 +754,12 @@ ProgramAST *generate_ast(StringView file_path, const char *source, Arena *arena)
 
     parser.arena = arena;
     parser.source = source;
-    parser.file_path = file_path;
 
     ProgramAST *ast = arena_alloc(arena, sizeof(ProgramAST));
     if (!ast) {
         fprintf(stderr, "Could not allocate AST.");
         return NULL;
     }
-    ast->file = file_path;
     ast->source = source;
     VEC_INIT(ast->imports);
     VEC_INIT(ast->stmts);
@@ -767,7 +768,7 @@ ProgramAST *generate_ast(StringView file_path, const char *source, Arena *arena)
 
     if (match(&parser, TOK_APPLY)) {
         consume(&parser, TOK_STRING, SV("Expected apply path."));
-        ast->apply = parser.previous.text;
+        ast->apply = remove_quotes(parser.previous.text);
     } else {
         ast->apply = SV_NULL;
     }
@@ -783,4 +784,59 @@ ProgramAST *generate_ast(StringView file_path, const char *source, Arena *arena)
     }
 
     return parser.had_error ? NULL : ast;
+}
+
+static bool generate_all_asts_helper(VEC_PTR_ProgramAST *asts, StringView path, Arena *arena) {
+    // If file has already been parsed, do nothing.
+    for (size_t i = 0; i < asts->count; i++) {
+        if (sv_equals(path, asts->at[i]->source.path))
+            return true;
+    }
+
+    // Otherwise recursively parse the file.
+    Source *sub_source = alloc_source(path, arena);
+    if (!sub_source) return false;
+    
+    ProgramAST *ast = generate_ast(*sub_source, arena);
+    if (!ast) return false;
+
+    VEC_PUSH(*asts, ast, arena);
+
+    StringView dir = get_directory(path, arena);
+    if (sv_is_null(dir)) return false;
+
+    bool success = true;
+    for (size_t i = 0; i < ast->imports.count; i++) {
+        Import *import = &ast->imports.at[i];
+        
+        StringView absolute_import_path;
+        {
+            char *import_path = sv_dup(arena, import->path);
+            if (path_is_relative(import_path)) {
+                absolute_import_path = sv_concat(arena, 
+                    dir, to_sv(import_path));
+            } else {
+                absolute_import_path = to_sv(import_path);
+            }
+        }
+
+        if (sv_is_null(absolute_import_path))
+            return false;
+
+        success = success && 
+            generate_all_asts_helper(asts, absolute_import_path, arena);
+    }
+
+    return success;
+}
+
+VEC_PTR_ProgramAST generate_all_asts(StringView path, Arena *arena) {
+    VEC_PTR_ProgramAST asts = VEC_EMPTY;
+
+    StringView full_path = get_full_path(path, arena);
+    if (sv_is_null(full_path)) return (VEC_PTR_ProgramAST)VEC_EMPTY;
+
+    bool success = generate_all_asts_helper(&asts, full_path, arena);
+
+    return success ? asts : (VEC_PTR_ProgramAST)VEC_EMPTY;
 }

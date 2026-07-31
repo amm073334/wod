@@ -185,15 +185,15 @@ static WIROperand _visit_Expr(Ast2Wir *aw, Expr *expr) {
             }
         }
 
-        if (sv_is_null(sym->path)) {
-            return (WIROperand){
-                .kind = OPKIND_LOCAL,
-                .as.offset = sym->offset };
-        } else {
-            return (WIROperand){
-                .kind = OPKIND_GLOBAL,
-                .as.imm_str = get_globally_qualified_name(aw->arena, sym) };
-        }
+        return (WIROperand){
+            .kind = OPKIND_LOCAL,
+            .as.offset = sym->offset };
+        // if (sv_is_null(sym->path)) {
+        // } else {
+        //     return (WIROperand){
+        //         .kind = OPKIND_GLOBAL,
+        //         .as.imm_str = get_globally_qualified_name(aw->arena, sym) };
+        // }
     }
     case NODE_ExprArray: {
         ExprArray *e = (ExprArray *)expr;

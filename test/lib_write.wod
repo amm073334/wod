@@ -1,0 +1,11 @@
+// EXPECT: a
+
+apply "bin"
+
+import "_test.wod"
+
+void main() {
+    str thing = "a";
+    output(thing);
+    exit();
+}

@@ -2,7 +2,7 @@
 
 static ExprIntLit *make_int(Arena *arena, Token tok, int32_t value) {
     ExprIntLit *out = arena_alloc_assert(arena, sizeof(ExprIntLit));
-    out->base.loc = tok;
+    out->base.tok = tok;
     out->base.kind = NODE_ExprIntLit;
     out->base.type = (WodType){
         .basetype = TYPE_INT,
@@ -15,7 +15,7 @@ static ExprIntLit *make_int(Arena *arena, Token tok, int32_t value) {
 
 static ExprStrLit *make_str(Arena *arena, Token tok, StringView value) {
     ExprStrLit *out = arena_alloc_assert(arena, sizeof(ExprStrLit));
-    out->base.loc = tok;
+    out->base.tok = tok;
     out->base.kind = NODE_ExprStrLit;
     out->base.type = (WodType){
         .basetype = TYPE_STR,
@@ -28,7 +28,7 @@ static ExprStrLit *make_str(Arena *arena, Token tok, StringView value) {
 
 static ExprBoolLit *make_bool(Arena *arena, Token tok, bool value) {
     ExprBoolLit *out = arena_alloc_assert(arena, sizeof(ExprBoolLit));
-    out->base.loc = tok;
+    out->base.tok = tok;
     out->base.kind = NODE_ExprBoolLit;
     out->base.type = (WodType){
         .basetype = TYPE_BOOL,
@@ -39,9 +39,9 @@ static ExprBoolLit *make_bool(Arena *arena, Token tok, bool value) {
     return out;
 }
 
-#define MAKE_INT(value) (Expr *)make_int(arena, expr->loc, (value))
-#define MAKE_STR(value) (Expr *)make_str(arena, expr->loc, (value))
-#define MAKE_BOOL(value) (Expr *)make_bool(arena, expr->loc, (value))
+#define MAKE_INT(value) (Expr *)make_int(arena, expr->tok, (value))
+#define MAKE_STR(value) (Expr *)make_str(arena, expr->tok, (value))
+#define MAKE_BOOL(value) (Expr *)make_bool(arena, expr->tok, (value))
 
 static Expr *visit_Expr(Arena *arena, Expr *expr) {
     switch (expr->kind) {

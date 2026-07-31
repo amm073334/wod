@@ -2,6 +2,8 @@
 #define WOD_LEXER_H_
 
 #include "common.h"
+#include "source.h"
+#include "location.h"
 
 typedef enum {
     // One character.
@@ -48,19 +50,19 @@ typedef enum {
 typedef struct {
     TokenType type;
     StringView text;
-    size_t line;
-    size_t col;
+    Location loc;
 } Token;
 
 typedef struct {
+    Source source;
+    
     const char *start;
     const char *current;
     size_t line;
     size_t col;
 } Lexer;
 
-char *alloc_source(StringView path, Arena *arena);
-void lexer_init(Lexer *lexer, const char *source);
+void lexer_init(Lexer *lexer, Source source);
 Token scan_token(Lexer *lexer);
 
 #endif // WOD_LEXER_H_

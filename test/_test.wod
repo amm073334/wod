@@ -1,0 +1,7 @@
+void output(str out) {
+    cmd [122](&out,1536,0,0)("test_output");
+}
+
+void exit() {
+    cmd [175]()();
+}

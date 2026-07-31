@@ -35,9 +35,10 @@ static const Keyword keywords[] = {
     {.name = "apply",    .type = TOK_APPLY},
 };
 
-void lexer_init(Lexer *lexer, const char *source) {
-    lexer->start = source;
-    lexer->current = source;
+void lexer_init(Lexer *lexer, Source source) {
+    lexer->source = source;
+    lexer->start = source.text.data;
+    lexer->current = source.text.data;
     lexer->line = 1;
     lexer->col = 1;
 }
@@ -89,29 +90,33 @@ static char peek_next(Lexer *lexer) {
 }
 
 static Token make_token(Lexer *lexer, TokenType type) {
-    Token token;
-    token.type = type;
-    token.text.data = lexer->start;
-    token.text.len = (size_t)(lexer->current - lexer->start);
-    token.line = lexer->line;
-    token.col = lexer->col - token.text.len - 1;
-    return token;
+    size_t len = lexer->current - lexer->start;
+    return (Token){
+        .type = type,
+        .text.data = lexer->start,
+        .text.len = len,
+        .loc = {
+            .source = lexer->source,
+            .line = lexer->line,
+            .column = lexer->col - len
+        },
+    };
 }
 
 static Token error_token(Lexer *lexer, const char *message) {
-    Token token;
-    token.type = TOK_ERROR;
-    token.text.data = message;
-    token.text.len = strlen(message);
-    token.line = lexer->line;
-    token.col = lexer->col;
-    return token;
+    return (Token){
+        .type = TOK_ERROR,
+        .text.data = message,
+        .text.len = strlen(message),
+        .loc = {
+            .source = lexer->source,
+            .line = lexer->line,
+            .column = lexer->col,
+        },
+    };
 }
 
 static Token string(Lexer *lexer) {
-    // Skip start quote.
-    lexer->start = lexer->current;
-
     while (peek(lexer) != '"' && !is_at_end(lexer)) {
         if (peek(lexer) == '\n')
             return error_token(lexer, "Unterminated string.");
@@ -122,13 +127,10 @@ static Token string(Lexer *lexer) {
     if (is_at_end(lexer))
         return error_token(lexer, "Unterminated string.");
 
-
-    Token tok = make_token(lexer, TOK_STRING);
-
     // Move past end quote.
     advance(lexer);
 
-    return tok;
+    return make_token(lexer, TOK_STRING);
 }
 
 static TokenType identifier_type(Lexer *lexer) {
@@ -177,9 +179,9 @@ static void skip_whitespace(Lexer *lexer) {
                 advance(lexer);
                 break;
             case '\n':
+                advance(lexer);
                 lexer->line++;
                 lexer->col = 1;
-                advance(lexer);
                 break;
             case '/':
                 if (peek_next(lexer) == '/') {
@@ -285,41 +287,4 @@ Token scan_token(Lexer *lexer) {
     }
 
     return error_token(lexer, "Unexpected character.");
-}
-
-char *alloc_source(StringView path, Arena *arena) {
-    char *path_cstr = arena_alloc(arena, path.len + 1);
-    if (!path_cstr) {
-        fprintf(stderr, "Not enough memory to read '" SV_FMT "'.\n", SV_FMT_VAL(path));
-        exit(1);
-    }
-    memcpy(path_cstr, path.data, path.len);
-    path_cstr[path.len] = '\0';
-
-    FILE *file = fopen(path_cstr, "rb");
-    if (!file) {
-        fprintf(stderr, "Could not open file '%s'.\n", path_cstr);
-        exit(1);
-    }
-
-    fseek(file, 0L, SEEK_END);
-    size_t file_size = ftell(file);
-    rewind(file);
-
-    char *buf = arena_alloc(arena, file_size + 1);
-    if (!buf) {
-        fprintf(stderr, "Not enough memory to read '%s'.\n", path_cstr);
-        exit(1);
-    }
-
-    size_t n = fread(buf, sizeof(char), file_size, file);
-    if (n < file_size) {
-        fprintf(stderr, "Could not read '%s'.\n", path_cstr);
-        exit(1);
-    }
-
-    buf[n] = '\0';
-
-    fclose(file);
-    return buf;
 }

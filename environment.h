@@ -2,6 +2,7 @@
 #define WOD_ENVIRONMENT_H_
 
 #include "common.h"
+#include "location.h"
 
 typedef enum {
     TYPE_NONE,
@@ -34,6 +35,7 @@ struct Environment {
     Environment *parent;
     VEC_Symbol symbols;
 };
+VEC_PTR_DEF(Environment);
 
 struct WodType {
     BaseType basetype;
@@ -81,8 +83,11 @@ struct Symbol {
     StringView name;
     WodType type;
     
-    // Is SV_NULL if symbol is not top-level.
-    StringView path;
+    // For use in printing redeclaration errors.
+    Location declared_at;
+
+    // 
+    Environment *top_level_env;
 
     union {
         // This is for example the common event ID, or the CSelf ID.

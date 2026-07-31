@@ -3,6 +3,6 @@
 
 #include "lexer.h"
 
-void error(StringView file_path, const char *source, Token *token, StringView message);
+void error(Location loc, size_t len, StringView message);
 
-#endif
+#endif // WOD_ERROR_H_

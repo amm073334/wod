@@ -9,6 +9,14 @@
 #define WIR_IMM_I(i) (WIROperand){ .kind = OPKIND_IMM, .type = OPTYPE_INT, .as.imm_int = (i) }
 #define WIR_IMM_S(s) (WIROperand){ .kind = OPKIND_IMM, .type = OPTYPE_STR, .as.imm_str = (s) }
 
+// typedef struct WIRCompiler {
+//     // Maps globally-qualified names to global addresses.
+//     VEC_TableEntry table;
+
+//     GameData gd;
+//     Arena *arena;
+// } WIRCompiler;
+
 typedef struct WIROperand {
     enum {
         // Immediate.
@@ -122,7 +130,9 @@ typedef struct {
     VEC_WIRDB cdb_types;
 } WIR;
 
-GameData compile_wir_to_gd(WIR arr, Arena *arena);
+// void compile_wir(WIRCompiler *wc, WIR arr);
+// GameData output_gd(WIRCompiler *wc);
+
 void print_wir(WIR *wir);
 
 #endif // WOD_WIR_H_

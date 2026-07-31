@@ -165,7 +165,7 @@ static StringView graph_gen(char *source, VEC_PTR_CFGNode *visited, CFGNode *par
 
     if (!node->branch_a) {
         // Node is the end node.
-        sv = transition(source, sv, parent->block.at[0]->loc.line,
+        sv = transition(source, sv, parent->block.at[0]->tok.loc.line,
             9999, arena);
         return sv;
     }
@@ -176,13 +176,13 @@ static StringView graph_gen(char *source, VEC_PTR_CFGNode *visited, CFGNode *par
         // to the end node immediately after.
         // Ideally we'd just prune that node since it does nothing, but
         // uhh pain.
-        sv = transition(source, sv, parent->block.at[0]->loc.line,
+        sv = transition(source, sv, parent->block.at[0]->tok.loc.line,
             9999, arena);
         return sv;
     }
 
-    sv = transition(source, sv, parent->block.at[0]->loc.line,
-        node->block.at[0]->loc.line, arena);
+    sv = transition(source, sv, parent->block.at[0]->tok.loc.line,
+        node->block.at[0]->tok.loc.line, arena);
 
     for (size_t i = 0; i < visited->count; i++) {
         if (visited->at[i] == node)

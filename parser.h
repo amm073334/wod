@@ -20,7 +20,7 @@ typedef enum {
 
 typedef struct Expr {
     ExprKind kind;
-    Token loc;
+    Token tok;
 
     // For use during/after typechecking.
     WodType type;
@@ -46,15 +46,15 @@ typedef enum {
 
 typedef struct Stmt {
     StmtKind kind;
-    Token loc;
+    Token tok;
 
     // For use during/after typechecking.
-    Environment* env;
+    Environment *env;
 } Stmt;
 VEC_PTR_DEF(Stmt);
 
-typedef struct {
-    Token loc;
+typedef struct Import {
+    Token tok;
     StringView path;
 
     // SV_NULL means unqualified.
@@ -62,13 +62,13 @@ typedef struct {
 } Import;
 VEC_DEF(Import);
 
-typedef struct {
-    StringView file;
-    const char *source;
+typedef struct ProgramAST {
+    Source source;
     StringView apply;
     VEC_Import imports;
     VEC_PTR_Stmt stmts;
 } ProgramAST;
+VEC_PTR_DEF(ProgramAST);
 
 typedef struct {
     Expr base;
@@ -212,6 +212,6 @@ typedef struct {
     Expr *expr;
 } StmtExpr;
 
-ProgramAST *generate_ast(StringView file_path, const char *source, Arena *arena);
+VEC_PTR_ProgramAST generate_all_asts(StringView path, Arena *arena);
 
 #endif // WOD_PARSER_H_

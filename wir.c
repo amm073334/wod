@@ -3,6 +3,12 @@
 #define I_BASE 1600010
 #define S_BASE 1600005
 
+typedef struct TableEntry {
+    StringView key;
+    int32_t value;
+} TableEntry;
+VEC_DEF(TableEntry);
+
 // TODO: It seems like disabling rc isn't really viable at the wir layer,
 //       because allocating space for temporaries requires knowledge
 //       of the state of the compile-time stack (which means it should
@@ -52,7 +58,7 @@ static int32_t disable_rc(Arena *arena, CommonEvent *cev, WIROperand wop) {
         cev_push_cmd(&cev, CMD_VAR, indent, i_vec, s_vec); \
     } while (0)
 
-GameData compile_wir_to_gd(WIR wir, Arena *arena) {
+GameData compile_wir_to_gd(/*WIRCompiler *wc,*/ WIR wir, Arena *arena) {
     GameData gd;
     gd_init(&gd);
     

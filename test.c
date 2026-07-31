@@ -95,8 +95,19 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
-    // If test should fail, just check exit code.
+    // If file starts with an underscore, ignore it.
+    // This is useful for any libraries shared across tests.
+    if (starts_with(path, "_")) {
+        goto end;
+    }
+
     int ret = system(command.data);
+    if (ret == 1) {
+        failed(path, "Test crashed the compiler.");
+        goto end;
+    }
+
+    // If test should fail, just check exit code.
     if (starts_with(path, "test/fail")) {
         if (ret != 2) failed(path, "Test that should fail to compile compiled successfully.");
         else passed(path);
@@ -178,13 +189,14 @@ int main(int argc, char **argv) {
         goto close_proc;
     }
 
-    if (sv_equals(expected, test_output)) {
-        passed(path);
-    } else {
+    if (!sv_equals(expected, test_output)) {
         failed(path, "Unexpected output.");
         printf("Expected: " SV_FMT "; Actual: " SV_FMT "\n",
             SV_FMT_VAL(expected), SV_FMT_VAL(test_output));
+        goto close_proc;
     }
+    
+    passed(path);
 
     close_proc:
     CloseHandle(pi.hProcess);

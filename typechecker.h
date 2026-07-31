@@ -4,6 +4,6 @@
 #include "parser.h"
 #include "environment.h"
 
-Environment *typecheck(ProgramAST *ast, const char *source, Arena *arena);
+VEC_PTR_Environment typecheck_asts(VEC_PTR_ProgramAST asts, Arena *arena);
 
 #endif // WOD_TYPECHECKER_H_
