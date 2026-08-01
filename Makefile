@@ -1,8 +1,12 @@
-HEADERS := $(wildcard *.h)
-SOURCES := $(wildcard *.c)
-MAINS := main.c test.c
+SOURCE_DIR := src
+TEST_DIR := test
+BUILD_DIR := build
 
-TESTS := $(wildcard test/*.wod)
+HEADERS := $(wildcard $(SOURCE_DIR)/*.h)
+SOURCES := $(wildcard $(SOURCE_DIR)/*.c)
+MAINS := $(SOURCE_DIR)/main.c $(SOURCE_DIR)/test.c
+
+TESTS := $(wildcard $(TEST_DIR)/*.wod)
 
 WARNINGS = /Wall /wd5045 /wd4820 /wd4061 /wd4668 /wd4201
 
@@ -12,12 +16,13 @@ debug: CFLAGS = /Zi
 debug: wodc.exe test.exe
 
 wodc.exe: $(HEADERS) $(SOURCES)
-	@ if not exist build mkdir build
-	@ cl $(CFLAGS) $(WARNINGS) /Fobuild\ main.c $(filter-out $(MAINS),$(SOURCES)) /link /out:$@
+	@ if not exist $(BUILD_DIR) mkdir $(BUILD_DIR)
+	@ cl $(CFLAGS) $(WARNINGS) /Fo$(BUILD_DIR)\ \
+		$(SOURCE_DIR)/main.c $(filter-out $(MAINS),$(SOURCES)) /link /out:$@
 
-test.exe: wodc.exe test.c sv.c memory.c
+test.exe: wodc.exe
 	@ if not exist build mkdir build
-	@ cl $(CFLAGS) $(WARNINGS) /Fobuild\ test.c sv.c memory.c /link /out:$@
+	@ cl $(CFLAGS) $(WARNINGS) /Fobuild\ $(SOURCE_DIR)/test.c $(filter-out $(MAINS),$(SOURCES)) /link /out:$@
 
 test: test.exe
 	@ -$(foreach test,$(TESTS),.\test.exe $(test)&)

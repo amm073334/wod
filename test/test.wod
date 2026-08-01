@@ -1,7 +1,5 @@
 apply "bin"
 
-import "_test.wod"
-
 cdb SomeCDB {
     int a;
     bool ghghj;
