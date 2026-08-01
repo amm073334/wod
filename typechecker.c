@@ -271,6 +271,7 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
         ExprUnary *e = (ExprUnary *)expr;
 
         visit_Expr(tc, e->right);
+
         switch (e->op.type) {
         case TOK_MINUS:
             if (e->right->type.basetype != TYPE_INT)
@@ -282,15 +283,29 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
                 tc_expr_error(tc, expr, &e->right->tok,
                     SV("Operand of logical NOT operator must be boolean type."));
             break;
+        case TOK_AMP:
+            if (e->right->kind != NODE_ExprVar)
+                tc_expr_error(tc, expr, &e->right->tok,
+                    SV("Operand of address-of operator must be a variable."));
+            break;
         default: UNREACHABLE;
         }
 
         if (expr->type.basetype != TYPE_ERROR) {
-            expr->type = (WodType){
-                .basetype = e->right->type.basetype,
-                .is_assignable = false,
-                .is_compile_time = e->right->type.is_compile_time
-            };
+            if (e->op.type == TOK_AMP) {
+                expr->type = (WodType){
+                    .basetype = TYPE_PTR,
+                    .ptr_to = &((ExprVar *)e->right)->sym->type,
+                    .is_assignable = false,
+                    .is_compile_time = false
+                };
+            } else {
+                expr->type = (WodType){
+                    .basetype = e->right->type.basetype,
+                    .is_assignable = false,
+                    .is_compile_time = e->right->type.is_compile_time
+                };
+            }
         }
         return;
     }
@@ -563,7 +578,8 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
                 tc_error(tc, &op->tok,
                     SV("Argument must be integer or pointer type."));
 
-            if (!op->type.is_compile_time)
+            if (op->type.basetype != TYPE_PTR
+                && !op->type.is_compile_time)
                 tc_error(tc, &op->tok,
                     SV("Argument must be constant expression."));
         }

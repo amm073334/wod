@@ -89,9 +89,12 @@ static void synchronize(Parser *parser) {
     parser->panic_mode = false;
 
     while (parser->current.type != TOK_EOF) {
-        advance(parser);
         if (parser->previous.type == TOK_SEMICOLON) return;
         switch (parser->current.type) {
+            case TOK_VOID:
+            case TOK_INT:
+            case TOK_BOOL:
+            case TOK_CDB:
             case TOK_IF:
             case TOK_LOOP:
             case TOK_FOR:
@@ -101,6 +104,7 @@ static void synchronize(Parser *parser) {
             default:
                 ;
         }
+        advance(parser);
     }
 }
 

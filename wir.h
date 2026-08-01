@@ -35,6 +35,7 @@ typedef struct WIROperand {
                 LOCAL_INT,
                 LOCAL_STR,
             } type;
+
             size_t offset;
         } local;
 
@@ -49,6 +50,7 @@ typedef struct WIROperand {
                 GLOBAL_UDB,
                 GLOBAL_CDB
             } type;
+
             StringView path;
             StringView name;
         } global;

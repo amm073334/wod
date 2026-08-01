@@ -121,19 +121,19 @@ static Expr *visit_Expr(Arena *arena, Expr *expr) {
         if (!e->right->type.is_compile_time)
             return expr;
 
-        if (e->right->kind == NODE_ExprIntLit) {
+        switch (e->op.type) {
+        case TOK_MINUS: {
+            assert(e->right->kind == NODE_ExprIntLit);
             int32_t right = ((ExprIntLit *)e->right)->value;
-            switch(e->op.type) {
-            case TOK_MINUS: return MAKE_INT(-right);
-            default: UNREACHABLE;
-            }
-        } else if (e->right->kind == NODE_ExprBoolLit) {
+            return MAKE_INT(-right);
+        }
+        case TOK_BANG: {
+            assert(e->right->kind == NODE_ExprBoolLit);
             bool right = ((ExprBoolLit *)e->right)->value;
-            switch(e->op.type) {
-            case TOK_BANG: return MAKE_BOOL(!right);
-            default: UNREACHABLE;
-            }
-        } else UNREACHABLE;
+            return MAKE_BOOL(!right);
+        }
+        default: UNREACHABLE;
+        }
     }
     case NODE_ExprCall: {
         ExprCall *e = (ExprCall *)expr;

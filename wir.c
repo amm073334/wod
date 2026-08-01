@@ -2,6 +2,8 @@
 
 #define I_BASE 1600010
 #define S_BASE 1600005
+#define I_MAX  1600099
+#define S_MAX  1600009
 
 typedef struct GlobalEntry {
     StringView path;
@@ -77,14 +79,22 @@ int32_t resolve(WIRCompiler *wc, WIROperand wop) {
     
     switch (wop.kind) {
     case OPKIND_IMM_INT: {
-        return disable_rc(wc->arena, wc->cev, wop.as.imm_int);
+        return wop.as.imm_int;
     }
     case OPKIND_LOCAL:
     case OPKIND_TEMP: {
+        int32_t ref = 0;
         switch (wop.as.local.type) {
-        case LOCAL_INT: return wop.as.local.offset + I_BASE;
-        case LOCAL_STR: return wop.as.local.offset + S_BASE;
+        case LOCAL_INT: {
+            ref = wop.as.local.offset + I_BASE;
+            assert(ref <= I_MAX);
         }
+        case LOCAL_STR: {
+            ref = wop.as.local.offset + S_BASE;
+            assert(ref <= S_MAX);
+        }
+        }
+        return ref;
     }
     case OPKIND_GLOBAL: {
         VEC_GlobalEntry *vec = NULL;
@@ -194,14 +204,14 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
                 && inst->open_close <= 1);
 
         VEC_int32_t int_fields = VEC_EMPTY;
-        for (size_t arg = 0; arg < inst->iargs.count; arg++) {
-            VEC_PUSH(int_fields, inst->iargs.at[arg].as.imm_int, wc->arena);
+        for (size_t i = 0; i < inst->iargs.count; i++) {
+            VEC_PUSH(int_fields, resolve(wc, inst->iargs.at[i]), wc->arena);
         }
 
         VEC_StringView str_fields = VEC_EMPTY;
-        for (size_t arg = 0; arg < inst->sargs.count; arg++) {
-            assert(inst->sargs.at[arg].kind == OPKIND_IMM_STR);
-            VEC_PUSH(str_fields, inst->sargs.at[arg].as.imm_str, wc->arena);
+        for (size_t i = 0; i < inst->sargs.count; i++) {
+            assert(inst->sargs.at[i].kind == OPKIND_IMM_STR);
+            VEC_PUSH(str_fields, inst->sargs.at[i].as.imm_str, wc->arena);
         }
 
         if (inst->open_close == -1)
@@ -317,13 +327,6 @@ static void compile_wir(WIRCompiler *wc, Module *mod) {
 
         WIRCev *wcev = &wir->g_cevs.at[i];
 
-        // TODO: This is a bandaid to specify the entry point,
-        //       but if WIR is to be a file-local concept then it doesn't
-        //       make sense to specify a global entry point here.
-        if (sv_equals(wcev->name, SV("main"))) {
-            wc->gd.entry = 500000 + i;
-        }
-
         for (size_t j = 0; j < wcev->insts.count; j++) {
             compile_inst(wc, wcev->insts.at[j]);
         }
@@ -352,6 +355,13 @@ GameData wir_pass(VEC_Module *modules, Arena *arena) {
     // register every top-level symbol's offset before its use.
     for (size_t i = 0; i < modules->count; i++) {
         compile_wir(&wc, &modules->at[modules->count - i - 1]);
+    }
+
+    // Assign entry point.
+    for (size_t i = 0; i < wc.g_cevs.count; i++) {
+        if (sv_equals(wc.g_cevs.at[i].name, SV("main"))) {
+            wc.gd.entry = 500000 + i;
+        }
     }
 
     DB db;

@@ -13,10 +13,9 @@ typedef struct {
     size_t int_top;
     size_t str_top;
 } TwoStack;
-
 VEC_DEF(TwoStack);
 
-typedef struct {
+typedef struct Ast2Wir {
     Arena *arena;
     WIR *wir;
 
@@ -285,19 +284,29 @@ static WIROperand _visit_Expr(Ast2Wir *aw, Expr *expr) {
     case NODE_ExprUnary: {
         ExprUnary *e = (ExprUnary *)expr;
 
-        WIROperand dest = tmp_int(aw);
         WIROperand right = visit_Expr(aw, e->right);
         
         switch (e->op.type) {
-        case TOK_MINUS:
+        case TOK_MINUS: {
+            WIROperand dest = tmp_int(aw);
             emit_binop(aw, dest, WIR_IMM_I(0), right, WIR_SUB); break;
-        case TOK_BANG:
+            return dest;
+        }
+        case TOK_BANG: {
             // Assumes that booleans are either zero or one.
+            WIROperand dest = tmp_int(aw);
             emit_binop(aw, dest, WIR_IMM_I(1), right, WIR_XOR); break;
+            return dest;
+        }
+        case TOK_AMP: {
+            assert(right.kind == OPKIND_LOCAL
+                || right.kind == OPKIND_GLOBAL);
+            return right;
+        }
         default: UNREACHABLE;
         }
 
-        return dest;
+        return (WIROperand){ 0 };
     }
     case NODE_ExprCall: {
         ExprCall *e = (ExprCall *)expr;

@@ -94,7 +94,8 @@ struct Symbol {
     StringView top_level_path;
 
     union {
-        // This is for example the common event ID, or the CSelf ID.
+        // Populated in the AST2WIR phase.
+        // Acts as a function-local identifier.
         size_t offset;
 
         // Used to store compile-time values.
