@@ -5,6 +5,8 @@ BUILD_DIR := build
 HEADERS := $(wildcard $(SOURCE_DIR)/*.h)
 SOURCES := $(wildcard $(SOURCE_DIR)/*.c)
 MAINS := $(SOURCE_DIR)/main.c $(SOURCE_DIR)/test.c
+INCLUDES := $(filter-out $(MAINS),$(SOURCES))
+OBJECTS := $(addprefix $(BUILD_DIR)/,$(notdir $(INCLUDES:.c=.obj)))
 
 TESTS := $(wildcard $(TEST_DIR)/*.wod)
 
@@ -22,7 +24,7 @@ wodc.exe: $(HEADERS) $(SOURCES)
 
 test.exe: wodc.exe
 	@ if not exist build mkdir build
-	@ cl $(CFLAGS) $(WARNINGS) /Fobuild\ $(SOURCE_DIR)/test.c $(filter-out $(MAINS),$(SOURCES)) /link /out:$@
+	@ cl $(CFLAGS) $(WARNINGS) /Fo$(BUILD_DIR)\ $(SOURCE_DIR)/test.c $(OBJECTS) /link /out:$@
 
 test: test.exe
 	@ -$(foreach test,$(TESTS),.\test.exe $(test)&)
