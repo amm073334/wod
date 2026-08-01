@@ -65,6 +65,11 @@ typedef enum {
     VAR_OP_LSHIFT   = 0x9000,
 } CommandVarFlag;
 
+typedef enum {
+    CALL_EVAL_NAME      =     0x100,
+    CALL_STORES_RETURN  = 0x1000000,
+} CallFlag;
+
 typedef struct {
     CommandOp id;
     VEC_int32_t int_list;

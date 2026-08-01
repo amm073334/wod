@@ -7,122 +7,227 @@
 #include "gamedata.h"
 #include "module.h"
 
-#define WIR_IMM_I(i) (WIROperand){ .kind = OPKIND_IMM, .type = OPTYPE_INT, .as.imm_int = (i) }
-#define WIR_IMM_S(s) (WIROperand){ .kind = OPKIND_IMM, .type = OPTYPE_STR, .as.imm_str = (s) }
+#define WIR_IMM_I(i) (WIROperand){ .kind = OPKIND_IMM_INT, .as.imm_int = (i) }
+#define WIR_IMM_S(s) (WIROperand){ .kind = OPKIND_IMM_STR, .as.imm_str = (s) }
 
 typedef struct WIROperand {
     enum {
         // Immediate.
-        OPKIND_IMM,
+        OPKIND_IMM_INT,
+        OPKIND_IMM_STR,
 
-        // Uses the `offset` member; basically a virtual register.
+        // Uses the `local` member; basically a virtual register.
         OPKIND_LOCAL,
-        OPKIND_TMP,
+        OPKIND_TEMP,
 
-        // Uses the `top` field to qualify a top-level identifier.
+        // Uses the `global` field to qualify a top-level identifier.
         OPKIND_GLOBAL,
     } kind;
-
-    // Type of the operand (not of the union). For example,
-    // an integer local would still use the `offset` field.
-    enum {
-        OPTYPE_INT,
-        OPTYPE_STR,
-    } type;
 
     union {
         int32_t imm_int;
         StringView imm_str;
-        size_t offset;
 
         struct {
+            // Determines whether the variable should access
+            // the integer or string CSelfs.
+            enum {
+                LOCAL_INT,
+                LOCAL_STR,
+            } type;
+            size_t offset;
+        } local;
+
+        struct {
+            // Determines which global array the variable should
+            // index into. Integer variables are assumed to
+            // index into 通常変数.
+            enum {
+                GLOBAL_INT,
+                GLOBAL_STR,
+                GLOBAL_CEV,
+                GLOBAL_UDB,
+                GLOBAL_CDB
+            } type;
             StringView path;
             StringView name;
-        } top;
+        } global;
     } as;
 } WIROperand;
 VEC_DEF(WIROperand);
 
 typedef struct {
     enum {
-        // For handling scopes.
-        WIR_PUSH_LOCAL, WIR_POP_LOCAL,
+        INST_WIRInst_Binop,
+        INST_WIRInst_StrAssign,
+        INST_WIRInst_IfBegin,
+        INST_WIRInst_LoopBeginN,
+        INST_WIRInst_Call,
+        INST_WIRInst_ReturnVal,
+        INST_WIRInst_Cmd,
+        INST_WIRInst_DBLoad,
+        INST_WIRInst_DBStore,
+        INST_WIRInst_Label,
+        INST_WIRInst_Goto,
+        INST_WIRInst_Else,
+        INST_WIRInst_IfEnd,
+        INST_WIRInst_LoopBegin,
+        INST_WIRInst_LoopEnd,
+        INST_WIRInst_Continue,
+        INST_WIRInst_Break,
+        INST_WIRInst_ReturnVoid,
+    } kind;
+} WIRInst;
+VEC_PTR_DEF(WIRInst);
 
-        // (dest, a, b)
+typedef struct {
+    WIRInst base;
+    enum {
         WIR_ADD, WIR_SUB, WIR_MUL, WIR_DIV, WIR_MOD,
         WIR_AND, WIR_OR, WIR_XOR, WIR_LSH,
         WIR_EQ, WIR_NEQ, WIR_LT, WIR_LTE,
         WIR_GT, WIR_GTE,
         WIR_LAND, WIR_LOR,
-
-        // (dest, src)
-        WIR_STR_ASSIGN,
-
-        // (cond)
-        WIR_IF_BEGIN,
-
-        WIR_ELSE, WIR_IF_END,
-
-        WIR_LOOP_BEGIN,
-        WIR_LOOP_BEGIN_N, // (n)
-        WIR_LOOP_END,
-
-        // (src/dst, type, data, field)
-        WIR_DB_LOAD, WIR_DB_STORE,
-
-        // (dest, cev, iargs..., sargs...)
-        // `cev` is either a globally qualified name
-        //    (like `directory/file.wod:cev_name`)
-        // or a virtual register containing the cev address.
-        WIR_CALL,
-
-        WIR_CONTINUE, WIR_BREAK,
-        WIR_RETURN_VOID,
-        
-        // (src)
-        WIR_RETURN_VAL,
-
-        // (op, open/close, iargs..., sargs...)
-        // `open/close` can be 1 for `open` or -1 for `close`;
-        // or 0 for no change. Indicates commands with block-like
-        // structures, like loops and conditionals.
-        WIR_CMD,
-
-        // (name)
-        WIR_LABEL, WIR_GOTO,
     } op;
-    VEC_WIROperand operands;
-} WIRInst;
-VEC_DEF(WIRInst);
+    WIROperand dest;
+    WIROperand a;
+    WIROperand b;
+} WIRInst_Binop;
 
 typedef struct {
-    StringView debug_name;
-    VEC_WIRInst insts;
+    WIRInst base;
+} WIRInst_Else;
+
+typedef struct {
+    WIRInst base;
+} WIRInst_IfEnd;
+
+typedef struct {
+    WIRInst base;
+} WIRInst_LoopBegin;
+
+typedef struct {
+    WIRInst base;
+} WIRInst_LoopEnd;
+
+typedef struct {
+    WIRInst base;
+} WIRInst_Continue;
+
+typedef struct {
+    WIRInst base;
+} WIRInst_Break;
+
+typedef struct {
+    WIRInst base;
+} WIRInst_ReturnVoid;
+
+typedef struct {
+    WIRInst base;
+    WIROperand dest;
+    WIROperand src;
+} WIRInst_StrAssign;
+
+typedef struct {
+    WIRInst base;
+    WIROperand cond;
+} WIRInst_IfBegin;
+
+typedef struct {
+    WIRInst base;
+    WIROperand count;
+} WIRInst_LoopBeginN;
+
+typedef struct {
+    WIRInst base;
+    WIROperand src;
+    WIROperand db_type;
+    WIROperand db_data;
+    WIROperand db_field;
+} WIRInst_DBLoad;
+
+typedef struct {
+    WIRInst base;
+    WIROperand dst;
+    WIROperand db_type;
+    WIROperand db_data;
+    WIROperand db_field;
+} WIRInst_DBStore;
+
+typedef struct {
+    WIRInst base;
+    
+    // Can be the immediate integer `0` if the
+    // return value is unused, or there is no return value.
+    WIROperand dest;
+
+    // Either a globally qualified name or a
+    // virtual register containing the cev address.
+    WIROperand cev;
+    
+    VEC_WIROperand args;
+} WIRInst_Call;
+
+typedef struct {
+    WIRInst base;
+    WIROperand val;
+} WIRInst_ReturnVal;
+
+typedef struct {
+    WIRInst base;
+    int32_t op;
+    VEC_WIROperand iargs;
+    VEC_WIROperand sargs;
+
+    // Can be 1 for `open` or -1 for `close`; or 0 for
+    // no change. Indicates commands with block-like
+    // structures, like loops and conditionals.
+    int open_close;
+} WIRInst_Cmd;
+
+typedef struct {
+    WIRInst base;
+    WIROperand name;
+} WIRInst_Label;
+
+typedef struct {
+    WIRInst base;
+    WIROperand name;
+} WIRInst_Goto;
+
+typedef struct WIRCev {
+    StringView name;
+    VEC_PTR_WIRInst insts;
 } WIRCev;
 VEC_DEF(WIRCev);
 
-typedef struct {
-    StringView debug_name;
+typedef struct WIRVar {
+    StringView name;
     WodType type;
 
     bool has_initializer;
     WIROperand initializer;
-} WIRDBField;
-VEC_DEF(WIRDBField);
+} WIRVar;
+VEC_DEF(WIRVar);
 
-typedef struct {
-    StringView debug_name;
-    VEC_WIRDBField fields;
+typedef struct WIRDB {
+    StringView name;
+    VEC_WIRVar fields;
 } WIRDB;
 VEC_DEF(WIRDB);
 
 typedef struct WIR {
-    VEC_WIRCev cevs;
-    VEC_WIRDB udb_types;
-    VEC_WIRDB cdb_types;
+    // Each of these fields is a list of global (top-level)
+    // symbols in the file, separated by kind.
+    VEC_WIRVar g_ints;
+    VEC_WIRVar g_strs;
+    VEC_WIRCev g_cevs;
+    VEC_WIRDB g_udbs;
+    VEC_WIRDB g_cdbs;
 } WIR;
 
 GameData wir_pass(VEC_Module *modules, Arena *arena);
+void wir_init(WIR *wir);
 void print_wir(WIR *wir);
 
 #endif // WOD_WIR_H_

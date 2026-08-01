@@ -80,6 +80,8 @@ struct WodType {
 };
 
 struct Symbol {
+    Environment *env;
+
     StringView name;
     WodType type;
     

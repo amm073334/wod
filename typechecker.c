@@ -99,11 +99,11 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
     switch (expr->kind) {
     case NODE_ExprVar: {
         ExprVar *e = (ExprVar *)expr;
-        Symbol *sym = find_including_imports(tc, tc->current_env, e->name);
-        if (!sym) {
+        e->sym = find_including_imports(tc, tc->current_env, e->name);
+        if (!e->sym) {
             tc_expr_error(tc, expr, &e->base.tok, SV("Undeclared or ambiguous identifier."));
         } else {
-            expr->type = sym->type;
+            expr->type = e->sym->type;
         }
         return;
     }
@@ -360,16 +360,15 @@ static Symbol *try_insert_vardecl(Typechecker *tc, StmtVarDecl *s) {
         default: UNREACHABLE;
     }
 
-    Symbol *sym = NULL;
     if (s->array_length) {
         WodType *array_of = arena_alloc_assert(tc->arena, sizeof(WodType));
         *array_of = ty;
         ty.basetype = TYPE_ARRAY;
         ty.array_of = array_of;
     }
-    sym = env_insert(tc->current_env, s->name, ty, tc->arena);
+    s->sym = env_insert(tc->current_env, s->name, ty, tc->arena);
 
-    if (!sym) {
+    if (!s->sym) {
         tc_error(tc, &s->base.tok, SV("Redeclaration of name."));
         return NULL;
     }
@@ -387,7 +386,7 @@ static Symbol *try_insert_vardecl(Typechecker *tc, StmtVarDecl *s) {
 
     if (s->initializer) {
         visit_Expr(tc, s->initializer);
-        if (sym->type.basetype != s->initializer->type.basetype)
+        if (s->sym->type.basetype != s->initializer->type.basetype)
             tc_error(tc, &s->initializer->tok,
                 SV("Initializer does not match declared type of variable."));
 
@@ -396,7 +395,7 @@ static Symbol *try_insert_vardecl(Typechecker *tc, StmtVarDecl *s) {
                 SV("Used non-constant expression to initialize 'const' variable."));
     }
 
-    return sym;
+    return s->sym;
 }
 
 static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
@@ -511,11 +510,11 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
         StmtFor *s = (StmtFor *)stmt;
         open_scope(tc);
 
-        Symbol *sym = env_insert(tc->current_env, s->iterator,
+        s->sym = env_insert(tc->current_env, s->iterator,
             (WodType){ .basetype = TYPE_INT, .is_assignable = false,
                 .is_compile_time = false }, tc->arena);
         
-        if (!sym)
+        if (!s->sym)
             tc_error(tc, &s->base.tok, SV("Redeclaration of iterator name."));
 
         visit_Expr(tc, s->left_bound);
@@ -721,12 +720,12 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
                 }
             }
 
-            Symbol *sym = env_insert(tc->current_env, s->name,
+            s->sym = env_insert(tc->current_env, s->name,
                 wt, tc->arena);
 
-            if (!sym)
+            if (!s->sym)
                 tc_error(tc, &s->base.tok, SV("Redeclaration of name."));
-            else sym->top_level_path = 
+            else s->sym->top_level_path = 
                 tc->modules->at[module_index].source->path;
 
             break;
@@ -742,14 +741,14 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
                 default: UNREACHABLE;
             }
 
-            Symbol *sym = env_insert(tc->current_env, s->name,
+            s->sym = env_insert(tc->current_env, s->name,
                 (WodType){ .basetype = TYPE_DBTYPE, .is_assignable = false,
                     .db_kind = db_kind, .db_env = db_env }, tc->arena);
 
-            if (!sym) {
+            if (!s->sym) {
                 tc_error(tc, &stmt->tok, SV("Redeclaration of name."));
                 break;
-            } else sym->top_level_path = 
+            } else s->sym->top_level_path = 
                 tc->modules->at[module_index].source->path;
 
             assert(tc->current_env = tc->top_level_env);

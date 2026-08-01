@@ -37,6 +37,7 @@ Symbol *env_insert(Environment *env, StringView name, WodType type, Arena *arena
     if (entry) return NULL;
 
     Symbol sym;
+    sym.env = env;
     sym.name = name;
     sym.type = type;
     sym.offset = 0;

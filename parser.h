@@ -4,6 +4,7 @@
 #include "common.h"
 #include "lexer.h"
 #include "environment.h"
+#include "module.h"
 
 typedef enum {
     NODE_ExprVar,
@@ -72,6 +73,8 @@ VEC_PTR_DEF(ProgramAST);
 typedef struct {
     Expr base;
     StringView name;
+
+    Symbol *sym;
 } ExprVar;
 
 typedef struct {
@@ -140,6 +143,8 @@ typedef struct {
     Expr *array_length;
     Expr *initializer;
     bool is_const;
+
+    Symbol *sym;
 } StmtVarDecl;
 
 VEC_PTR_DEF(StmtVarDecl);
@@ -151,6 +156,8 @@ typedef struct {
     VEC_PTR_StmtVarDecl params;
     VEC_PTR_Stmt body;
     bool is_inline;
+
+    Symbol *sym;
 } StmtFuncDecl;
 
 typedef struct {
@@ -182,6 +189,8 @@ typedef struct {
     Expr *left_bound;
     Expr *right_bound;
     Stmt *body;
+
+    Symbol *sym;
 } StmtFor;
 
 typedef struct {
@@ -204,6 +213,8 @@ typedef struct {
     Token db;
     StringView name;
     VEC_PTR_StmtVarDecl fields;
+
+    Symbol *sym;
 } StmtDBDecl;
 
 typedef struct {
@@ -211,6 +222,7 @@ typedef struct {
     Expr *expr;
 } StmtExpr;
 
-ProgramAST *generate_ast(Source source, Arena *arena);
+// Return a topological sort of all modules.
+VEC_Module parse_all_modules(StringView path, Arena *arena);
 
 #endif // WOD_PARSER_H_

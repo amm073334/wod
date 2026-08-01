@@ -224,7 +224,7 @@ bool gd_apply(Arena *arena, StringView editor_path, StringView txt_path) {
     si.cb = sizeof(si);
     ZeroMemory(&pi, sizeof(pi));
 
-    bool success = CreateProcessA(NULL, command.data,
+    bool success = CreateProcessA(NULL, sv_dup(arena, command),
         NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
 
     WaitForSingleObject(pi.hProcess, INFINITE);
