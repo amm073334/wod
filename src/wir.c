@@ -258,6 +258,7 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
         VEC_int32_t int_args = VEC_EMPTY;
         VEC_int32_t str_ref_args = VEC_EMPTY;
         VEC_StringView str_lit_args = VEC_EMPTY;
+        VEC_PUSH(str_lit_args, SV(""), wc->arena);
 
         int32_t total_int_args = 0;
         int32_t total_str_args = 0;
