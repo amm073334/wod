@@ -1,0 +1,12 @@
+// EXPECT: 123
+
+apply "bin";
+
+import "_test.wod";
+
+void main() {
+    int a = 1;
+    int b = 2;
+    output("${a + b}");
+    exit();
+}

@@ -1,11 +1,10 @@
-// EXPECT: a
+// EXPECT: hello
 
 apply "bin";
 
 import "_test.wod";
 
 void main() {
-    str thing = "a";
-    output(thing);
+    output("hello");
     exit();
 }

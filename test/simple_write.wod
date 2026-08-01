@@ -1,6 +1,6 @@
 // EXPECT: a
 
-apply "bin"
+apply "bin";
 
 void main() {
     cmd [122](1600005,0,0)("a");

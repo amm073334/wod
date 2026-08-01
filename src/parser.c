@@ -387,7 +387,7 @@ static Import import(Parser *parser) {
         imp.alias = parser->previous.text;
     }
 
-    consume(parser, TOK_SEMICOLON, SV("Expected ';' after import."));
+    consume(parser, TOK_SEMICOLON, SV("Expected ';' after import path."));
 
     return imp;
 }
@@ -775,6 +775,8 @@ static ProgramAST *generate_ast(Source source, Arena *arena) {
     if (match(&parser, TOK_APPLY)) {
         consume(&parser, TOK_STRING, SV("Expected apply path."));
         ast->apply = remove_quotes(parser.previous.text);
+        consume(&parser, TOK_SEMICOLON, SV("Expected ';' after apply path."));
+        if (parser.panic_mode) synchronize(&parser);
     } else {
         ast->apply = SV_NULL;
     }

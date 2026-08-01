@@ -222,7 +222,8 @@ typedef struct {
     Expr *expr;
 } StmtExpr;
 
-// Return a topological sort of all modules.
+// Return a topological sort of all modules, or an empty vector
+// if an error occurred.
 VEC_Module parse_all_modules(StringView path, Arena *arena);
 
 #endif // WOD_PARSER_H_

@@ -1,4 +1,4 @@
-apply "bin"
+apply "bin";
 
 cdb SomeCDB {
     int a;
