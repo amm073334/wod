@@ -63,7 +63,6 @@ typedef struct Import {
 VEC_DEF(Import);
 
 typedef struct ProgramAST {
-    Source source;
     StringView apply;
     VEC_Import imports;
     VEC_PTR_Stmt stmts;
@@ -212,6 +211,6 @@ typedef struct {
     Expr *expr;
 } StmtExpr;
 
-VEC_PTR_ProgramAST generate_all_asts(StringView path, Arena *arena);
+ProgramAST *generate_ast(Source source, Arena *arena);
 
 #endif // WOD_PARSER_H_

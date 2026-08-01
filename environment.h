@@ -104,7 +104,7 @@ void env_init(Environment *env);
 Environment *env_new(Environment *parent, Arena *arena);
 Symbol *env_insert(Environment *env, StringView name, WodType type, Arena *arena);
 Symbol *env_find(Environment *env, StringView name);
-StringView get_globally_qualified_name(Arena *arena, Symbol *sym);
+Symbol *env_find_recursive(Environment *env, StringView name);
 
 
 #endif // WOD_ENVIRONMENT_H_

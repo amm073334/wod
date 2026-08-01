@@ -48,7 +48,7 @@ static Expr *visit_Expr(Arena *arena, Expr *expr) {
     case NODE_ExprVar: {
         ExprVar *e = (ExprVar *)expr;
         if (expr->type.is_compile_time) {
-            Symbol* sym = env_find(expr->env, e->name);
+            Symbol* sym = env_find_recursive(expr->env, e->name);
             assert(sym);
 
             switch (expr->type.basetype) {
@@ -244,7 +244,10 @@ static void visit_Stmt(Arena *arena, Stmt *stmt) {
     }
 }
 
-void constexpr_pass(ProgramAST *ast, Arena *arena) {
-    for (size_t i = 0; i < ast->stmts.count; i++)
-        visit_Stmt(arena, ast->stmts.at[i]);
+void constexpr_pass(VEC_Module *modules, Arena *arena) {
+    for (size_t i = 0; i < modules->count; i++) {
+        ProgramAST *ast = modules->at[i].ast;
+        for (size_t i = 0; i < ast->stmts.count; i++)
+            visit_Stmt(arena, ast->stmts.at[i]);
+    }
 }

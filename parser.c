@@ -745,7 +745,7 @@ static Stmt *top_decl(Parser *parser) {
     return NULL;
 }
 
-static ProgramAST *generate_ast(Source source, Arena *arena) {
+ProgramAST *generate_ast(Source source, Arena *arena) {
     Parser parser;
     lexer_init(&parser.lexer, source);
 
@@ -760,7 +760,6 @@ static ProgramAST *generate_ast(Source source, Arena *arena) {
         fprintf(stderr, "Could not allocate AST.");
         return NULL;
     }
-    ast->source = source;
     VEC_INIT(ast->imports);
     VEC_INIT(ast->stmts);
     
@@ -784,59 +783,4 @@ static ProgramAST *generate_ast(Source source, Arena *arena) {
     }
 
     return parser.had_error ? NULL : ast;
-}
-
-static bool generate_all_asts_helper(VEC_PTR_ProgramAST *asts, StringView path, Arena *arena) {
-    // If file has already been parsed, do nothing.
-    for (size_t i = 0; i < asts->count; i++) {
-        if (sv_equals(path, asts->at[i]->source.path))
-            return true;
-    }
-
-    // Otherwise recursively parse the file.
-    Source *sub_source = alloc_source(path, arena);
-    if (!sub_source) return false;
-    
-    ProgramAST *ast = generate_ast(*sub_source, arena);
-    if (!ast) return false;
-
-    VEC_PUSH(*asts, ast, arena);
-
-    StringView dir = get_directory(path, arena);
-    if (sv_is_null(dir)) return false;
-
-    bool success = true;
-    for (size_t i = 0; i < ast->imports.count; i++) {
-        Import *import = &ast->imports.at[i];
-        
-        StringView absolute_import_path;
-        {
-            char *import_path = sv_dup(arena, import->path);
-            if (path_is_relative(import_path)) {
-                absolute_import_path = sv_concat(arena, 
-                    dir, to_sv(import_path));
-            } else {
-                absolute_import_path = to_sv(import_path);
-            }
-        }
-
-        if (sv_is_null(absolute_import_path))
-            return false;
-
-        success = success && 
-            generate_all_asts_helper(asts, absolute_import_path, arena);
-    }
-
-    return success;
-}
-
-VEC_PTR_ProgramAST generate_all_asts(StringView path, Arena *arena) {
-    VEC_PTR_ProgramAST asts = VEC_EMPTY;
-
-    StringView full_path = get_full_path(path, arena);
-    if (sv_is_null(full_path)) return (VEC_PTR_ProgramAST)VEC_EMPTY;
-
-    bool success = generate_all_asts_helper(&asts, full_path, arena);
-
-    return success ? asts : (VEC_PTR_ProgramAST)VEC_EMPTY;
 }

@@ -119,7 +119,7 @@ static void visit_db_field_decl(Ast2Wir *aw, Stmt *stmt) {
 
     WIRDB *last = &aw->cdbs.at[aw->cdbs.count - 1];
 
-    Symbol *sym = env_find(stmt->env, s->name);
+    Symbol *sym = env_find_recursive(stmt->env, s->name);
     assert(sym);
 
     WIRDBField wdbf = {
@@ -173,7 +173,7 @@ static WIROperand _visit_Expr(Ast2Wir *aw, Expr *expr) {
     switch (expr->kind) {
     case NODE_ExprVar: {
         ExprVar *e = (ExprVar *)expr;
-        Symbol *sym = env_find(expr->env, e->name);
+        Symbol *sym = env_find_recursive(expr->env, e->name);
         assert(sym);
         
         if (expr->type.is_compile_time) {
@@ -352,7 +352,7 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
             visit_Expr(aw, s->array_length);
         }
 
-        Symbol *sym = env_find(stmt->env, s->name);
+        Symbol *sym = env_find_recursive(stmt->env, s->name);
         assert(sym);
 
         switch (sym->type.basetype) {
@@ -388,7 +388,7 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
     case NODE_StmtFuncDecl: {
         StmtFuncDecl *s = (StmtFuncDecl *)stmt;
         
-        Symbol *sym = env_find(stmt->env, s->name);
+        Symbol *sym = env_find_recursive(stmt->env, s->name);
         assert(sym);
 
         sym->offset = aw->cevs.count;
@@ -513,7 +513,7 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
     }
 }
 
-WIR ast2wir_pass(ProgramAST *ast, Arena *arena) {
+void ast2wir_pass(VEC_Module *modules, Arena *arena) {
     Ast2Wir aw = (Ast2Wir){
         .arena = arena,
         .tmp = { 0 },

@@ -4,8 +4,8 @@
 #define WOD_CONSTEXPR_H_
 
 #include "common.h"
-#include "parser.h"
+#include "module.h"
 
-void constexpr_pass(ProgramAST *ast, Arena *arena);
+void constexpr_pass(VEC_Module *modules, Arena *arena);
 
 #endif // WOD_CONSTEXPR_H_

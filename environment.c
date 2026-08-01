@@ -21,9 +21,19 @@ Environment *env_new(Environment *parent, Arena *arena) {
     return env;
 }
 
+// TODO: This would be more efficient with a hash table.
+Symbol *env_find(Environment *env, StringView name) {
+    for (size_t i = 0; i < env->symbols.count; i++) {
+        if (!sv_equals(name, env->symbols.at[i].name))
+            continue;
+
+        return &env->symbols.at[i];
+    }
+    return NULL;
+}
+
 Symbol *env_insert(Environment *env, StringView name, WodType type, Arena *arena) {
     Symbol *entry = env_find(env, name);
-    
     if (entry) return NULL;
 
     Symbol sym;
@@ -35,29 +45,12 @@ Symbol *env_insert(Environment *env, StringView name, WodType type, Arena *arena
     return &env->symbols.at[env->symbols.count - 1];
 }
 
-// TODO: This would be more efficient with a hash table.
-Symbol *env_find(Environment *env, StringView name) {
+
+Symbol *env_find_recursive(Environment *env, StringView name) {
     if (!env) return NULL;
     
-    for (size_t i = 0; i < env->symbols.count; i++) {
-        if (!sv_equals(name, env->symbols.at[i].name))
-            continue;
+    Symbol *sym = env_find(env, name);
+    if (sym) return sym;
 
-        return &env->symbols.at[i];
-    }
-
-    return env_find(env->parent, name);
+    return env_find_recursive(env->parent, name);
 }
-
-// StringView get_globally_qualified_name(Arena *arena, Symbol *sym) {
-//     size_t new_len = sym->path.len + sym->name.len + 1;
-//     char *new_str = arena_alloc(arena, new_len);
-//     if (!new_str) {
-//         fprintf(stderr, "Fatal error: Out of memory.\n");
-//         exit(1);
-//     }
-//     memcpy(new_str, sym->path.data, sym->path.len);
-//     new_str[sym->path.len] = ':';
-//     memcpy(new_str + sym->path.len + 1, sym->name.data, sym->name.len);
-//     return (StringView){.data = new_str, .len = new_len};
-// }
