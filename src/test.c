@@ -80,10 +80,17 @@ static StringView read_from_handle(HANDLE handle, Arena *arena) {
 int main(int argc, char **argv) {
     if (argc != 2) exit(1);
 
-    const char *path = argv[1];
-    
     Arena arena;
     arena_init(&arena);
+
+    DWORD path_len = GetFullPathNameA(argv[1], 0, NULL, NULL);
+    char *path = arena_alloc(&arena, path_len);
+    char *file_name = arena_alloc(&arena, path_len);
+    if (!path || !file_name) {
+        fprintf(stderr, "Failed to allocate memory.\n");
+        exit(1);
+    }
+    GetFullPathNameA(argv[1], path_len, path, &file_name);
 
     StringView command = 
         sv_concat(&arena, SV(".\\wodc.exe "), to_sv(path));
@@ -97,26 +104,26 @@ int main(int argc, char **argv) {
 
     // If file starts with an underscore, ignore it.
     // This is useful for any libraries shared across tests.
-    if (starts_with(path, "_")) {
+    if (starts_with(file_name, "_")) {
         goto end;
     }
 
     int ret = system(command.data);
     if (ret == 1) {
-        failed(path, "Test crashed the compiler.");
+        failed(file_name, "Test crashed the compiler.");
         goto end;
     }
 
     // If test should fail, just check exit code.
-    if (starts_with(path, "test/fail")) {
-        if (ret != 2) failed(path, "Test that should fail to compile compiled successfully.");
-        else passed(path);
+    if (starts_with(file_name, "test/fail")) {
+        if (ret != 2) failed(file_name, "Test that should fail to compile compiled successfully.");
+        else passed(file_name);
         goto end;
     }
 
     // If test should compile successfully, exit code should be 0.
     if (ret != 0) {
-        failed(path, "Test failed to compile.");
+        failed(file_name, "Test failed to compile.");
         goto end;
     }
 
@@ -127,7 +134,7 @@ int main(int argc, char **argv) {
 
     if (!starts_with(f.data, EXPECT_STR)) {
         printf("(Note: Compiled only.) ");
-        passed(path);
+        passed(file_name);
         goto end;
     }
 
@@ -170,7 +177,7 @@ int main(int argc, char **argv) {
 
         DWORD event = WaitForSingleObject(pi.hProcess, TEST_TIMEOUT_MS);
         if (event == WAIT_TIMEOUT) {
-            failed(path, "Timed out.");
+            failed(file_name, "Timed out.");
         } else if (event != WAIT_OBJECT_0) {
             fprintf(stderr, "WaitForSingleObject failed.\n");
         }
@@ -185,18 +192,18 @@ int main(int argc, char **argv) {
 
     StringView test_output = read_from_handle(file_handle, &arena);
     if (sv_is_null(test_output)) {
-        failed(path, "No output.");
+        failed(file_name, "No output.");
         goto close_proc;
     }
 
     if (!sv_equals(expected, test_output)) {
-        failed(path, "Unexpected output.");
+        failed(file_name, "Unexpected output.");
         printf("Expected: " SV_FMT "; Actual: " SV_FMT "\n",
             SV_FMT_VAL(expected), SV_FMT_VAL(test_output));
         goto close_proc;
     }
     
-    passed(path);
+    passed(file_name);
 
     close_proc:
     CloseHandle(pi.hProcess);

@@ -4,5 +4,6 @@
 #include "lexer.h"
 
 void error(Location loc, size_t len, StringView message);
+void source_error(Source source, StringView message);
 
 #endif // WOD_ERROR_H_

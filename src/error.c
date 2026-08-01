@@ -36,3 +36,11 @@ void error(Location loc, size_t len, StringView message) {
     fprintf(stderr, "%*s", 8 + (int)loc.column, "");
     fprintf(stderr, SV_FMT "\n\n", SV_FMT_VAL(message));
 }
+
+void source_error(Source source, StringView message) {
+    fprintf(stderr, "[Error] " SV_FMT "\n",
+        SV_FMT_VAL(source.path));
+
+    fprintf(stderr, "%*s", 8, "");
+    fprintf(stderr, SV_FMT "\n\n", SV_FMT_VAL(message));
+}

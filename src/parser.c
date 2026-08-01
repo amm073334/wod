@@ -650,6 +650,9 @@ static Stmt *statement(Parser *parser) {
         return (Stmt *)stmt;
     }
 
+    if (match(parser, TOK_VOID))
+        error_previous(parser, SV("Attempted to declare variable of type void."));
+
     return assign_stmt(parser);
 }
 

@@ -786,8 +786,10 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
         }
     }
 
-    if (module_index == 0 && !env_find(tc->top_level_env, SV("main")))
-        tc_error(tc, NULL, SV("No 'main' function."));
+    if (module_index == 0 && !env_find(tc->top_level_env, SV("main"))) {
+        tc->had_error = true;
+        source_error(*tc->modules->at[0].source, SV("No 'main' function."));
+    }
 
     // Do a second pass to look inside functions.
     for (size_t i = 0; i < ast->stmts.count; i++) {
