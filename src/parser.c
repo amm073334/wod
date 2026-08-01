@@ -794,9 +794,20 @@ static ProgramAST *generate_ast(Source source, Arena *arena) {
     return parser.had_error ? NULL : ast;
 }
 
+// https://en.wikipedia.org/wiki/Topological_sorting#Depth-first_search
+// Generate a topologically sorted set of imports.
+typedef struct {
+    enum {
+        TEMPORARY,
+        PERMANENT,
+    } mark;
+    StringView path;
+} ImportGraphNode;
+VEC_DEF(ImportGraphNode);
 
 static bool parse_all_modules_helper(
-    VEC_Module *modules, 
+    VEC_ImportGraphNode *graph,
+    VEC_Module *sorted, 
     StringView path, 
     Arena *arena, 
     Import *import_node
@@ -805,22 +816,36 @@ static bool parse_all_modules_helper(
     if (import_node) import_node->path = path;
 
     // If file has already been parsed, do nothing.
-    for (size_t i = 0; i < modules->count; i++) {
-        if (sv_equals(path, modules->at[i].source->path)) {
+    for (size_t i = 0; i < graph->count; i++) {
+        ImportGraphNode *node = &graph->at[i];
+        if (!sv_equals(path, node->path))
+            continue;
+
+        if (node->mark == PERMANENT)
             return true;
-        }
+
+        if (import_node)
+            error(import_node->tok.loc, import_node->tok.text.len,
+                SV("Cyclic import detected."));
+        return false;
     }
     
-    // Otherwise recursively parse the file.
+    // Otherwise parse the file.
     Source *sub_source = alloc_source(path, arena);
     if (!sub_source) return false;
 
     ProgramAST *ast = generate_ast(*sub_source, arena);
     if (!ast) return false;
 
-    VEC_PUSH(*modules,
-        ((Module){ .source = sub_source, .ast = ast }), arena);
+    // Mark the node.
+    ImportGraphNode node = {
+        .mark = TEMPORARY,
+        .path = path
+    };
+    VEC_PUSH(*graph, node, arena);
+    size_t node_index = graph->count - 1;
 
+    // Recursively parse imported files.
     StringView dir = get_directory(path, arena);
     if (sv_is_null(dir)) return false;
 
@@ -843,8 +868,14 @@ static bool parse_all_modules_helper(
             return false;
 
         success = success && 
-            parse_all_modules_helper(modules, absolute_import_path, arena, import);
+            parse_all_modules_helper(graph, sorted,
+                absolute_import_path, arena, import);
     }
+    
+    // Update the node.
+    graph->at[node_index].mark = PERMANENT;
+    VEC_PUSH(*sorted,
+        ((Module){ .source = sub_source, .ast = ast }), arena);
 
     return success;
 }
@@ -855,7 +886,9 @@ VEC_Module parse_all_modules(StringView path, Arena *arena) {
     StringView full_path = get_full_path(path, arena);
     if (sv_is_null(full_path)) return (VEC_Module)VEC_EMPTY;
 
-    bool success = parse_all_modules_helper(&modules, full_path, arena, NULL);
+    VEC_ImportGraphNode graph = VEC_EMPTY;
+    bool success = parse_all_modules_helper(
+        &graph, &modules, full_path, arena, NULL);
 
     return success ? modules : (VEC_Module)VEC_EMPTY;
 }

@@ -115,7 +115,7 @@ int main(int argc, char **argv) {
     }
 
     // If test should fail, just check exit code.
-    if (starts_with(file_name, "test/fail")) {
+    if (starts_with(file_name, "fail")) {
         if (ret != 2) failed(file_name, "Test that should fail to compile compiled successfully.");
         else passed(file_name);
         goto end;
