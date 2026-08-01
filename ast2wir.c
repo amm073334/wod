@@ -289,13 +289,13 @@ static WIROperand _visit_Expr(Ast2Wir *aw, Expr *expr) {
         switch (e->op.type) {
         case TOK_MINUS: {
             WIROperand dest = tmp_int(aw);
-            emit_binop(aw, dest, WIR_IMM_I(0), right, WIR_SUB); break;
+            emit_binop(aw, dest, WIR_IMM_I(0), right, WIR_SUB);
             return dest;
         }
         case TOK_BANG: {
             // Assumes that booleans are either zero or one.
             WIROperand dest = tmp_int(aw);
-            emit_binop(aw, dest, WIR_IMM_I(1), right, WIR_XOR); break;
+            emit_binop(aw, dest, WIR_IMM_I(1), right, WIR_XOR);
             return dest;
         }
         case TOK_AMP: {

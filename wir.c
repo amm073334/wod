@@ -164,18 +164,39 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
         }
         break;                
     }
+    case INST_WIRInst_StrAssign: {
+        WIRInst_StrAssign *inst = (WIRInst_StrAssign *)wi;
+
+        VEC_int32_t int_fields = VEC_EMPTY;
+        VEC_StringView str_fields = VEC_EMPTY;
+        if (inst->src.kind == OPKIND_IMM_STR) {
+            VEC_PUSH(int_fields, resolve(wc, inst->dest), wc->arena);
+            VEC_PUSH(int_fields, 0, wc->arena);
+            VEC_PUSH(int_fields, 0, wc->arena);
+            VEC_PUSH(str_fields, inst->src.as.imm_str, wc->arena);
+        } else {
+            VEC_PUSH(int_fields, resolve(wc, inst->dest), wc->arena);
+            VEC_PUSH(int_fields, 0, wc->arena);
+            VEC_PUSH(int_fields, resolve(wc, inst->src), wc->arena);
+        }
+        
+        cev_push_cmd(wc->cev, CMD_STRING, wc->indent,
+            int_fields, str_fields);
+        break;
+    }
     // TODO
-    case INST_WIRInst_IfBegin:
+    case INST_WIRInst_IfBegin: {
         cev_push_simple_cmd(wc->cev, CMD_IF_INT, wc->indent);
         
         wc->indent++;
         break;
-
-    case INST_WIRInst_LoopBegin:
+    }
+    case INST_WIRInst_LoopBegin: {
         cev_push_simple_cmd(wc->cev, CMD_LOOP, wc->indent);
         
         wc->indent++;
         break;
+    }
     case INST_WIRInst_LoopBeginN: {
         WIRInst_LoopBeginN *inst = (WIRInst_LoopBeginN *)wi;
 
@@ -190,14 +211,16 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
         wc->indent++;
         break;
     }
-    case INST_WIRInst_LoopEnd:
+    case INST_WIRInst_LoopEnd: {
         wc->indent--;
 
         cev_push_simple_cmd(wc->cev, CMD_LOOP_END, wc->indent);
         break;
-    case INST_WIRInst_ReturnVal:
+    }
+    case INST_WIRInst_ReturnVal: {
         cev_push_simple_cmd(wc->cev, CMD_RETURN, wc->indent);
         break;
+    }
     case INST_WIRInst_Cmd: {
         WIRInst_Cmd *inst = (WIRInst_Cmd *)wi;
         assert(inst->open_close >= -1
@@ -247,6 +270,7 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
                     VEC_PUSH(str_lit_args, wop.as.imm_str, wc->arena);
                     strlit_flags |= (1 << total_str_args);    
                 } else {
+                    VEC_PUSH(str_ref_args, resolve(wc, wop), wc->arena);
                     VEC_PUSH(str_lit_args, SV(""), wc->arena);
                 }
                 total_str_args++;
