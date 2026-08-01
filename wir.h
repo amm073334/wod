@@ -5,34 +5,26 @@
 #include "commonevent.h"
 #include "environment.h"
 #include "gamedata.h"
+#include "module.h"
 
 #define WIR_IMM_I(i) (WIROperand){ .kind = OPKIND_IMM, .type = OPTYPE_INT, .as.imm_int = (i) }
 #define WIR_IMM_S(s) (WIROperand){ .kind = OPKIND_IMM, .type = OPTYPE_STR, .as.imm_str = (s) }
-
-// typedef struct WIRCompiler {
-//     // Maps globally-qualified names to global addresses.
-//     VEC_TableEntry table;
-
-//     GameData gd;
-//     Arena *arena;
-// } WIRCompiler;
 
 typedef struct WIROperand {
     enum {
         // Immediate.
         OPKIND_IMM,
 
-        // Uses the `imm_str` field to qualify a globally-scoped identifier.
-        // For example, `example/file.wod:global_name`.
-        OPKIND_GLOBAL,
-
-        // Uses the offset member; basically a virtual register.
+        // Uses the `offset` member; basically a virtual register.
         OPKIND_LOCAL,
         OPKIND_TMP,
+
+        // Uses the `top` field to qualify a top-level identifier.
+        OPKIND_GLOBAL,
     } kind;
 
     // Type of the operand (not of the union). For example,
-    // an integer global would still use the `imm_str` field.
+    // an integer local would still use the `offset` field.
     enum {
         OPTYPE_INT,
         OPTYPE_STR,
@@ -42,9 +34,13 @@ typedef struct WIROperand {
         int32_t imm_int;
         StringView imm_str;
         size_t offset;
+
+        struct {
+            StringView path;
+            StringView name;
+        } top;
     } as;
 } WIROperand;
-
 VEC_DEF(WIROperand);
 
 typedef struct {
@@ -97,14 +93,12 @@ typedef struct {
     } op;
     VEC_WIROperand operands;
 } WIRInst;
-
 VEC_DEF(WIRInst);
 
 typedef struct {
     StringView debug_name;
     VEC_WIRInst insts;
 } WIRCev;
-
 VEC_DEF(WIRCev);
 
 typedef struct {
@@ -114,25 +108,21 @@ typedef struct {
     bool has_initializer;
     WIROperand initializer;
 } WIRDBField;
-
 VEC_DEF(WIRDBField);
 
 typedef struct {
     StringView debug_name;
     VEC_WIRDBField fields;
 } WIRDB;
-
 VEC_DEF(WIRDB);
 
-typedef struct {
+typedef struct WIR {
     VEC_WIRCev cevs;
     VEC_WIRDB udb_types;
     VEC_WIRDB cdb_types;
 } WIR;
 
-// void compile_wir(WIRCompiler *wc, WIR arr);
-// GameData output_gd(WIRCompiler *wc);
-
+GameData wir_pass(VEC_Module *modules, Arena *arena);
 void print_wir(WIR *wir);
 
 #endif // WOD_WIR_H_

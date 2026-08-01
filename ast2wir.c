@@ -1,4 +1,6 @@
 #include "ast2wir.h"
+#include "parser.h"
+#include "wir.h"
 
 typedef struct {
     size_t int_top;
@@ -9,8 +11,7 @@ VEC_DEF(TwoStack);
 
 typedef struct {
     Arena *arena;
-    VEC_WIRCev cevs;
-    VEC_WIRDB cdbs;
+    WIR *wir;
 
     TwoStack tmp;
     TwoStack global;
@@ -18,9 +19,9 @@ typedef struct {
 } Ast2Wir;
 
 static void emit_to_current_cev(Ast2Wir *aw, WIRInst inst) {
-    assert(aw->cevs.count > 0);
+    assert(aw->wir->cevs.count > 0);
 
-    WIRCev *last = &aw->cevs.at[aw->cevs.count - 1];
+    WIRCev *last = &aw->wir->cevs.at[aw->wir->cevs.count - 1];
     VEC_PUSH(last->insts, inst, aw->arena);
 }
 
@@ -117,7 +118,7 @@ static void visit_db_field_decl(Ast2Wir *aw, Stmt *stmt) {
     StmtVarDecl *s = (StmtVarDecl *)stmt;
     assert(!s->is_const);
 
-    WIRDB *last = &aw->cdbs.at[aw->cdbs.count - 1];
+    WIRDB *last = &aw->wir->cdb_types.at[aw->wir->cdb_types.count - 1];
 
     Symbol *sym = env_find_recursive(stmt->env, s->name);
     assert(sym);
@@ -185,15 +186,16 @@ static WIROperand _visit_Expr(Ast2Wir *aw, Expr *expr) {
             }
         }
 
-        return (WIROperand){
-            .kind = OPKIND_LOCAL,
-            .as.offset = sym->offset };
-        // if (sv_is_null(sym->path)) {
-        // } else {
-        //     return (WIROperand){
-        //         .kind = OPKIND_GLOBAL,
-        //         .as.imm_str = get_globally_qualified_name(aw->arena, sym) };
-        // }
+        if (sv_is_null(sym->top_level_path)) {
+            return (WIROperand){
+                .kind = OPKIND_LOCAL,
+                .as.offset = sym->offset };
+        } else {
+            return (WIROperand){
+                .kind = OPKIND_GLOBAL,
+                .as.top.path = sym->top_level_path,
+                .as.top.name = sym->name };
+        }
     }
     case NODE_ExprArray: {
         ExprArray *e = (ExprArray *)expr;
@@ -314,6 +316,7 @@ static WIROperand _visit_Expr(Ast2Wir *aw, Expr *expr) {
     }
 
     UNREACHABLE;
+    return (WIROperand){ 0 };
 }
 
 static WIROperand visit_Expr(Ast2Wir *aw, Expr *expr) {
@@ -391,8 +394,8 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
         Symbol *sym = env_find_recursive(stmt->env, s->name);
         assert(sym);
 
-        sym->offset = aw->cevs.count;
-        VEC_PUSH(aw->cevs,
+        sym->offset = aw->wir->cevs.count;
+        VEC_PUSH(aw->wir->cevs,
             ((WIRCev){
                 .debug_name = s->name,
                 .insts = VEC_EMPTY,
@@ -501,7 +504,7 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
     }
     case NODE_StmtDBDecl: {
         StmtDBDecl *s = (StmtDBDecl *)stmt;
-        VEC_PUSH(aw->cdbs,
+        VEC_PUSH(aw->wir->cdb_types,
             ((WIRDB){
                 .debug_name = s->name,
                 .fields = VEC_EMPTY
@@ -514,19 +517,21 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
 }
 
 void ast2wir_pass(VEC_Module *modules, Arena *arena) {
-    Ast2Wir aw = (Ast2Wir){
-        .arena = arena,
-        .tmp = { 0 },
-        .global = { 0 },
-        .cevs = VEC_EMPTY,
-        .cdbs = VEC_EMPTY,
-        .local_frames = VEC_EMPTY,
-    };
+    for (size_t i = 0; i < modules->count; i++) {
+        Ast2Wir aw = (Ast2Wir){
+            .arena = arena,
+            .tmp = { 0 },
+            .global = { 0 },
+            .wir = arena_alloc_assert(arena, sizeof(WIR)),
+            .local_frames = VEC_EMPTY,
+        };
 
-    for (size_t i = 0; i < ast->stmts.count; i++) {
-        visit_Stmt(&aw, ast->stmts.at[i]);
-        assert(aw.local_frames.count == 0);
+        Module *mod = &modules->at[modules->count - i - 1];
+        for (size_t j = 0; j < mod->ast->stmts.count; j++) {
+            visit_Stmt(&aw, mod->ast->stmts.at[j]);
+            assert(aw.local_frames.count == 0);
+        }
+
+        mod->wir = aw.wir;
     }
-
-    return (WIR){.cevs = aw.cevs, .cdb_types = aw.cdbs};
 }

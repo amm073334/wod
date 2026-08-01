@@ -2,7 +2,7 @@
 
 #include "error.h"
 
-static char *get_nth_line(Source source, size_t line) {
+static const char *get_nth_line(Source source, size_t line) {
     size_t cur_line = 1;
     for (size_t i = 0; i < source.text.len; i++) {
         if (line == cur_line)

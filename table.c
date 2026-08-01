@@ -36,6 +36,8 @@ static Entry *table_insert_generic(void *table, StringView key, void *value) {
     Table *t = (Table *)table;
     Entry *entry = table_find_generic(table, key);
 
-
+    (void) value;
+    (void) entry;
+    (void) t;
 
 }

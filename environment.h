@@ -86,8 +86,10 @@ struct Symbol {
     // For use in printing redeclaration errors.
     Location declared_at;
 
-    // 
-    Environment *top_level_env;
+    // Path of the file the symbol is in. Only valid if symbol is
+    // top-level; otherwise is `SV_NULL`.
+    // Used for resolving cross-file references.
+    StringView top_level_path;
 
     union {
         // This is for example the common event ID, or the CSelf ID.

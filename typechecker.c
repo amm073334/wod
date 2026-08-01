@@ -73,7 +73,10 @@ static Symbol *find_including_imports(
     size_t num_found = 0;
     for (size_t i = 0; i < tc->unqualified_imports.count; i++) {
         sym = env_find(tc->unqualified_imports.at[i], name);
-        if (sym) num_found++;
+
+        // Only increment the number found if the symbol wasn't a module alias.
+        // (Otherwise, it would make for weird importing semantics.)
+        if (sym && sym->type.basetype != TYPE_MODULE) num_found++;
         
         // If more than one symbol with the same name is found,
         // this is ambiguous; don't return a result.
@@ -343,8 +346,7 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
     }
 }
 
-// Insert new declaration without typechecking.
-static Symbol *try_insert_vardecl(StmtVarDecl *s, Environment *env, Arena *arena) {
+static Symbol *try_insert_vardecl(Typechecker *tc, StmtVarDecl *s) {
     WodType ty = (WodType){
         .is_assignable = !s->is_const,
         .is_compile_time = s->is_const
@@ -360,12 +362,39 @@ static Symbol *try_insert_vardecl(StmtVarDecl *s, Environment *env, Arena *arena
 
     Symbol *sym = NULL;
     if (s->array_length) {
-        WodType *array_of = arena_alloc_assert(arena, sizeof(WodType));
+        WodType *array_of = arena_alloc_assert(tc->arena, sizeof(WodType));
         *array_of = ty;
         ty.basetype = TYPE_ARRAY;
         ty.array_of = array_of;
     }
-    sym = env_insert(env, s->name, ty, arena);
+    sym = env_insert(tc->current_env, s->name, ty, tc->arena);
+
+    if (!sym) {
+        tc_error(tc, &s->base.tok, SV("Redeclaration of name."));
+        return NULL;
+    }
+
+    if (s->array_length) {
+        visit_Expr(tc, s->array_length);
+        if (!s->array_length->type.is_compile_time)
+            tc_error(tc, &s->array_length->tok,
+                SV("Array length must be a constant expression."));
+    }
+
+    if (s->is_const && !s->initializer)
+        tc_error(tc, &s->base.tok,
+            SV("Variable marked 'const' must have initializer."));
+
+    if (s->initializer) {
+        visit_Expr(tc, s->initializer);
+        if (sym->type.basetype != s->initializer->type.basetype)
+            tc_error(tc, &s->initializer->tok,
+                SV("Initializer does not match declared type of variable."));
+
+        if (s->is_const && !s->initializer->type.is_compile_time)
+            tc_error(tc, &s->initializer->tok,
+                SV("Used non-constant expression to initialize 'const' variable."));
+    }
 
     return sym;
 }
@@ -392,35 +421,7 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
     case NODE_StmtVarDecl: {
         StmtVarDecl *s = (StmtVarDecl *)stmt;
 
-        Symbol *sym = try_insert_vardecl(s, tc->current_env, tc->arena);
-
-        if (!sym) {
-            tc_error(tc, &s->base.tok, SV("Redeclaration of name."));
-            return;
-        }
-
-        if (s->array_length) {
-            visit_Expr(tc, s->array_length);
-            if (!s->array_length->type.is_compile_time)
-                tc_error(tc, &s->array_length->tok,
-                    SV("Array length must be a constant expression."));
-        }
-
-        if (s->is_const && !s->initializer)
-            tc_error(tc, &s->base.tok,
-                SV("Variable marked 'const' must have initializer."));
-
-        if (s->initializer) {
-            visit_Expr(tc, s->initializer);
-            if (sym->type.basetype != s->initializer->type.basetype)
-                tc_error(tc, &s->initializer->tok,
-                    SV("Initializer does not match declared type of variable."));
-
-            if (s->is_const && !s->initializer->type.is_compile_time)
-                tc_error(tc, &s->initializer->tok,
-                    SV("Used non-constant expression to initialize 'const' variable."));
-        }
-        
+        try_insert_vardecl(tc, s);
         return;
     }
     case NODE_StmtFuncDecl: {
@@ -600,13 +601,14 @@ static size_t find_module(VEC_Module *modules, StringView path) {
         }
     }
     UNREACHABLE;
+    return 0;
 }
 
-static Environment *typecheck_file(Typechecker *tc, size_t module_index, Arena *arena) {
+static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
     ProgramAST *ast = tc->modules->at[module_index].ast;
 
     VEC_PTR_Environment unqualified_imports = VEC_EMPTY;
-    Environment *top_level_env = env_new_assert(NULL, arena);
+    Environment *top_level_env = env_new_assert(NULL, tc->arena);
     
     // Handle imports. If an import isn't already typechecked, then recursively
     // check through that file first.
@@ -617,10 +619,10 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index, Arena *
         // Assumes that import paths have been canonicalized.
         // Assumes that there are no cyclic imports.
         size_t sub_index = find_module(tc->modules, s.path);
-        Environment *sub_env = &tc->modules->at[sub_index].env;
+        Environment *sub_env = tc->modules->at[sub_index].env;
 
-        if (!tc->modules->at[sub_index].env) {
-            sub_env = typecheck_file(tc, sub_index, arena);
+        if (!sub_env) {
+            sub_env = typecheck_file(tc, sub_index);
             if (!sub_env) tc->had_error = true;
             
             tc->modules->at[sub_index].env = sub_env;
@@ -634,21 +636,21 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index, Arena *
                 goto skip;
             }
         }
-        VEC_PUSH(unqualified_imports, sub_env, arena);
+        VEC_PUSH(unqualified_imports, sub_env, tc->arena);
 
         // If import has an alias, insert the symbol into the environment.
         if (sv_is_null(s.alias)) continue;
         
         Symbol *sym = env_insert(top_level_env, s.alias,
             (WodType){ .basetype = TYPE_MODULE,
-                .is_assignable = false, .module_env = sub_env }, arena);
+                .is_assignable = false, .module_env = sub_env }, tc->arena);
 
         if (!sym) {
             tc_error(tc, &s.tok, SV("Duplicate import."));
             continue;
         }
 
-        skip:
+        skip:;
     }
 
     // If any imports failed, just exit early to avoid errors later on
@@ -677,7 +679,9 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index, Arena *
                 tc_error(tc, &s->base.tok,
                     SV("Constant variables must be initialized."));
         
-            visit_Stmt(tc, stmt);
+            Symbol *sym = try_insert_vardecl(tc, s);
+            if (sym) sym->top_level_path = 
+                tc->modules->at[module_index].source->path;
 
             break;
         }
@@ -722,6 +726,8 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index, Arena *
 
             if (!sym)
                 tc_error(tc, &s->base.tok, SV("Redeclaration of name."));
+            else sym->top_level_path = 
+                tc->modules->at[module_index].source->path;
 
             break;
         }
@@ -742,19 +748,21 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index, Arena *
 
             if (!sym) {
                 tc_error(tc, &stmt->tok, SV("Redeclaration of name."));
-                return;
-            }
+                break;
+            } else sym->top_level_path = 
+                tc->modules->at[module_index].source->path;
 
             assert(tc->current_env = tc->top_level_env);
             tc->current_env = db_env;
-            for (size_t i = 0; i < s->fields.count; i++) {
-                StmtVarDecl *field = s->fields.at[i];
+            for (size_t j = 0; j < s->fields.count; j++) {
+                StmtVarDecl *field = s->fields.at[j];
                 assert(!field->is_const);
-                visit_Stmt(tc, (Stmt *)field);
                 if (field->initializer
                     && !field->initializer->type.is_compile_time)
                     tc_error(tc, &field->initializer->tok,
                         SV("DB field initializer must be constant expression."));
+                else 
+                    try_insert_vardecl(tc, field);
             }
             tc->current_env = tc->top_level_env;
             break;
@@ -786,7 +794,7 @@ bool typecheck_modules(VEC_Module *modules, Arena *arena) {
     tc.current_func = NULL;
     tc.modules = modules;
     
-    if (typecheck_file(&tc, 0, arena))
+    if (typecheck_file(&tc, 0))
         return true;
     else
         return false;

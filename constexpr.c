@@ -1,4 +1,5 @@
 #include "constexpr.h"
+#include "parser.h"
 
 static ExprIntLit *make_int(Arena *arena, Token tok, int32_t value) {
     ExprIntLit *out = arena_alloc_assert(arena, sizeof(ExprIntLit));
@@ -247,7 +248,7 @@ static void visit_Stmt(Arena *arena, Stmt *stmt) {
 void constexpr_pass(VEC_Module *modules, Arena *arena) {
     for (size_t i = 0; i < modules->count; i++) {
         ProgramAST *ast = modules->at[i].ast;
-        for (size_t i = 0; i < ast->stmts.count; i++)
-            visit_Stmt(arena, ast->stmts.at[i]);
+        for (size_t j = 0; j < ast->stmts.count; j++)
+            visit_Stmt(arena, ast->stmts.at[j]);
     }
 }

@@ -17,10 +17,10 @@ static bool parse_all_modules_helper(
     VEC_Module *modules, 
     StringView path, 
     Arena *arena, 
-    Import *import
+    Import *import_node
 ) {
     // Canonicalize import paths.
-    if (import) import->path = path;
+    if (import_node) import_node->path = path;
 
     // If file has already been parsed, do nothing.
     for (size_t i = 0; i < modules->count; i++) {
@@ -97,47 +97,41 @@ int main(int argc, const char *argv[]) {
 
     constexpr_pass(&modules, &arena);
 
-    // TODO: This probably should generate a different set of instructions per cev,
-    //       and compile each of them separately.
     ast2wir_pass(&modules, &arena);
-    // print_wir(&wir);
 
-    // Arena gd_arena;
-    // arena_init(&gd_arena);
-
-    // GameData gd = compile_wir_to_gd(wir, &gd_arena);
+    GameData gd = wir_pass(&modules, &arena);
 
     // If an `apply` directory is specified, then apply the text output there.
     // Otherwise, just compile output into the directory the source file is in.
-    // if (sv_is_null(ast->apply)) {
-    //     StringView directory = get_directory(to_sv(argv[0]), &gd_arena);
-    //     gd_write_dir(&gd, directory);
-    // } else {
-    //     StringView input_directory = get_directory(input_file, &gd_arena);
+    ProgramAST *main_file_ast = modules.at[0].ast;
+    if (sv_is_null(main_file_ast->apply)) {
+        StringView directory = get_directory(to_sv(argv[0]), &arena);
+        gd_write_dir(&gd, directory);
+    } else {
+        StringView input_directory = get_directory(input_file, &arena);
 
-    //     StringView editor_directory = sv_concat(&gd_arena,
-    //         input_directory, ast->apply);
+        StringView editor_directory = sv_concat(&arena,
+            input_directory, main_file_ast->apply);
 
-    //     char last = ast->apply.data[ast->apply.len - 1];
-    //     if (last != '/' && last != '\\')
-    //         editor_directory = sv_concat(&gd_arena,
-    //             editor_directory, SV("\\"));
+        char last = main_file_ast->apply.data[main_file_ast->apply.len - 1];
+        if (last != '/' && last != '\\')
+            editor_directory = sv_concat(&arena,
+                editor_directory, SV("\\"));
 
-    //     StringView build_directory = sv_concat(&gd_arena,
-    //         editor_directory, SV("build"));
+        StringView build_directory = sv_concat(&arena,
+            editor_directory, SV("build"));
 
-    //     gd_write_dir(&gd, build_directory);
-    //     if (!gd_apply(&gd_arena,
-    //             sv_concat(&gd_arena, editor_directory, SV("Editor.exe")),
-    //             SV("build"))) {
+        gd_write_dir(&gd, build_directory);
+        if (!gd_apply(&arena,
+                sv_concat(&arena, editor_directory, SV("Editor.exe")),
+                SV("build"))) {
         
-    //         fprintf(stderr, "Failed to apply game data.");
-    //         exit(2);
-    //     }
-    // }
+            fprintf(stderr, "Failed to apply game data.");
+            exit(2);
+        }
+    }
 
     arena_free(&arena);
-    // arena_free(&gd_arena);
 
     return 0;
 }
