@@ -148,6 +148,8 @@ static Expr *visit_Expr(Arena *arena, Expr *expr) {
     case NODE_ExprBoolLit:
         assert(expr->type.is_compile_time);
         return expr;
+    case NODE_ExprInterp:
+        return expr;
     }
 
     return NULL;

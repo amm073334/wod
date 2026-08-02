@@ -1,9 +1,16 @@
 #include "wir.h"
 
-#define I_BASE 1600010
-#define S_BASE 1600005
-#define I_MAX  1600099
-#define S_MAX  1600009
+#define CSELF_BASE 1600000
+#define CSELF_INT_BASE 1600010
+#define CSELF_INT_MAX  1600099
+#define CSELF_STR_BASE 1600005
+#define CSELF_STR_MAX  1600009
+
+#define NORMAL_VAR_BASE 2000000
+#define STRING_VAR_BASE 3000000
+#define CEV_BASE 500000
+#define UDB_BASE 10000000
+#define CDB_BASE 11000000
 
 typedef struct GlobalEntry {
     StringView path;
@@ -28,19 +35,28 @@ typedef struct WIRCompiler {
 
 bool is_string(WIROperand wop) {
     switch (wop.kind) {
-    case OPKIND_IMM_INT:
-        return false;
-    case OPKIND_IMM_STR:
-        return true;
-    case OPKIND_LOCAL:
-    case OPKIND_TEMP:
-        return wop.as.local.type == LOCAL_STR;
-    case OPKIND_GLOBAL:
-        return wop.as.global.type == GLOBAL_STR;
+        case OPKIND_IMM_STR:
+        case OPKIND_INTERP:
+        case OPKIND_LOCAL_STR:
+        case OPKIND_GLOBAL_STR:
+            return true;
+        case OPKIND_IMM_INT:
+        case OPKIND_TEMP_INT:
+        case OPKIND_LOCAL_INT:
+        case OPKIND_GLOBAL_INT:
+        case OPKIND_GLOBAL_CEV:
+        case OPKIND_GLOBAL_UDB:
+        case OPKIND_GLOBAL_CDB:
+            return false;
     }
 
     UNREACHABLE;
     return false;
+}
+
+bool is_strlit(WIROperand wop) {
+    return wop.kind == OPKIND_IMM_STR
+        || wop.kind == OPKIND_INTERP;
 }
 
 // TODO: It seems like disabling rc isn't really viable at the wir layer,
@@ -74,61 +90,115 @@ static int32_t disable_rc(Arena *arena, CommonEvent *cev, int32_t imm) {
     return 0;
 }
 
-int32_t resolve(WIRCompiler *wc, WIROperand wop) {
-    assert(wop.kind != OPKIND_IMM_STR);
+// If `yobidasi` is true, returns the 呼び出し値.
+// Otherwise, returns the index (for example, CSelf index).
+int32_t resolve(WIRCompiler *wc, WIROperand wop, bool yobidasi) {
+    assert(wop.kind != OPKIND_IMM_STR && wop.kind != OPKIND_INTERP);
     
+    VEC_GlobalEntry *g_vec = NULL;
+    size_t offset = 0;
+
     switch (wop.kind) {
     case OPKIND_IMM_INT: {
         return wop.as.imm_int;
     }
-    case OPKIND_LOCAL:
-    case OPKIND_TEMP: {
-        int32_t ref = 0;
-        switch (wop.as.local.type) {
-        case LOCAL_INT: {
-            ref = wop.as.local.offset + I_BASE;
-            assert(ref <= I_MAX);
+    case OPKIND_LOCAL_INT:
+    case OPKIND_LOCAL_STR:
+    case OPKIND_TEMP_INT: {
+        // TODO: Fix temp offsets.
+        int32_t ref;
+        if (wop.kind == OPKIND_LOCAL_STR) {
+            ref = wop.as.local_offset + CSELF_STR_BASE;
+            assert(ref <= CSELF_STR_MAX);
+        } else {
+            ref = wop.as.local_offset + CSELF_INT_BASE;
+            assert(ref <= CSELF_INT_MAX);
         }
-        case LOCAL_STR: {
-            ref = wop.as.local.offset + S_BASE;
-            assert(ref <= S_MAX);
-        }
-        }
-        return ref;
+        return yobidasi ? ref : ref - CSELF_BASE;
     }
-    case OPKIND_GLOBAL: {
-        VEC_GlobalEntry *vec = NULL;
-        size_t offset = 0;
-        switch (wop.as.global.type) {
-        case GLOBAL_INT: vec = &wc->g_ints; offset = 2000000; break;
-        case GLOBAL_STR: vec = &wc->g_strs; offset = 3000000; break;
-        case GLOBAL_CEV: vec = &wc->g_cevs; offset = 500000; break;
-        case GLOBAL_UDB: vec = &wc->g_udbs; offset = 0; break;
-        case GLOBAL_CDB: vec = &wc->g_cdbs; offset = 0; break;
-        }
+    case OPKIND_GLOBAL_INT: g_vec = &wc->g_ints; offset = NORMAL_VAR_BASE; break;
+    case OPKIND_GLOBAL_STR: g_vec = &wc->g_strs; offset = STRING_VAR_BASE; break;
+    case OPKIND_GLOBAL_CEV: g_vec = &wc->g_cevs; offset = CEV_BASE; break;
+    case OPKIND_GLOBAL_UDB: g_vec = &wc->g_udbs; offset = UDB_BASE; break;
+    case OPKIND_GLOBAL_CDB: g_vec = &wc->g_cdbs; offset = CDB_BASE; break;
     
-        for (size_t i = 0; i < vec->count; i++) {
-            if (sv_equals(wop.as.global.path, vec->at[i].path)
-                && sv_equals(wop.as.global.name, vec->at[i].name)) {
-                    
-                return offset + i;
-            }
-        }
+    case OPKIND_IMM_STR:
+    case OPKIND_INTERP:
         UNREACHABLE;
-        return 0;
-    }
-    case OPKIND_IMM_STR: UNREACHABLE;
     }
 
+    for (size_t i = 0; i < g_vec->count; i++) {
+        if (sv_equals(wop.as.global.path, g_vec->at[i].path)
+            && sv_equals(wop.as.global.name, g_vec->at[i].name)) {
+                
+            return yobidasi ? offset + i : i;
+        }
+    }
+
+    UNREACHABLE;
     return 0;
+}
+
+StringView interpolate(WIRCompiler *wc, WIROperand wop) {
+    assert(is_strlit(wop));
+
+    if (wop.kind == OPKIND_IMM_STR)
+        return wop.as.imm_str;
+
+    assert(wop.kind == OPKIND_INTERP);
+
+    StringView out = SV("");
+    for (size_t i = 0; i < wop.as.interp.count; i++) {
+        WIROperand w = wop.as.interp.at[i];
+
+        char buf[sizeof(int32_t) * 8 + 1];
+        switch (w.kind) {
+        case OPKIND_IMM_STR:
+            out = sv_concat(wc->arena, out, w.as.imm_str);
+            break;
+        case OPKIND_INTERP:
+            out = sv_concat(wc->arena, out, interpolate(wc, w));
+            break;
+        case OPKIND_IMM_INT: {
+            snprintf(buf, sizeof(buf), "%d", w.as.imm_int);
+            out = sv_concat(wc->arena, out, to_sv(buf));
+            break;
+        }
+        case OPKIND_LOCAL_INT:
+        case OPKIND_LOCAL_STR:
+        case OPKIND_TEMP_INT: {
+            // TODO: Maybe the string-processing stuff needs an upgrade.
+            snprintf(buf, sizeof(buf), "\\cself[%d]", resolve(wc, w, false));
+            out = sv_concat(wc->arena, out, to_sv(buf));
+            break;
+        }
+        case OPKIND_GLOBAL_INT: {
+            snprintf(buf, sizeof(buf), "\\v[%d]", resolve(wc, w, false));
+            out = sv_concat(wc->arena, out, to_sv(buf));
+            break;
+        }
+        case OPKIND_GLOBAL_STR: {
+            snprintf(buf, sizeof(buf), "\\s[%d]", resolve(wc, w, false));
+            out = sv_concat(wc->arena, out, to_sv(buf));
+            break;
+        }
+        case OPKIND_GLOBAL_CEV:
+        case OPKIND_GLOBAL_UDB:
+        case OPKIND_GLOBAL_CDB:
+            out = sv_concat(wc->arena, out, w.as.global.name);
+            break;
+        }
+    }
+
+    return out;
 }
 
 static void binop(WIRCompiler *wc, WIRInst_Binop *inst, int cmd_var_op) {
     VEC_int32_t i_vec = VEC_EMPTY;
     
-    int32_t dest = resolve(wc, inst->dest);
-    int32_t a = resolve(wc, inst->a);
-    int32_t b = resolve(wc, inst->b);
+    int32_t dest = resolve(wc, inst->dest, true);
+    int32_t a = resolve(wc, inst->a, true);
+    int32_t b = resolve(wc, inst->b, true);
 
     VEC_PUSH(i_vec, dest, wc->arena);
     VEC_PUSH(i_vec, a, wc->arena);
@@ -170,14 +240,14 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
         VEC_int32_t int_fields = VEC_EMPTY;
         VEC_StringView str_fields = VEC_EMPTY;
         if (inst->src.kind == OPKIND_IMM_STR) {
-            VEC_PUSH(int_fields, resolve(wc, inst->dest), wc->arena);
+            VEC_PUSH(int_fields, resolve(wc, inst->dest, true), wc->arena);
             VEC_PUSH(int_fields, 0, wc->arena);
             VEC_PUSH(int_fields, 0, wc->arena);
             VEC_PUSH(str_fields, inst->src.as.imm_str, wc->arena);
         } else {
-            VEC_PUSH(int_fields, resolve(wc, inst->dest), wc->arena);
+            VEC_PUSH(int_fields, resolve(wc, inst->dest, true), wc->arena);
             VEC_PUSH(int_fields, 0, wc->arena);
-            VEC_PUSH(int_fields, resolve(wc, inst->src), wc->arena);
+            VEC_PUSH(int_fields, resolve(wc, inst->src, true), wc->arena);
         }
         
         cev_push_cmd(wc->cev, CMD_STRING, wc->indent,
@@ -201,7 +271,7 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
         WIRInst_LoopBeginN *inst = (WIRInst_LoopBeginN *)wi;
 
         VEC_int32_t i_vec = VEC_EMPTY;
-        int32_t n = resolve(wc, inst->count);
+        int32_t n = resolve(wc, inst->count, true);
         
         VEC_PUSH(i_vec, n, wc->arena);
         
@@ -228,13 +298,15 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
 
         VEC_int32_t int_fields = VEC_EMPTY;
         for (size_t i = 0; i < inst->iargs.count; i++) {
-            VEC_PUSH(int_fields, resolve(wc, inst->iargs.at[i]), wc->arena);
+            VEC_PUSH(int_fields, resolve(wc, inst->iargs.at[i], true), wc->arena);
         }
 
         VEC_StringView str_fields = VEC_EMPTY;
         for (size_t i = 0; i < inst->sargs.count; i++) {
-            assert(inst->sargs.at[i].kind == OPKIND_IMM_STR);
-            VEC_PUSH(str_fields, inst->sargs.at[i].as.imm_str, wc->arena);
+            WIROperand wop = inst->sargs.at[i];
+            if (is_strlit(wop))
+                VEC_PUSH(str_fields, interpolate(wc, wop), wc->arena);
+            else UNREACHABLE;
         }
 
         if (inst->open_close == -1)
@@ -253,7 +325,7 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
     case INST_WIRInst_Call: {
         WIRInst_Call *inst = (WIRInst_Call *)wi;
 
-        int32_t cev = resolve(wc, inst->cev);
+        int32_t cev = resolve(wc, inst->cev, true);
 
         VEC_int32_t int_args = VEC_EMPTY;
         VEC_int32_t str_ref_args = VEC_EMPTY;
@@ -266,17 +338,17 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
         for (size_t i = 0; i < inst->args.count; i++) {
             WIROperand wop = inst->args.at[i];
             if (is_string(wop)) {
-                if (wop.kind == OPKIND_IMM_STR) {
+                if (is_strlit(wop)) {
                     VEC_PUSH(str_ref_args, 0, wc->arena);
-                    VEC_PUSH(str_lit_args, wop.as.imm_str, wc->arena);
-                    strlit_flags |= (1 << total_str_args);    
+                    VEC_PUSH(str_lit_args, interpolate(wc, wop), wc->arena);
+                    strlit_flags |= (1 << total_str_args);
                 } else {
-                    VEC_PUSH(str_ref_args, resolve(wc, wop), wc->arena);
+                    VEC_PUSH(str_ref_args, resolve(wc, wop, true), wc->arena);
                     VEC_PUSH(str_lit_args, SV(""), wc->arena);
                 }
                 total_str_args++;
             } else {
-                VEC_PUSH(int_args, resolve(wc, wop), wc->arena);
+                VEC_PUSH(int_args, resolve(wc, wop, true), wc->arena);
                 total_int_args++;
             }
         }
@@ -304,7 +376,7 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
             VEC_PUSH(int_fields, str_ref_args.at[i], wc->arena);
 
         if (flags & CALL_STORES_RETURN)
-            VEC_PUSH(int_fields, resolve(wc, inst->dest), wc->arena);
+            VEC_PUSH(int_fields, resolve(wc, inst->dest, true), wc->arena);
 
         cev_push_cmd(wc->cev,
             CMD_CALL_ID, wc->indent,
@@ -448,5 +520,44 @@ void print_wir(WIR *wir) {
             printf(SV_FMT "\n", SV_FMT_VAL(field->name));
         }
     }
+}
 
+bool op_is_local(WIROperand wop) {
+    switch (wop.kind) {
+        case OPKIND_IMM_INT:
+        case OPKIND_IMM_STR:
+        case OPKIND_INTERP:
+        case OPKIND_TEMP_INT:
+        case OPKIND_GLOBAL_INT:
+        case OPKIND_GLOBAL_STR:
+        case OPKIND_GLOBAL_CEV:
+        case OPKIND_GLOBAL_UDB:
+        case OPKIND_GLOBAL_CDB:
+            return false;
+        case OPKIND_LOCAL_INT:
+        case OPKIND_LOCAL_STR:
+            return true;
+    }
+    UNREACHABLE;
+    return false;
+}
+
+bool op_is_global(WIROperand wop) {
+    switch (wop.kind) {
+        case OPKIND_IMM_INT:
+        case OPKIND_IMM_STR:
+        case OPKIND_INTERP:
+        case OPKIND_TEMP_INT:
+        case OPKIND_LOCAL_INT:
+        case OPKIND_LOCAL_STR:
+            return false;
+        case OPKIND_GLOBAL_INT:
+        case OPKIND_GLOBAL_STR:
+        case OPKIND_GLOBAL_CEV:
+        case OPKIND_GLOBAL_UDB:
+        case OPKIND_GLOBAL_CDB:
+            return true;
+    }
+    UNREACHABLE;
+    return false;
 }

@@ -50,7 +50,13 @@ static void error_current(Parser *parser, StringView message) {
 }
 
 static StringView remove_quotes(StringView sv) {
-    return (StringView){ .data = sv.data + 1, .len = sv.len - 2 };
+    if (sv.data[0] == '"') {
+        sv.data++;
+        sv.len--;
+    }
+    if (sv.len > 0 && sv.data[sv.len - 1] == '"')
+        sv.len--;
+    return sv;
 }
 
 static void advance(Parser *parser) {
@@ -118,6 +124,31 @@ static void synchronize(Parser *parser) {
 
 static Expr *expression(Parser *parser);
 
+static Expr *interpolation(Parser *parser) {
+    StringView opening = remove_quotes(parser->previous.text);
+    Expr *expr = expression(parser);
+
+    Expr *next;
+    if (match(parser, TOK_INTERPOLATION)) {
+        next = interpolation(parser);
+    } else {
+        consume(parser, TOK_STRING, SV("Expected end of string interpolation."));
+        ExprStrLit *lit;
+        ALLOC_NODE(lit, parser->previous, ExprStrLit, 
+            (ExprStrLit){ .value = remove_quotes(parser->previous.text) });
+        
+        next = (Expr *)lit;
+    }
+    
+    ExprInterp *interp;
+    ALLOC_NODE(interp, parser->previous, ExprInterp, 
+        (ExprInterp){
+            .opening = opening,
+            .expr = expr, .next = next });
+    
+    return (Expr *)interp;
+}
+
 static Expr *primary(Parser *parser) {
     if (match(parser, TOK_NUMBER)) {
         int32_t number;
@@ -134,7 +165,12 @@ static Expr *primary(Parser *parser) {
         ExprStrLit *expr;
         ALLOC_NODE(expr, parser->previous, ExprStrLit, 
             (ExprStrLit){ .value = remove_quotes(parser->previous.text) });
+        
         return (Expr *)expr;
+    }
+
+    if (match(parser, TOK_INTERPOLATION)) {
+        return interpolation(parser);
     }
 
     if (match(parser, TOK_TRUE) || match(parser, TOK_FALSE)) {

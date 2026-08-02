@@ -1,4 +1,4 @@
-// EXPECT: 123
+// EXPECT: test 3
 
 apply "bin";
 
@@ -7,6 +7,6 @@ import "_test.wod";
 void main() {
     int a = 1;
     int b = 2;
-    output("${a + b}");
+    output("test ${a + b}");
     exit();
 }

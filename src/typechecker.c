@@ -358,6 +358,23 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
         };
         return;
     }
+    case NODE_ExprInterp: {
+        Expr *p = expr;
+        while (p->kind == NODE_ExprInterp) {
+            ExprInterp *e = (ExprInterp *)p;
+            visit_Expr(tc, e->expr);
+            p = e->next;
+        }
+        assert(p->kind == NODE_ExprStrLit);
+        visit_Expr(tc, p);
+
+        expr->type = (WodType){
+            .basetype = TYPE_STR,
+            .is_assignable = false,
+            .is_compile_time = false
+        };
+        return;
+    }
     }
 }
 
@@ -591,7 +608,8 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
                 tc_error(tc, &op->tok,
                     SV("Argument must be string type."));
 
-            if (!op->type.is_compile_time)
+            if (op->kind != NODE_ExprInterp &&
+                !op->type.is_compile_time)
                 tc_error(tc, &op->tok,
                     SV("Argument must be constant expression."));
         }

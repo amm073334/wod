@@ -16,6 +16,7 @@ typedef enum {
     NODE_ExprIntLit,
     NODE_ExprStrLit,
     NODE_ExprBoolLit,
+    NODE_ExprInterp,
     // NODE_ExprArrayLit,
 } ExprKind;
 
@@ -128,6 +129,16 @@ typedef struct {
     VEC_PTR_Expr value;
 } ExprArrayLit;
 
+typedef struct ExprInterp ExprInterp;
+struct ExprInterp {
+    Expr base;
+    StringView opening;
+    Expr *expr;
+    
+    // Should either be a string literal or
+    // another interpolation node.
+    Expr* next;
+};
 
 typedef struct {
     Stmt base;

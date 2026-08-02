@@ -10,53 +10,47 @@
 #define WIR_IMM_I(i) (WIROperand){ .kind = OPKIND_IMM_INT, .as.imm_int = (i) }
 #define WIR_IMM_S(s) (WIROperand){ .kind = OPKIND_IMM_STR, .as.imm_str = (s) }
 
-typedef struct WIROperand {
+typedef struct WIROperand WIROperand;
+VEC_DEF(WIROperand);
+struct WIROperand {
     enum {
         // Immediate.
         OPKIND_IMM_INT,
         OPKIND_IMM_STR,
 
-        // Uses the `local` member; basically a virtual register.
-        OPKIND_LOCAL,
-        OPKIND_TEMP,
+        // Interpolated string. This gets compiled down to a single
+        // string eventually, but it needs to hold an arbitrary number
+        // of operands.
+        OPKIND_INTERP,
+
+        // Uses the `local_offset` member; basically a virtual register.
+        OPKIND_LOCAL_INT,
+        OPKIND_LOCAL_STR,
+        OPKIND_TEMP_INT,
 
         // Uses the `global` field to qualify a top-level identifier.
-        OPKIND_GLOBAL,
+        // Integer variables are assumed to index into 通常変数.
+        OPKIND_GLOBAL_INT,
+        OPKIND_GLOBAL_STR,
+        OPKIND_GLOBAL_CEV,
+        OPKIND_GLOBAL_UDB,
+        OPKIND_GLOBAL_CDB,
     } kind;
 
     union {
         int32_t imm_int;
         StringView imm_str;
 
-        struct {
-            // Determines whether the variable should access
-            // the integer or string CSelfs.
-            enum {
-                LOCAL_INT,
-                LOCAL_STR,
-            } type;
+        VEC_WIROperand interp;
 
-            size_t offset;
-        } local;
+        size_t local_offset;
 
         struct {
-            // Determines which global array the variable should
-            // index into. Integer variables are assumed to
-            // index into 通常変数.
-            enum {
-                GLOBAL_INT,
-                GLOBAL_STR,
-                GLOBAL_CEV,
-                GLOBAL_UDB,
-                GLOBAL_CDB
-            } type;
-
             StringView path;
             StringView name;
         } global;
     } as;
-} WIROperand;
-VEC_DEF(WIROperand);
+};
 
 typedef struct {
     enum {
@@ -231,5 +225,8 @@ typedef struct WIR {
 GameData wir_pass(VEC_Module *modules, Arena *arena);
 void wir_init(WIR *wir);
 void print_wir(WIR *wir);
+
+bool op_is_local(WIROperand wop);
+bool op_is_global(WIROperand wop);
 
 #endif // WOD_WIR_H_

@@ -101,7 +101,7 @@ CFGNode *generate_cfg(VEC_PTR_Stmt *func_body, Arena *arena) {
 // Ad-hoc dangerous function.
 static StringView number_to_sv(size_t a, Arena *arena) {
     char *buf = arena_alloc(arena, 10);
-    sprintf(buf, "%zu", a);
+    snprintf(buf, 10, "%zu", a);
     return to_sv(buf);
 }
 

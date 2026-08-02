@@ -243,6 +243,11 @@ Token scan_token(Lexer *lexer) {
         case '}':
             if (lexer->interpolation_depth > 0) {
                 lexer->interpolation_depth--;
+
+                // Update the token start position to avoid
+                // including the end bracket in the string.
+                lexer->start = lexer->current;
+
                 return string(lexer);
             }
             return make_token(lexer, TOK_RIGHT_BRACE);

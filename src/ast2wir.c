@@ -60,20 +60,9 @@ static void emit_simple(Ast2Wir *aw, int kind) {
 
 static WIROperand tmp_int(Ast2Wir *aw) {
     return (WIROperand){
-        .kind = OPKIND_TEMP,
-        .as.local = { 
-            .type = LOCAL_INT, 
-            .offset = aw->tmp.int_top++ 
-    }};
-}
-
-static WIROperand tmp_str(Ast2Wir *aw) {
-    return (WIROperand){
-        .kind = OPKIND_TEMP,
-        .as.local = { 
-            .type = LOCAL_STR, 
-            .offset = aw->tmp.str_top++ 
-    }};
+        .kind = OPKIND_TEMP_INT,
+        .as.local_offset = aw->tmp.int_top++ 
+    };
 }
 
 static void open_frame(Ast2Wir *aw) {
@@ -177,14 +166,12 @@ static WIROperand _visit_Expr(Ast2Wir *aw, Expr *expr) {
 
         if (sv_is_null(e->sym->top_level_path)) {
             return (WIROperand){
-                .kind = OPKIND_LOCAL,
-                .as.local = {
-                    .type = e->sym->type.basetype == TYPE_STR ?
-                        LOCAL_STR : LOCAL_INT,
-                    .offset = e->sym->offset 
-            }};
+                .kind = e->sym->type.basetype == TYPE_STR ?
+                    OPKIND_LOCAL_STR : OPKIND_LOCAL_INT,
+                .as.local_offset = e->sym->offset 
+            };
         } else {
-            int global_type = 0;
+            int kind = OPKIND_GLOBAL_INT;
             switch (e->sym->type.basetype) {
             case TYPE_NONE:
             case TYPE_ERROR:
@@ -197,21 +184,21 @@ static WIROperand _visit_Expr(Ast2Wir *aw, Expr *expr) {
             case TYPE_DBDATA:
             case TYPE_DBTYPE:
             case TYPE_CEVTYPE:
-                global_type = GLOBAL_INT;
+                kind = OPKIND_GLOBAL_INT;
                 break;
             case TYPE_STR:
-                global_type = GLOBAL_STR;
+                kind = OPKIND_GLOBAL_STR;
                 break;
             case TYPE_FUNC:
-                global_type = GLOBAL_CEV;
+                kind = OPKIND_GLOBAL_CEV;
                 break;
-            case TYPE_ARRAY: UNIMPLEMENTED;
+            case TYPE_ARRAY:
+                UNIMPLEMENTED;
             }
 
             return (WIROperand){
-                .kind = OPKIND_GLOBAL,
+                .kind = kind,
                 .as.global = {
-                    .type = global_type,
                     .path = e->sym->top_level_path,
                     .name = e->sym->name
             }};
@@ -299,8 +286,7 @@ static WIROperand _visit_Expr(Ast2Wir *aw, Expr *expr) {
             return dest;
         }
         case TOK_AMP: {
-            assert(right.kind == OPKIND_LOCAL
-                || right.kind == OPKIND_GLOBAL);
+            assert(op_is_local(right) || op_is_global(right));
             return right;
         }
         default: UNREACHABLE;
@@ -339,6 +325,24 @@ static WIROperand _visit_Expr(Ast2Wir *aw, Expr *expr) {
         ExprBoolLit *e = (ExprBoolLit *)expr;
         return WIR_IMM_I(e->value);
     }
+    case NODE_ExprInterp: {
+        VEC_WIROperand results = VEC_EMPTY;
+
+        Expr *p = expr;
+        while (p->kind == NODE_ExprInterp) {
+            ExprInterp *e = (ExprInterp *)p;
+            VEC_PUSH(results, WIR_IMM_S(e->opening), aw->arena);
+            VEC_PUSH(results, visit_Expr(aw, e->expr), aw->arena);
+            p = e->next;
+        }
+        assert(p->kind == NODE_ExprStrLit);
+        VEC_PUSH(results, visit_Expr(aw, p), aw->arena);
+
+        return (WIROperand){
+            .kind = OPKIND_INTERP,
+            .as.interp = results
+        };
+    }
     }
 
     UNREACHABLE;
@@ -351,12 +355,8 @@ static WIROperand visit_Expr(Ast2Wir *aw, Expr *expr) {
     aw->tmp = top;
 
     // The temporary result of a calculation needs a slot to hold it.
-    if (operand.kind == OPKIND_TEMP) {
-        switch (operand.as.local.type) {
-        case LOCAL_INT: aw->tmp.int_top++; break;
-        case LOCAL_STR: aw->tmp.str_top++; break;
-        }
-    }
+    if (operand.kind == OPKIND_TEMP_INT)
+        aw->tmp.int_top++;
 
     return operand;
 }
@@ -390,11 +390,9 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
                 init = visit_Expr(aw, s->initializer);
                 emit_str(aw,
                     (WIROperand){
-                        .kind = OPKIND_LOCAL,
-                        .as.local = {
-                            .type = LOCAL_STR,
-                            .offset = s->sym->offset
-                    }},
+                        .kind = OPKIND_LOCAL_STR,
+                        .as.local_offset = s->sym->offset
+                    },
                     init);
             }
 
@@ -418,11 +416,9 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
                 init = visit_Expr(aw, s->initializer);
                 emit_binop(aw,
                     (WIROperand){
-                        .kind = OPKIND_LOCAL,
-                        .as.local = {
-                            .type = LOCAL_INT,
-                            .offset = s->sym->offset
-                    }},
+                        .kind = OPKIND_LOCAL_INT,
+                        .as.local_offset = s->sym->offset
+                    },
                     init, WIR_IMM_I(0), WIR_ADD);
             }
 
