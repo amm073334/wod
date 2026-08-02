@@ -622,41 +622,35 @@ static size_t find_module(VEC_Module *modules, StringView path) {
 static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
     ProgramAST *ast = tc->modules->at[module_index].ast;
 
-    VEC_PTR_Environment unqualified_imports = VEC_EMPTY;
-    Environment *top_level_env = env_new_assert(NULL, tc->arena);
+    tc->unqualified_imports = (VEC_PTR_Environment)VEC_EMPTY;
+    tc->top_level_env = env_new_assert(NULL, tc->arena);
+    tc->current_env = tc->top_level_env;
     
     // Handle imports. If an import isn't already typechecked, then recursively
     // check through that file first.
     for (size_t i = 0; i < ast->imports.count; i++) {
         Import s = ast->imports.at[i];
 
-        // Recursively typecheck the file if it has not been already.
         // Assumes that import paths have been canonicalized.
         // Assumes that there are no cyclic imports.
         size_t sub_index = find_module(tc->modules, s.path);
         Environment *sub_env = tc->modules->at[sub_index].env;
-
-        if (!sub_env) {
-            sub_env = typecheck_file(tc, sub_index);
-            if (!sub_env) tc->had_error = true;
-            
-            tc->modules->at[sub_index].env = sub_env;
-        }
+        assert(sub_env);
 
         // Add import's top-level environment to the list.
         // If the import's environment is already in the list, error.
-        for (size_t j = 0; j < unqualified_imports.count; j++) {
-            if (unqualified_imports.at[j] == sub_env) {
+        for (size_t j = 0; j < tc->unqualified_imports.count; j++) {
+            if (tc->unqualified_imports.at[j] == sub_env) {
                 tc_error(tc, &s.tok, SV("Duplicate import."));
                 goto skip;
             }
         }
-        VEC_PUSH(unqualified_imports, sub_env, tc->arena);
+        VEC_PUSH(tc->unqualified_imports, sub_env, tc->arena);
 
         // If import has an alias, insert the symbol into the environment.
         if (sv_is_null(s.alias)) continue;
         
-        Symbol *sym = env_insert(top_level_env, s.alias,
+        Symbol *sym = env_insert(tc->top_level_env, s.alias,
             (WodType){ .basetype = TYPE_MODULE,
                 .is_assignable = false, .module_env = sub_env }, tc->arena);
 
@@ -671,13 +665,6 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
     // If any imports failed, just exit early to avoid errors later on
     // with a bunch of symbols not being found.
     if (tc->had_error) return NULL;
-
-    // From this point on, it is guaranteed that we won't recurse into
-    // any other files, so it is safe to set typechecker fields without
-    // them being overwritten.
-    tc->unqualified_imports = unqualified_imports;
-    tc->top_level_env = top_level_env;
-    tc->current_env = tc->top_level_env;
 
     // Do a pass to add all the top-level symbols.
     for (size_t i = 0; i < ast->stmts.count; i++) {
@@ -786,7 +773,7 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
         }
     }
 
-    if (module_index == 0 && !env_find(tc->top_level_env, SV("main"))) {
+    if (module_index == tc->modules->count - 1 && !env_find(tc->top_level_env, SV("main"))) {
         tc->had_error = true;
         source_error(*tc->modules->at[0].source, SV("No 'main' function."));
     }
@@ -797,6 +784,9 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
         if (stmt->kind == NODE_StmtFuncDecl)
             visit_Stmt(tc, stmt);
     }
+
+    // Update module info.
+    tc->modules->at[module_index].env = tc->top_level_env;
 
     return tc->had_error ? NULL : tc->top_level_env;
 }
@@ -811,8 +801,9 @@ bool typecheck_modules(VEC_Module *modules, Arena *arena) {
     tc.current_func = NULL;
     tc.modules = modules;
     
-    if (typecheck_file(&tc, 0))
-        return true;
-    else
-        return false;
+    for (size_t i = 0; i < modules->count; i++) {
+        typecheck_file(&tc, i);
+    }
+
+    return !tc.had_error;
 }

@@ -375,11 +375,8 @@ GameData wir_pass(VEC_Module *modules, Arena *arena) {
     };
     gd_init(&wc.gd);
     
-    // Iterate backwards. Assuming that the modules list is
-    // a topological sort of the import graph, this should
-    // register every top-level symbol's offset before its use.
     for (size_t i = 0; i < modules->count; i++) {
-        compile_wir(&wc, &modules->at[modules->count - i - 1]);
+        compile_wir(&wc, &modules->at[i]);
     }
 
     // Assign entry point.

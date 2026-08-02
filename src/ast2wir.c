@@ -579,7 +579,7 @@ void ast2wir_pass(VEC_Module *modules, Arena *arena) {
         };
         wir_init(aw.wir);
 
-        Module *mod = &modules->at[modules->count - i - 1];
+        Module *mod = &modules->at[i];
         for (size_t j = 0; j < mod->ast->stmts.count; j++) {
             visit_Stmt(&aw, mod->ast->stmts.at[j]);
             assert(aw.local_frames.count == 0);

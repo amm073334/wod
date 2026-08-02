@@ -38,7 +38,7 @@ int main(int argc, const char *argv[]) {
 
     // If an `apply` directory is specified, then apply the text output there.
     // Otherwise, just compile output into the directory the source file is in.
-    ProgramAST *main_file_ast = modules.at[0].ast;
+    ProgramAST *main_file_ast = modules.at[modules.count - 1].ast;
     if (sv_is_null(main_file_ast->apply)) {
         StringView directory = get_directory(to_sv(argv[0]), &arena);
         gd_write_dir(&gd, directory);
