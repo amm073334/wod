@@ -41,6 +41,7 @@ void lexer_init(Lexer *lexer, Source source) {
     lexer->current = source.text.data;
     lexer->line = 1;
     lexer->col = 1;
+    lexer->interpolation_depth = 0;
 }
 
 static bool is_alpha(char c) {
@@ -111,26 +112,42 @@ static Token error_token(Lexer *lexer, const char *message) {
         .loc = {
             .source = lexer->source,
             .line = lexer->line,
-            .column = lexer->col,
+            .column = lexer->col - 1,
         },
     };
 }
 
 static Token string(Lexer *lexer) {
-    while (peek(lexer) != '"' && !is_at_end(lexer)) {
-        if (peek(lexer) == '\n')
+    while (!is_at_end(lexer)) {
+        char c = peek(lexer);
+        if (c == '"') {
+            // Move past end quote.
+            advance(lexer);
+
+            return make_token(lexer, TOK_STRING);
+        }
+
+        if (c == '\r' || c == '\n')
             return error_token(lexer, "Unterminated string.");
-                
+    
+        if (c == '$' && peek_next(lexer) == '{') {
+            lexer->interpolation_depth++;
+
+            // Make the token before advancing past the
+            // dollar sign so that it's not included in the token.
+            Token token = make_token(lexer, TOK_INTERPOLATION);
+            advance(lexer);
+
+            // Skip the bracket.
+            advance(lexer);
+
+            return token;
+        }
+
         advance(lexer);
     }
 
-    if (is_at_end(lexer))
-        return error_token(lexer, "Unterminated string.");
-
-    // Move past end quote.
-    advance(lexer);
-
-    return make_token(lexer, TOK_STRING);
+    return error_token(lexer, "Unterminated string.");
 }
 
 static TokenType identifier_type(Lexer *lexer) {
@@ -223,7 +240,12 @@ Token scan_token(Lexer *lexer) {
         case '(': return make_token(lexer, TOK_LEFT_PAREN);
         case ')': return make_token(lexer, TOK_RIGHT_PAREN);
         case '{': return make_token(lexer, TOK_LEFT_BRACE);
-        case '}': return make_token(lexer, TOK_RIGHT_BRACE);
+        case '}':
+            if (lexer->interpolation_depth > 0) {
+                lexer->interpolation_depth--;
+                return string(lexer);
+            }
+            return make_token(lexer, TOK_RIGHT_BRACE);
         case '[': return make_token(lexer, TOK_LEFT_BRACK);
         case ']': return make_token(lexer, TOK_RIGHT_BRACK);
         case ',': return make_token(lexer, TOK_COMMA);

@@ -33,6 +33,14 @@ static void parse_error(Parser *parser, Token *token, StringView message) {
     error(token->loc, token->text.len, message);
 }
 
+static void lex_error(Parser *parser, Location loc, StringView message) {
+    if (parser->panic_mode) return;
+    parser->panic_mode = true;
+    parser->had_error = true;
+
+    error(loc, 1, message);
+}
+
 static void error_previous(Parser *parser, StringView message) {
     parse_error(parser, &parser->previous, message);
 }
@@ -51,7 +59,7 @@ static void advance(Parser *parser) {
         parser->current = scan_token(&parser->lexer);
         if (parser->current.type != TOK_ERROR) break;
 
-        error_previous(parser, parser->current.text);
+        lex_error(parser, parser->current.loc, parser->current.text);
     }
 }
 

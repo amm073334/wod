@@ -44,6 +44,11 @@ typedef enum {
     // Literals.
     TOK_IDENTIFIER, TOK_NUMBER, TOK_STRING,
 
+    // Used for string interpolation.
+    // Idea borrowed from https://github.com/wren-lang/wren/blob/main/src/vm/wren_compiler.c
+    // (and described in https://github.com/munificent/craftinginterpreters/blob/master/note/answers/chapter16_scanning.md).
+    TOK_INTERPOLATION,
+
     TOK_ERROR, TOK_EOF
 } TokenType;
 
@@ -56,6 +61,8 @@ typedef struct {
 typedef struct {
     Source source;
     
+    size_t interpolation_depth;
+
     const char *start;
     const char *current;
     size_t line;
