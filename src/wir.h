@@ -54,6 +54,7 @@ struct WIROperand {
 
 typedef struct {
     enum {
+        INST_TOMBSTONE,
         INST_WIRInst_Binop,
         INST_WIRInst_StrAssign,
         INST_WIRInst_IfBegin,

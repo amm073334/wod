@@ -385,11 +385,41 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
         );
         break;
     }
+    case INST_TOMBSTONE: break;
     default:
         UNIMPLEMENTED;
+    }        
 }
+
+// If the temporary result of a calculation is moved directly into a
+// variable, rewrite to store the result directly into the variable.
+static void temp_copy_propagation(WIRCev *wcev) {
+    for (size_t i = 0; i < wcev->insts.count; i++) {
+        if (wcev->insts.at[i]->kind != INST_WIRInst_Binop)
+            continue;
         
+        WIRInst_Binop *inst = (WIRInst_Binop *)wcev->insts.at[i]; 
+
+        if (inst->op != WIR_ADD) continue;
+        if (inst->a.kind != OPKIND_TEMP_INT) continue;
+        if (inst->b.kind != OPKIND_IMM_INT) continue;
+        if (inst->b.as.imm_int != 0) continue;
+
+        assert(i > 0);
+        WIRInst *prev = wcev->insts.at[i - 1];
+
+        if (prev->kind == INST_WIRInst_Binop) {
+            WIRInst_Binop *p = (WIRInst_Binop *)prev;
+            if (p->dest.kind == OPKIND_TEMP_INT
+                && p->dest.as.local_offset == inst->a.as.local_offset) {
+
+                p->dest = inst->dest;
+                inst->base.kind = INST_TOMBSTONE;
+            }
+        }
+    }
 }
+
 
 static void compile_wir(WIRCompiler *wc, Module *mod) {
     WIR *wir = mod->wir;
@@ -423,6 +453,8 @@ static void compile_wir(WIRCompiler *wc, Module *mod) {
         wc->indent = 0;
 
         WIRCev *wcev = &wir->g_cevs.at[i];
+
+        temp_copy_propagation(wcev);
 
         for (size_t j = 0; j < wcev->insts.count; j++) {
             compile_inst(wc, wcev->insts.at[j]);
@@ -473,8 +505,54 @@ void wir_init(WIR *wir) {
     VEC_INIT(wir->g_cdbs);
 }
 
-void print_wir(WIR *wir) {
+static void print_wop(WIROperand wop) {
+    switch (wop.kind) {
+        case OPKIND_IMM_INT:
+            printf(" %d", wop.as.imm_int);
+            return;
+        case OPKIND_IMM_STR:
+            printf(" \"" SV_FMT "\"", SV_FMT_VAL(wop.as.imm_str));
+            return;
+        case OPKIND_INTERP:
+            printf(" ${");
+            for (size_t i = 0; i < wop.as.interp.count; i++) {
+                print_wop(wop.as.interp.at[i]);
+            }
+            printf("}");
+            return;
+        case OPKIND_LOCAL_INT:
+            printf(" $LI(%zu)", wop.as.local_offset);
+            return;
+        case OPKIND_LOCAL_STR:
+            printf(" $LS(%zu)", wop.as.local_offset);
+            return;
+        case OPKIND_TEMP_INT:
+            printf(" $T(%zu)", wop.as.local_offset);
+            return;
+        case OPKIND_GLOBAL_INT:
+            printf(" $GINT[" SV_FMT ":" SV_FMT "]",
+                SV_FMT_VAL(wop.as.global.path), SV_FMT_VAL(wop.as.global.name));
+            return;
+        case OPKIND_GLOBAL_STR:
+            printf(" $GSTR[" SV_FMT ":" SV_FMT "]",
+                SV_FMT_VAL(wop.as.global.path), SV_FMT_VAL(wop.as.global.name));
+            return;
+        case OPKIND_GLOBAL_CEV:
+            printf(" $GCEV[" SV_FMT ":" SV_FMT "]",
+                SV_FMT_VAL(wop.as.global.path), SV_FMT_VAL(wop.as.global.name));
+            return;
+        case OPKIND_GLOBAL_UDB:
+            printf(" $GUDB[" SV_FMT ":" SV_FMT "]",
+                SV_FMT_VAL(wop.as.global.path), SV_FMT_VAL(wop.as.global.name));
+            return;
+        case OPKIND_GLOBAL_CDB:
+            printf(" $GCDB[" SV_FMT ":" SV_FMT "]",
+                SV_FMT_VAL(wop.as.global.path), SV_FMT_VAL(wop.as.global.name));
+            return;
+    }
+}
 
+void print_wir(WIR *wir) {
     for (size_t cev = 0; cev < wir->g_cevs.count; cev++) {
         VEC_PTR_WIRInst arr = wir->g_cevs.at[cev].insts;
 
@@ -483,28 +561,22 @@ void print_wir(WIR *wir) {
         for (size_t i = 0; i < arr.count; i++) {
             WIRInst *inst = arr.at[i];
             printf("[OP %d]:", inst->kind);
-            // for (size_t j = 0; j < inst.operands.count; j++) {
-            //     WIROperand operand = inst.operands.at[j];
-            //     switch (operand.kind) {
-            //     case OPKIND_IMM:
-            //         if (operand.type == OPTYPE_INT)
-            //             printf(" %d", operand.as.imm_int);
-            //         else 
-            //             printf(" \"" SV_FMT "\"", SV_FMT_VAL(operand.as.imm_str));
-            //         break;
-            //     case OPKIND_GLOBAL:
-            //         printf(" " SV_FMT ":" SV_FMT,
-            //             SV_FMT_VAL(operand.as.top.path),
-            //             SV_FMT_VAL(operand.as.top.name));
-            //         break;
-            //     case OPKIND_LOCAL:
-            //         printf(" $L%zu", operand.as.offset);
-            //         break;
-            //     case OPKIND_TMP:
-            //         printf(" $T%zu", operand.as.offset);
-            //         break;
-            //     }
-            // }
+            switch (inst->kind) {
+            case INST_WIRInst_Binop: {
+                WIRInst_Binop *in = (WIRInst_Binop *)inst;
+                printf(" %d", in->op);
+                print_wop(in->dest);
+                print_wop(in->a);
+                print_wop(in->b);
+                break;
+            }
+            case INST_TOMBSTONE:
+                printf(" X");
+                break;
+            default:
+                printf(" (print not implemented)");
+                break;
+            }
             printf("\n");
         }
         printf("\n");
