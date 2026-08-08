@@ -196,7 +196,6 @@ static int32_t resolve(WIRCompiler *wc, WIROperand wop) {
 
     switch (wop.kind) {
     case OPKIND_IMM_INT: {
-        assert(wop.as.imm_int < RC_THRESHOLD);
         return wop.as.imm_int;
     }
     // For the time being, don't allow addresses to escape the CSelf space.
@@ -1050,6 +1049,16 @@ void print_wir(WIR *wir) {
                 for (size_t arg = 0; arg < in->args.count; arg++) {
                     print_wop(in->args.at[arg]);
                 }
+                break;
+            }
+            case E_INST_Cmd: {
+                printf("cmd");
+                INST_Cmd *in = (INST_Cmd *)inst;
+                printf(" %d %d", in->op, in->open_close);
+                for (size_t arg = 0; arg < in->iargs.count; arg++)
+                    print_wop(in->iargs.at[arg]);
+                for (size_t arg = 0; arg < in->sargs.count; arg++)
+                    print_wop(in->sargs.at[arg]);
                 break;
             }
             case E_INST_TOMBSTONE:

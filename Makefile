@@ -27,7 +27,7 @@ test.exe: wodc.exe
 	@ cl $(CFLAGS) $(WARNINGS) /Fo$(BUILD_DIR)\ $(SOURCE_DIR)/test.c $(OBJECTS) /link /out:$@
 
 test: test.exe
-	@ -$(foreach test,$(TESTS),.\test.exe $(test)&)
+	@ .\test.exe -f test
 
 clean:
 	@ if exist build rmdir /s /q build

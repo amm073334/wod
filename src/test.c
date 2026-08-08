@@ -4,9 +4,10 @@
 #include "common.h"
 #include "windows.h"
 
-#define EXPECT_STR      "// EXPECT: "
-#define TEST_OUTPUT     "test\\bin\\test_output"
-#define TEST_TIMEOUT_MS 10000
+#define EXPECT_STR          "// EXPECT: "
+#define BIN_DIR             "test\\bin\\"
+#define TEST_OUTPUT_FILE    "test_output"
+#define TEST_TIMEOUT_MS     10000
 
 #define C_RED "\x1b[31m"
 #define C_GRN "\x1b[32m"
@@ -151,7 +152,10 @@ bool test_one(const char *input_file) {
     // Get a handle to the test output file.
     HANDLE file_handle;
     {
-        file_handle = CreateFileA(TEST_OUTPUT,
+        StringView test_output = sv_concat(&arena,
+            to_sv(base_dir), SV("\\" BIN_DIR TEST_OUTPUT_FILE));
+
+        file_handle = CreateFileA(test_output.data,
             GENERIC_READ, FILE_SHARE_WRITE, NULL,
             CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 
@@ -168,7 +172,7 @@ bool test_one(const char *input_file) {
         si.cb = sizeof(si);
         ZeroMemory(&pi, sizeof(pi));
     
-        StringView game = sv_concat(&arena, to_sv(base_dir), SV("test\\bin\\Game.exe"));
+        StringView game = sv_concat(&arena, to_sv(base_dir), SV("\\" BIN_DIR "Game.exe"));
         if (!CreateProcessA(game.data,
             NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
     
@@ -207,6 +211,7 @@ bool test_one(const char *input_file) {
     passed(file_name);
 
     close_proc:
+    CloseHandle(file_handle);
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
 

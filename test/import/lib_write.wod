@@ -1,6 +1,6 @@
 // EXPECT: a
 
-apply "bin";
+apply "../bin";
 
 import "../_test.wod";
 
