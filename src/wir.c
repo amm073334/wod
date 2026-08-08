@@ -99,10 +99,10 @@ static void disable_rc(Arena *arena, WIRCev *wcev, size_t *inst_pos, WIROperand 
     
     size_t temp = i_temp(wcev);
 
-    INST_Binop *inst = arena_alloc_assert(arena, sizeof(INST_Binop));
+    WIRInst_Binop *inst = arena_alloc_assert(arena, sizeof(WIRInst_Binop));
 
-    *inst = (INST_Binop){
-        .base.kind = E_INST_Binop,
+    *inst = (WIRInst_Binop){
+        .base.kind = _WIRInst_Binop,
         .dest = { .kind = OPKIND_TEMP_INT, .as.offset = temp },
         .op = WIR_SUB,
         .a = { .kind = OPKIND_IMM_INT, .as.imm_int = 0 },
@@ -125,41 +125,41 @@ static void disable_rc_pass(Arena *arena, WIRCev *wcev) {
     for (size_t i = 0; i < wcev->insts.count; i++) {
         WIRInst *wirinst = wcev->insts.at[i];
         switch (wirinst->kind) {
-        case E_INST_TOMBSTONE:
-        case E_INST_PushInt:
-        case E_INST_PushStr:
-        case E_INST_PopIntN:
-        case E_INST_PopStrN:
-        case E_INST_StrAssign:
-        case E_INST_Cmd:
-        case E_INST_ReturnVoid:
-        case E_INST_Continue:
-        case E_INST_Break:
-        case E_INST_LoopEnd:
-        case E_INST_Else:
-        case E_INST_IfEnd:
-        case E_INST_Label:
-        case E_INST_Goto:
-        case E_INST_LoopBegin:
+        case _WIRInst_TOMBSTONE:
+        case _WIRInst_PushInt:
+        case _WIRInst_PushStr:
+        case _WIRInst_PopIntN:
+        case _WIRInst_PopStrN:
+        case _WIRInst_StrAssign:
+        case _WIRInst_Cmd:
+        case _WIRInst_ReturnVoid:
+        case _WIRInst_Continue:
+        case _WIRInst_Break:
+        case _WIRInst_LoopEnd:
+        case _WIRInst_Else:
+        case _WIRInst_IfEnd:
+        case _WIRInst_Label:
+        case _WIRInst_Goto:
+        case _WIRInst_LoopBegin:
             break;
-        case E_INST_Binop: {
-            INST_Binop *inst = (INST_Binop *)wirinst;
+        case _WIRInst_Binop: {
+            WIRInst_Binop *inst = (WIRInst_Binop *)wirinst;
             disable_rc(arena, wcev, &i, &inst->a);
             disable_rc(arena, wcev, &i, &inst->b);
             break;
         }
-        case E_INST_IfBegin: {
-            INST_IfBegin *inst = (INST_IfBegin *)wirinst;
+        case _WIRInst_IfBegin: {
+            WIRInst_IfBegin *inst = (WIRInst_IfBegin *)wirinst;
             disable_rc(arena, wcev, &i, &inst->cond);
             break;
         }
-        case E_INST_LoopBeginN: {
-            INST_LoopBeginN *inst = (INST_LoopBeginN *)wirinst;
+        case _WIRInst_LoopBeginN: {
+            WIRInst_LoopBeginN *inst = (WIRInst_LoopBeginN *)wirinst;
             disable_rc(arena, wcev, &i, &inst->count);
             break;
         }
-        case E_INST_Call: {
-            INST_Call *inst = (INST_Call *)wirinst;
+        case _WIRInst_Call: {
+            WIRInst_Call *inst = (WIRInst_Call *)wirinst;
             // Disabling reference conversion for the destination
             // is unnecessary, assuming that you can't store a
             // value into an immediate.
@@ -167,20 +167,20 @@ static void disable_rc_pass(Arena *arena, WIRCev *wcev) {
                 disable_rc(arena, wcev, &arg, &inst->args.at[arg]);
             break;
         }
-        case E_INST_ReturnVal: {
-            INST_ReturnVal *inst = (INST_ReturnVal *)wirinst;
+        case _WIRInst_ReturnVal: {
+            WIRInst_ReturnVal *inst = (WIRInst_ReturnVal *)wirinst;
             disable_rc(arena, wcev, &i, &inst->val);
             break;
         }
-        case E_INST_DBLoad: {
-            INST_DBLoad *inst = (INST_DBLoad *)wirinst;
+        case _WIRInst_DBLoad: {
+            WIRInst_DBLoad *inst = (WIRInst_DBLoad *)wirinst;
             disable_rc(arena, wcev, &i, &inst->db_type);
             disable_rc(arena, wcev, &i, &inst->db_data);
             disable_rc(arena, wcev, &i, &inst->db_field);
             break;
         }
-        case E_INST_DBStore: {
-            INST_DBStore *inst = (INST_DBStore *)wirinst;
+        case _WIRInst_DBStore: {
+            WIRInst_DBStore *inst = (WIRInst_DBStore *)wirinst;
             disable_rc(arena, wcev, &i, &inst->db_type);
             disable_rc(arena, wcev, &i, &inst->db_data);
             disable_rc(arena, wcev, &i, &inst->db_field);
@@ -459,74 +459,74 @@ static void temp_alloc_pass(Arena *arena, WIRCev *wcev, VEC_int32_t *i_map, VEC_
     for (size_t i = 0; i < wcev->insts.count; i++) {
         WIRInst *wirinst = wcev->insts.at[i];
         switch (wirinst->kind) {
-        case E_INST_TOMBSTONE:
-        case E_INST_PushInt:
-        case E_INST_PushStr:
-        case E_INST_PopIntN:
-        case E_INST_PopStrN:
-        case E_INST_Cmd:
-        case E_INST_ReturnVoid:
-        case E_INST_Continue:
-        case E_INST_Break:
-        case E_INST_LoopEnd:
-        case E_INST_Else:
-        case E_INST_IfEnd:
-        case E_INST_LoopBegin:
+        case _WIRInst_TOMBSTONE:
+        case _WIRInst_PushInt:
+        case _WIRInst_PushStr:
+        case _WIRInst_PopIntN:
+        case _WIRInst_PopStrN:
+        case _WIRInst_Cmd:
+        case _WIRInst_ReturnVoid:
+        case _WIRInst_Continue:
+        case _WIRInst_Break:
+        case _WIRInst_LoopEnd:
+        case _WIRInst_Else:
+        case _WIRInst_IfEnd:
+        case _WIRInst_LoopBegin:
             break;
-        case E_INST_StrAssign: {
-            INST_StrAssign *inst = (INST_StrAssign *)wirinst;
+        case _WIRInst_StrAssign: {
+            WIRInst_StrAssign *inst = (WIRInst_StrAssign *)wirinst;
             update_interval(&i_its, &s_its, i, inst->dest);
             update_interval(&i_its, &s_its, i, inst->src);
             break;
         }
-        case E_INST_Label: {
-            INST_Label *inst = (INST_Label *)wirinst;
+        case _WIRInst_Label: {
+            WIRInst_Label *inst = (WIRInst_Label *)wirinst;
             update_interval(&i_its, &s_its, i, inst->name);
             break;
         }
-        case E_INST_Goto: {
-            INST_Goto *inst = (INST_Goto *)wirinst;
+        case _WIRInst_Goto: {
+            WIRInst_Goto *inst = (WIRInst_Goto *)wirinst;
             update_interval(&i_its, &s_its, i, inst->name);
             break;
         }
-        case E_INST_Binop: {
-            INST_Binop *inst = (INST_Binop *)wirinst;
+        case _WIRInst_Binop: {
+            WIRInst_Binop *inst = (WIRInst_Binop *)wirinst;
             update_interval(&i_its, &s_its, i, inst->dest);
             update_interval(&i_its, &s_its, i, inst->a);
             update_interval(&i_its, &s_its, i, inst->b);
             break;
         }
-        case E_INST_IfBegin: {
-            INST_IfBegin *inst = (INST_IfBegin *)wirinst;
+        case _WIRInst_IfBegin: {
+            WIRInst_IfBegin *inst = (WIRInst_IfBegin *)wirinst;
             update_interval(&i_its, &s_its, i, inst->cond);
             break;
         }
-        case E_INST_LoopBeginN: {
-            INST_LoopBeginN *inst = (INST_LoopBeginN *)wirinst;
+        case _WIRInst_LoopBeginN: {
+            WIRInst_LoopBeginN *inst = (WIRInst_LoopBeginN *)wirinst;
             update_interval(&i_its, &s_its, i, inst->count);
             break;
         }
-        case E_INST_Call: {
-            INST_Call *inst = (INST_Call *)wirinst;
+        case _WIRInst_Call: {
+            WIRInst_Call *inst = (WIRInst_Call *)wirinst;
             update_interval(&i_its, &s_its, i, inst->dest);
             for (size_t arg = 0; arg < inst->args.count; arg++)
                 update_interval(&i_its, &s_its, i, inst->args.at[arg]);
             break;
         }
-        case E_INST_ReturnVal: {
-            INST_ReturnVal *inst = (INST_ReturnVal *)wirinst;
+        case _WIRInst_ReturnVal: {
+            WIRInst_ReturnVal *inst = (WIRInst_ReturnVal *)wirinst;
             update_interval(&i_its, &s_its, i, inst->val);
             break;
         }
-        case E_INST_DBLoad: {
-            INST_DBLoad *inst = (INST_DBLoad *)wirinst;
+        case _WIRInst_DBLoad: {
+            WIRInst_DBLoad *inst = (WIRInst_DBLoad *)wirinst;
             update_interval(&i_its, &s_its, i, inst->db_type);
             update_interval(&i_its, &s_its, i, inst->db_data);
             update_interval(&i_its, &s_its, i, inst->db_field);
             break;
         }
-        case E_INST_DBStore: {
-            INST_DBStore *inst = (INST_DBStore *)wirinst;
+        case _WIRInst_DBStore: {
+            WIRInst_DBStore *inst = (WIRInst_DBStore *)wirinst;
             update_interval(&i_its, &s_its, i, inst->db_type);
             update_interval(&i_its, &s_its, i, inst->db_data);
             update_interval(&i_its, &s_its, i, inst->db_field);
@@ -563,90 +563,90 @@ static void temp_alloc_pass(Arena *arena, WIRCev *wcev, VEC_int32_t *i_map, VEC_
     for (size_t i = 0; i < wcev->insts.count; i++) {
         WIRInst *wirinst = wcev->insts.at[i];
         switch (wirinst->kind) {
-        case E_INST_PushInt:
+        case _WIRInst_PushInt:
             i_top++;
             break;
-        case E_INST_PushStr:
+        case _WIRInst_PushStr:
             s_top++;
             break;
-        case E_INST_PopIntN: {
-            INST_PopIntN *inst = (INST_PopIntN *)wirinst;
+        case _WIRInst_PopIntN: {
+            WIRInst_PopIntN *inst = (WIRInst_PopIntN *)wirinst;
             i_top -= inst->n;
             break;
         }
-        case E_INST_PopStrN: {
-            INST_PopStrN *inst = (INST_PopStrN *)wirinst;
+        case _WIRInst_PopStrN: {
+            WIRInst_PopStrN *inst = (WIRInst_PopStrN *)wirinst;
             s_top -= inst->n;
             break;
         }
-        case E_INST_Binop: {
-            INST_Binop *inst = (INST_Binop *)wirinst;
+        case _WIRInst_Binop: {
+            WIRInst_Binop *inst = (WIRInst_Binop *)wirinst;
             update_map(i_map, i_top, s_map, s_top, inst->dest);
             update_map(i_map, i_top, s_map, s_top, inst->a);
             update_map(i_map, i_top, s_map, s_top, inst->b);
             break;
         }
-        case E_INST_IfBegin: {
-            INST_IfBegin *inst = (INST_IfBegin *)wirinst;
+        case _WIRInst_IfBegin: {
+            WIRInst_IfBegin *inst = (WIRInst_IfBegin *)wirinst;
             update_map(i_map, i_top, s_map, s_top, inst->cond);
             break;
         }
-        case E_INST_LoopBeginN: {
-            INST_LoopBeginN *inst = (INST_LoopBeginN *)wirinst;
+        case _WIRInst_LoopBeginN: {
+            WIRInst_LoopBeginN *inst = (WIRInst_LoopBeginN *)wirinst;
             update_map(i_map, i_top, s_map, s_top, inst->count);
             break;
         }
-        case E_INST_Call: {
-            INST_Call *inst = (INST_Call *)wirinst;
+        case _WIRInst_Call: {
+            WIRInst_Call *inst = (WIRInst_Call *)wirinst;
             update_map(i_map, i_top, s_map, s_top, inst->dest);
             for (size_t arg = 0; arg < inst->args.count; arg++)
                 update_map(i_map, i_top, s_map, s_top, inst->args.at[arg]);
             break;
         }
-        case E_INST_ReturnVal: {
-            INST_ReturnVal *inst = (INST_ReturnVal *)wirinst;
+        case _WIRInst_ReturnVal: {
+            WIRInst_ReturnVal *inst = (WIRInst_ReturnVal *)wirinst;
             update_map(i_map, i_top, s_map, s_top, inst->val);
             break;
         }
-        case E_INST_DBLoad: {
-            INST_DBLoad *inst = (INST_DBLoad *)wirinst;
+        case _WIRInst_DBLoad: {
+            WIRInst_DBLoad *inst = (WIRInst_DBLoad *)wirinst;
             update_map(i_map, i_top, s_map, s_top, inst->db_type);
             update_map(i_map, i_top, s_map, s_top, inst->db_data);
             update_map(i_map, i_top, s_map, s_top, inst->db_field);
             break;
         }
-        case E_INST_DBStore: {
-            INST_DBStore *inst = (INST_DBStore *)wirinst;
+        case _WIRInst_DBStore: {
+            WIRInst_DBStore *inst = (WIRInst_DBStore *)wirinst;
             update_map(i_map, i_top, s_map, s_top, inst->db_type);
             update_map(i_map, i_top, s_map, s_top, inst->db_data);
             update_map(i_map, i_top, s_map, s_top, inst->db_field);
             break;
         }
-        case E_INST_StrAssign: {
-            INST_StrAssign *inst = (INST_StrAssign *)wirinst;
+        case _WIRInst_StrAssign: {
+            WIRInst_StrAssign *inst = (WIRInst_StrAssign *)wirinst;
             update_map(i_map, i_top, s_map, s_top, inst->dest);
             update_map(i_map, i_top, s_map, s_top, inst->src);
             break;
         }
-        case E_INST_Label: {
-            INST_Label *inst = (INST_Label *)wirinst;
+        case _WIRInst_Label: {
+            WIRInst_Label *inst = (WIRInst_Label *)wirinst;
             update_map(i_map, i_top, s_map, s_top, inst->name);
             break;
         }
-        case E_INST_Goto: {
-            INST_Goto *inst = (INST_Goto *)wirinst;
+        case _WIRInst_Goto: {
+            WIRInst_Goto *inst = (WIRInst_Goto *)wirinst;
             update_map(i_map, i_top, s_map, s_top, inst->name);
             break;
         }
-        case E_INST_TOMBSTONE:
-        case E_INST_Cmd:
-        case E_INST_ReturnVoid:
-        case E_INST_Continue:
-        case E_INST_Break:
-        case E_INST_LoopEnd:
-        case E_INST_Else:
-        case E_INST_IfEnd:
-        case E_INST_LoopBegin:
+        case _WIRInst_TOMBSTONE:
+        case _WIRInst_Cmd:
+        case _WIRInst_ReturnVoid:
+        case _WIRInst_Continue:
+        case _WIRInst_Break:
+        case _WIRInst_LoopEnd:
+        case _WIRInst_Else:
+        case _WIRInst_IfEnd:
+        case _WIRInst_LoopBegin:
             break;
         }
     }
@@ -665,7 +665,7 @@ static void push_binop_command(WIRCompiler *wc, int32_t dest, int32_t a, int32_t
     cev_push_cmd(wc->cev, CMD_VAR, wc->indent, i_vec, (VEC_StringView)VEC_EMPTY);
 }
 
-static void compile_binop(WIRCompiler *wc, INST_Binop *inst, int cmd_var_op) {
+static void compile_binop(WIRCompiler *wc, WIRInst_Binop *inst, int cmd_var_op) {
     push_binop_command(wc,
         resolve(wc, inst->dest), resolve(wc, inst->a), resolve(wc, inst->b),
         cmd_var_op);
@@ -691,8 +691,8 @@ static void push_str_command(WIRCompiler *wc, int32_t dest_ref, WIROperand src) 
 
 static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
     switch (wi->kind) {
-    case E_INST_Binop: {
-        INST_Binop *inst = (INST_Binop *)wi;
+    case _WIRInst_Binop: {
+        WIRInst_Binop *inst = (WIRInst_Binop *)wi;
         switch (inst->op) {
         case WIR_ADD: compile_binop(wc, inst, VAR_OP_PLUS); break;
         case WIR_SUB: compile_binop(wc, inst, VAR_OP_MINUS); break;
@@ -715,26 +715,26 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
         }
         break;                
     }
-    case E_INST_StrAssign: {
-        INST_StrAssign *inst = (INST_StrAssign *)wi;
+    case _WIRInst_StrAssign: {
+        WIRInst_StrAssign *inst = (WIRInst_StrAssign *)wi;
         push_str_command(wc, resolve(wc, inst->dest), inst->src);
         break;
     }
     // TODO
-    case E_INST_IfBegin: {
+    case _WIRInst_IfBegin: {
         cev_push_simple_cmd(wc->cev, CMD_IF_INT, wc->indent);
         
         wc->indent++;
         break;
     }
-    case E_INST_LoopBegin: {
+    case _WIRInst_LoopBegin: {
         cev_push_simple_cmd(wc->cev, CMD_LOOP, wc->indent);
         
         wc->indent++;
         break;
     }
-    case E_INST_LoopBeginN: {
-        INST_LoopBeginN *inst = (INST_LoopBeginN *)wi;
+    case _WIRInst_LoopBeginN: {
+        WIRInst_LoopBeginN *inst = (WIRInst_LoopBeginN *)wi;
 
         VEC_int32_t i_vec = VEC_EMPTY;
         int32_t n = resolve(wc, inst->count);
@@ -747,14 +747,14 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
         wc->indent++;
         break;
     }
-    case E_INST_LoopEnd: {
+    case _WIRInst_LoopEnd: {
         wc->indent--;
 
         cev_push_simple_cmd(wc->cev, CMD_LOOP_END, wc->indent);
         break;
     }
-    case E_INST_ReturnVal: {
-        INST_ReturnVal *inst = (INST_ReturnVal *)wi;
+    case _WIRInst_ReturnVal: {
+        WIRInst_ReturnVal *inst = (WIRInst_ReturnVal *)wi;
 
         // TODO: Optimize by not moving values if they are already in
         //       the correct index to return.
@@ -796,12 +796,12 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
         cev_push_simple_cmd(wc->cev, CMD_RETURN, wc->indent);
         break;
     }
-    case E_INST_ReturnVoid: {
+    case _WIRInst_ReturnVoid: {
         cev_push_simple_cmd(wc->cev, CMD_RETURN, wc->indent);
         break;
     }
-    case E_INST_Cmd: {
-        INST_Cmd *inst = (INST_Cmd *)wi;
+    case _WIRInst_Cmd: {
+        WIRInst_Cmd *inst = (WIRInst_Cmd *)wi;
         assert(inst->open_close >= -1
                 && inst->open_close <= 1);
 
@@ -831,8 +831,8 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
         
         break;
     }
-    case E_INST_Call: {
-        INST_Call *inst = (INST_Call *)wi;
+    case _WIRInst_Call: {
+        WIRInst_Call *inst = (WIRInst_Call *)wi;
 
         int32_t cev = resolve(wc, inst->cev);
 
@@ -897,7 +897,7 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
         );
         break;
     }
-    case E_INST_TOMBSTONE: break;
+    case _WIRInst_TOMBSTONE: break;
     }        
 }
 
@@ -906,10 +906,10 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
 // directly into the variable.
 static void temp_copy_propagation_pass(WIRCev *wcev) {
     for (size_t i = 0; i < wcev->insts.count; i++) {
-        if (wcev->insts.at[i]->kind != E_INST_Binop)
+        if (wcev->insts.at[i]->kind != _WIRInst_Binop)
             continue;
         
-        INST_Binop *inst = (INST_Binop *)wcev->insts.at[i]; 
+        WIRInst_Binop *inst = (WIRInst_Binop *)wcev->insts.at[i]; 
 
         if (inst->op != WIR_ADD) continue;
         if (inst->a.kind != OPKIND_TEMP_INT) continue;
@@ -919,13 +919,13 @@ static void temp_copy_propagation_pass(WIRCev *wcev) {
         assert(i > 0);
         WIRInst *prev = wcev->insts.at[i - 1];
 
-        if (prev->kind == E_INST_Binop) {
-            INST_Binop *p = (INST_Binop *)prev;
+        if (prev->kind == _WIRInst_Binop) {
+            WIRInst_Binop *p = (WIRInst_Binop *)prev;
             if (p->dest.kind == OPKIND_TEMP_INT
                 && p->dest.as.offset == inst->a.as.offset) {
 
                 p->dest = inst->dest;
-                inst->base.kind = E_INST_TOMBSTONE;
+                inst->base.kind = _WIRInst_TOMBSTONE;
             }
         }
     }
@@ -1104,16 +1104,16 @@ void print_wir(WIR *wir) {
         for (size_t i = 0; i < arr.count; i++) {
             WIRInst *inst = arr.at[i];
             switch (inst->kind) {
-            case E_INST_PushInt:
+            case _WIRInst_PushInt:
                 printf("pushi \t\t\t; (max i: %zu)", stack_i);
                 stack_i++;
                 break;
-            case E_INST_PushStr:
+            case _WIRInst_PushStr:
                 printf("pushs \t\t\t; (max s: %zu)", stack_s);
                 stack_i++;
                 break;
-            case E_INST_PopIntN: {
-                INST_PopIntN *in = (INST_PopIntN *)inst;
+            case _WIRInst_PopIntN: {
+                WIRInst_PopIntN *in = (WIRInst_PopIntN *)inst;
                 stack_i -= in->n;
                 printf("popi %zu \t\t\t", in->n);
                 if (stack_i == 0)
@@ -1122,8 +1122,8 @@ void print_wir(WIR *wir) {
                     printf("; (max i: %zu)", stack_i);
                 break;
             }
-            case E_INST_PopStrN: {
-                INST_PopStrN *in = (INST_PopStrN *)inst;
+            case _WIRInst_PopStrN: {
+                WIRInst_PopStrN *in = (WIRInst_PopStrN *)inst;
                 stack_s -= in->n;
                 printf("pops %zu \t\t\t", in->n);
                 if (stack_s == 0)
@@ -1132,24 +1132,24 @@ void print_wir(WIR *wir) {
                     printf("; (max s: %zu)", stack_s);
                 break;
             }
-            case E_INST_Binop: {
+            case _WIRInst_Binop: {
                 printf("binop");
-                INST_Binop *in = (INST_Binop *)inst;
+                WIRInst_Binop *in = (WIRInst_Binop *)inst;
                 print_wop(in->dest);
                 printf(" %d", in->op);
                 print_wop(in->a);
                 print_wop(in->b);
                 break;
             }
-            case E_INST_ReturnVal: {
+            case _WIRInst_ReturnVal: {
                 printf("ret");
-                INST_ReturnVal *in = (INST_ReturnVal *)inst;
+                WIRInst_ReturnVal *in = (WIRInst_ReturnVal *)inst;
                 print_wop(in->val);
                 break;
             }
-            case E_INST_Call: {
+            case _WIRInst_Call: {
                 printf("call");
-                INST_Call *in = (INST_Call *)inst;
+                WIRInst_Call *in = (WIRInst_Call *)inst;
                 print_wop(in->dest);
                 print_wop(in->cev);
                 for (size_t arg = 0; arg < in->args.count; arg++) {
@@ -1157,9 +1157,9 @@ void print_wir(WIR *wir) {
                 }
                 break;
             }
-            case E_INST_Cmd: {
+            case _WIRInst_Cmd: {
                 printf("cmd");
-                INST_Cmd *in = (INST_Cmd *)inst;
+                WIRInst_Cmd *in = (WIRInst_Cmd *)inst;
                 printf(" %d %d", in->op, in->open_close);
                 for (size_t arg = 0; arg < in->iargs.count; arg++)
                     print_wop(in->iargs.at[arg]);
@@ -1167,7 +1167,7 @@ void print_wir(WIR *wir) {
                     print_wop(in->sargs.at[arg]);
                 break;
             }
-            case E_INST_TOMBSTONE:
+            case _WIRInst_TOMBSTONE:
                 printf("nop");
                 break;
             default:

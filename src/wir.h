@@ -65,34 +65,34 @@ struct WIROperand {
 typedef struct {
     enum {
         // No-op.
-        E_INST_TOMBSTONE,
+        _WIRInst_TOMBSTONE,
 
         // Used to manipulate the compile-time stack.
         // Does not actually correspond to a real command.
-        E_INST_PushInt,
-        E_INST_PushStr,
-        E_INST_PopIntN,
-        E_INST_PopStrN,
+        _WIRInst_PushInt,
+        _WIRInst_PushStr,
+        _WIRInst_PopIntN,
+        _WIRInst_PopStrN,
 
         // Generally corresponds to a real command.
-        E_INST_Binop,
-        E_INST_StrAssign,
-        E_INST_IfBegin,
-        E_INST_LoopBeginN,
-        E_INST_Call,
-        E_INST_ReturnVal,
-        E_INST_Cmd,
-        E_INST_DBLoad,
-        E_INST_DBStore,
-        E_INST_Label,
-        E_INST_Goto,
-        E_INST_Else,
-        E_INST_IfEnd,
-        E_INST_LoopBegin,
-        E_INST_LoopEnd,
-        E_INST_Continue,
-        E_INST_Break,
-        E_INST_ReturnVoid,
+        _WIRInst_Binop,
+        _WIRInst_StrAssign,
+        _WIRInst_IfBegin,
+        _WIRInst_LoopBeginN,
+        _WIRInst_Call,
+        _WIRInst_ReturnVal,
+        _WIRInst_Cmd,
+        _WIRInst_DBLoad,
+        _WIRInst_DBStore,
+        _WIRInst_Label,
+        _WIRInst_Goto,
+        _WIRInst_Else,
+        _WIRInst_IfEnd,
+        _WIRInst_LoopBegin,
+        _WIRInst_LoopEnd,
+        _WIRInst_Continue,
+        _WIRInst_Break,
+        _WIRInst_ReturnVoid,
     } kind;
 } WIRInst;
 VEC_PTR_DEF(WIRInst);
@@ -100,12 +100,12 @@ VEC_PTR_DEF(WIRInst);
 typedef struct {
     WIRInst base;
     size_t n;
-} INST_PopIntN;
+} WIRInst_PopIntN;
 
 typedef struct {
     WIRInst base;
     size_t n;
-} INST_PopStrN;
+} WIRInst_PopStrN;
 
 typedef struct {
     WIRInst base;
@@ -119,51 +119,51 @@ typedef struct {
     WIROperand dest;
     WIROperand a;
     WIROperand b;
-} INST_Binop;
+} WIRInst_Binop;
 
 typedef struct {
     WIRInst base;
-} INST_Else;
+} WIRInst_Else;
 
 typedef struct {
     WIRInst base;
-} INST_IfEnd;
+} WIRInst_IfEnd;
 
 typedef struct {
     WIRInst base;
-} INST_LoopBegin;
+} WIRInst_LoopBegin;
 
 typedef struct {
     WIRInst base;
-} INST_LoopEnd;
+} WIRInst_LoopEnd;
 
 typedef struct {
     WIRInst base;
-} INST_Continue;
+} WIRInst_Continue;
 
 typedef struct {
     WIRInst base;
-} INST_Break;
+} WIRInst_Break;
 
 typedef struct {
     WIRInst base;
-} INST_ReturnVoid;
+} WIRInst_ReturnVoid;
 
 typedef struct {
     WIRInst base;
     WIROperand dest;
     WIROperand src;
-} INST_StrAssign;
+} WIRInst_StrAssign;
 
 typedef struct {
     WIRInst base;
     WIROperand cond;
-} INST_IfBegin;
+} WIRInst_IfBegin;
 
 typedef struct {
     WIRInst base;
     WIROperand count;
-} INST_LoopBeginN;
+} WIRInst_LoopBeginN;
 
 typedef struct {
     WIRInst base;
@@ -171,7 +171,7 @@ typedef struct {
     WIROperand db_type;
     WIROperand db_data;
     WIROperand db_field;
-} INST_DBLoad;
+} WIRInst_DBLoad;
 
 typedef struct {
     WIRInst base;
@@ -179,7 +179,7 @@ typedef struct {
     WIROperand db_type;
     WIROperand db_data;
     WIROperand db_field;
-} INST_DBStore;
+} WIRInst_DBStore;
 
 typedef struct {
     WIRInst base;
@@ -193,12 +193,12 @@ typedef struct {
     WIROperand cev;
     
     VEC_WIROperand args;
-} INST_Call;
+} WIRInst_Call;
 
 typedef struct {
     WIRInst base;
     WIROperand val;
-} INST_ReturnVal;
+} WIRInst_ReturnVal;
 
 typedef struct {
     WIRInst base;
@@ -210,17 +210,17 @@ typedef struct {
     // no change. Indicates commands with block-like
     // structures, like loops and conditionals.
     int open_close;
-} INST_Cmd;
+} WIRInst_Cmd;
 
 typedef struct {
     WIRInst base;
     WIROperand name;
-} INST_Label;
+} WIRInst_Label;
 
 typedef struct {
     WIRInst base;
     WIROperand name;
-} INST_Goto;
+} WIRInst_Goto;
 
 typedef struct WIRCev {
     StringView name;
