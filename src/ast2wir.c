@@ -6,7 +6,7 @@
     do { \
         (var) = arena_alloc_assert(aw->arena, sizeof(type_)); \
         *var = __VA_ARGS__; \
-        (var)->base.kind = INST_##type_; \
+        (var)->base.kind = E_##type_; \
     } while (0)
 
 typedef struct {
@@ -19,10 +19,28 @@ typedef struct Ast2Wir {
     Arena *arena;
     WIR *wir;
 
-    TwoStack tmp;
-    TwoStack global;
     VEC_TwoStack local_frames;
 } Ast2Wir;
+
+static WIRInst *get_last_inst(Ast2Wir *aw) {
+    WIRCev *cur_cev = &aw->wir->g_cevs.at[aw->wir->g_cevs.count - 1];
+    return cur_cev->insts.at[cur_cev->insts.count - 1];
+}
+
+static void update_prev_inst_dest(Ast2Wir *aw, WIROperand new_dest) {
+    assert(aw->wir->g_cevs.count > 0);
+    WIRInst *last_inst = get_last_inst(aw);
+
+    switch (last_inst->kind) {
+    case E_INST_Binop:
+        ((INST_Binop *)last_inst)->dest = new_dest;
+        break;
+    case E_INST_Call:
+        ((INST_Call *)last_inst)->dest = new_dest;
+            break;
+    default: UNREACHABLE;
+    }
+}
 
 static void emit_to_current_cev(Ast2Wir *aw, WIRInst *inst) {
     assert(aw->wir->g_cevs.count > 0);
@@ -32,23 +50,23 @@ static void emit_to_current_cev(Ast2Wir *aw, WIRInst *inst) {
 }
 
 static void emit_binop(Ast2Wir *aw, WIROperand dest, WIROperand a, WIROperand b, int op) {
-    WIRInst_Binop *inst;
-    ALLOC_WIR(inst, WIRInst_Binop,
-        (WIRInst_Binop){ .dest = dest, .op = op, .a = a, .b = b });
+    INST_Binop *inst;
+    ALLOC_WIR(inst, INST_Binop,
+        (INST_Binop){ .dest = dest, .op = op, .a = a, .b = b });
     emit_to_current_cev(aw, (WIRInst *)inst);
 }
 
 static void emit_str(Ast2Wir *aw, WIROperand dest, WIROperand a) {
-    WIRInst_StrAssign *inst;
-    ALLOC_WIR(inst, WIRInst_StrAssign,
-        (WIRInst_StrAssign){ .dest = dest, .src = a });
+    INST_StrAssign *inst;
+    ALLOC_WIR(inst, INST_StrAssign,
+        (INST_StrAssign){ .dest = dest, .src = a });
     emit_to_current_cev(aw, (WIRInst *)inst);
 }
 
 static void emit_return_val(Ast2Wir *aw, WIROperand a) {
-    WIRInst_ReturnVal *inst;
-    ALLOC_WIR(inst, WIRInst_ReturnVal,
-        (WIRInst_ReturnVal){ .val = a });
+    INST_ReturnVal *inst;
+    ALLOC_WIR(inst, INST_ReturnVal,
+        (INST_ReturnVal){ .val = a });
     emit_to_current_cev(aw, (WIRInst *)inst);
 }
 
@@ -59,9 +77,10 @@ static void emit_simple(Ast2Wir *aw, int kind) {
 }
 
 static WIROperand tmp_int(Ast2Wir *aw) {
+    WIRCev *cur_cev = &aw->wir->g_cevs.at[aw->wir->g_cevs.count - 1];
     return (WIROperand){
         .kind = OPKIND_TEMP_INT,
-        .as.local_offset = aw->tmp.int_top++ 
+        .as.offset = cur_cev->next_temp_int++ 
     };
 }
 
@@ -80,11 +99,31 @@ static void open_frame(Ast2Wir *aw) {
 
 static void close_frame(Ast2Wir *aw) {
     assert(aw->local_frames.count > 0);
+    TwoStack *to_pop = &aw->local_frames.at[aw->local_frames.count - 1];
+
+    size_t prev_ints;
+    if (aw->local_frames.count > 1) {
+        TwoStack *prev = &aw->local_frames.at[aw->local_frames.count - 2];
+        prev_ints = prev->int_top;
+    } else {
+        prev_ints = 0;
+    }
+    assert(prev_ints <= to_pop->int_top);
+
+    size_t allocated_ints = to_pop->int_top - prev_ints;
+
+    if (allocated_ints > 0) {
+        INST_PopIntN *inst; 
+        ALLOC_WIR(inst, INST_PopIntN, (INST_PopIntN){ .n = allocated_ints });
+        emit_to_current_cev(aw, (WIRInst *)inst);
+    }
+
     VEC_POP(aw->local_frames);
 }
 
 static size_t new_local_int(Ast2Wir *aw) {
     assert(aw->local_frames.count > 0);
+    emit_simple(aw, E_INST_PushInt);
     TwoStack *top = &aw->local_frames.at[aw->local_frames.count - 1];
     return top->int_top++;
 }
@@ -145,9 +184,7 @@ static void visit_db_field_decl(Ast2Wir *aw, Stmt *stmt) {
     VEC_PUSH(last->fields, wdbf, aw->arena);
 }
 
-static WIROperand visit_Expr(Ast2Wir *aw, Expr *expr);
-
-static WIROperand _visit_Expr(Ast2Wir *aw, Expr *expr) {
+static WIROperand visit_Expr(Ast2Wir *aw, Expr *expr) {
     switch (expr->kind) {
     case NODE_ExprVar: {
         ExprVar *e = (ExprVar *)expr;
@@ -168,7 +205,7 @@ static WIROperand _visit_Expr(Ast2Wir *aw, Expr *expr) {
             return (WIROperand){
                 .kind = e->sym->type.basetype == TYPE_STR ?
                     OPKIND_LOCAL_STR : OPKIND_LOCAL_INT,
-                .as.local_offset = e->sym->offset 
+                .as.offset = e->sym->offset 
             };
         } else {
             int kind = OPKIND_GLOBAL_INT;
@@ -223,9 +260,16 @@ static WIROperand _visit_Expr(Ast2Wir *aw, Expr *expr) {
     case NODE_ExprBinary: {
         ExprBinary *e = (ExprBinary *)expr;
 
-        WIROperand dest = tmp_int(aw);
         WIROperand left = visit_Expr(aw, e->left);
         WIROperand right = visit_Expr(aw, e->right);
+        
+        // Allocate temporaries in order of their use for
+        // optimization purposes later.
+        WIROperand negated = {0};
+        if (e->op.type == TOK_GREATER_GREATER)
+            negated = tmp_int(aw);
+        
+        WIROperand dest = tmp_int(aw);
 
         switch (e->op.type) {
         case TOK_PLUS:
@@ -238,15 +282,19 @@ static WIROperand _visit_Expr(Ast2Wir *aw, Expr *expr) {
             emit_binop(aw, dest, left, right, WIR_DIV); break;
         case TOK_PERCENT:
             emit_binop(aw, dest, left, right, WIR_MOD); break;
+        case TOK_CARET:
+            emit_binop(aw, dest, left, right, WIR_XOR); break;
+        case TOK_PIPE:
+            emit_binop(aw, dest, left, right, WIR_OR); break;
+        case TOK_AMP:
+            emit_binop(aw, dest, left, right, WIR_AND); break;
         case TOK_LESS_LESS:
             emit_binop(aw, dest, left, right, WIR_LSH); break;
         case TOK_GREATER_GREATER: {
-            WIROperand negated = tmp_int(aw);
             emit_binop(aw, negated, WIR_IMM_I(0), right, WIR_SUB);
             emit_binop(aw, dest, left, negated, WIR_LSH);
             break;
         }
-
         case TOK_EQUAL_EQUAL:
             emit_binop(aw, dest, left, right, WIR_EQ); break;
         case TOK_BANG_EQUAL:
@@ -297,7 +345,6 @@ static WIROperand _visit_Expr(Ast2Wir *aw, Expr *expr) {
     case NODE_ExprCall: {
         ExprCall *e = (ExprCall *)expr;
 
-        WIROperand dest = tmp_int(aw);
         WIROperand callee = visit_Expr(aw, e->callee);
         VEC_WIROperand args = VEC_EMPTY;
         for (size_t i = 0; i < e->args.count; i++) {
@@ -305,9 +352,10 @@ static WIROperand _visit_Expr(Ast2Wir *aw, Expr *expr) {
                 visit_Expr(aw, e->args.at[i]), aw->arena);
         }
 
-        WIRInst_Call *inst;
-        ALLOC_WIR(inst, WIRInst_Call,
-            (WIRInst_Call){.dest = dest, .cev = callee, .args = args});
+        WIROperand dest = tmp_int(aw);
+        INST_Call *inst;
+        ALLOC_WIR(inst, INST_Call,
+            (INST_Call){.dest = dest, .cev = callee, .args = args});
         emit_to_current_cev(aw, (WIRInst *)inst);
 
         return dest;
@@ -349,29 +397,19 @@ static WIROperand _visit_Expr(Ast2Wir *aw, Expr *expr) {
     return (WIROperand){ 0 };
 }
 
-static WIROperand visit_Expr(Ast2Wir *aw, Expr *expr) {
-    TwoStack top = aw->tmp;
-    WIROperand operand = _visit_Expr(aw, expr);
-    aw->tmp = top;
-
-    // The temporary result of a calculation needs a slot to hold it.
-    if (operand.kind == OPKIND_TEMP_INT)
-        aw->tmp.int_top++;
-
-    return operand;
-}
-
 static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
-    // Reset temp buffer before every statement.
-    aw->tmp = (TwoStack){ 0 };
-
     switch (stmt->kind) {
     case NODE_StmtAssign: {
         StmtAssign *s = (StmtAssign *)stmt;
         WIROperand left = visit_Expr(aw, s->left);
         WIROperand right = visit_Expr(aw, s->right);
 
-        emit_binop(aw, left, right, WIR_IMM_I(0), WIR_ADD);
+        if (op_is_string(right)) {
+            assert(op_is_string(left));
+            emit_str(aw, left, right);
+        } else {
+            emit_binop(aw, left, right, WIR_IMM_I(0), WIR_ADD);
+        }
         return;
     }
     case NODE_StmtVarDecl: {
@@ -391,7 +429,7 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
                 emit_str(aw,
                     (WIROperand){
                         .kind = OPKIND_LOCAL_STR,
-                        .as.local_offset = s->sym->offset
+                        .as.offset = s->sym->offset
                     },
                     init);
             }
@@ -417,7 +455,7 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
                 emit_binop(aw,
                     (WIROperand){
                         .kind = OPKIND_LOCAL_INT,
-                        .as.local_offset = s->sym->offset
+                        .as.offset = s->sym->offset
                     },
                     init, WIR_IMM_I(0), WIR_ADD);
             }
@@ -444,6 +482,7 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
             ((WIRCev){
                 .name = s->name,
                 .insts = VEC_EMPTY,
+                .next_temp_int = 0,
             }), aw->arena);
 
         open_frame(aw);
@@ -467,7 +506,7 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
             WIROperand ret = visit_Expr(aw, s->expr);
             emit_return_val(aw, ret);
         } else {
-            emit_simple(aw, INST_WIRInst_ReturnVoid);
+            emit_simple(aw, E_INST_ReturnVoid);
         }
 
         return;
@@ -476,19 +515,19 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
         StmtIf *s = (StmtIf *)stmt;
         WIROperand cond = visit_Expr(aw, s->condition);
 
-        WIRInst_IfBegin *inst;
-        ALLOC_WIR(inst, WIRInst_IfBegin,
-            (WIRInst_IfBegin){ .cond = cond });
+        INST_IfBegin *inst;
+        ALLOC_WIR(inst, INST_IfBegin,
+            (INST_IfBegin){ .cond = cond });
         emit_to_current_cev(aw, (WIRInst *)inst);
 
         visit_Stmt(aw, s->then_branch);
 
         if (s->else_branch) {
-            emit_simple(aw, INST_WIRInst_Else);
+            emit_simple(aw, E_INST_Else);
             visit_Stmt(aw, s->else_branch);
         }
 
-        emit_simple(aw, INST_WIRInst_IfEnd);
+        emit_simple(aw, E_INST_IfEnd);
 
         return;
     }
@@ -498,16 +537,16 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
         if (s->count) {
             WIROperand count = visit_Expr(aw, s->count);
 
-            WIRInst_LoopBeginN *inst;
-            ALLOC_WIR(inst, WIRInst_LoopBeginN,
-                (WIRInst_LoopBeginN){ .count = count });
+            INST_LoopBeginN *inst;
+            ALLOC_WIR(inst, INST_LoopBeginN,
+                (INST_LoopBeginN){ .count = count });
             emit_to_current_cev(aw, (WIRInst *)inst);
         } else {
-            emit_simple(aw, INST_WIRInst_LoopBegin);
+            emit_simple(aw, E_INST_LoopBegin);
         }
         visit_Stmt(aw, s->body);
 
-        emit_simple(aw, INST_WIRInst_LoopEnd);
+        emit_simple(aw, E_INST_LoopEnd);
         return;
     }
     case NODE_StmtFor: {
@@ -518,10 +557,10 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
         return;
     }
     case NODE_StmtContinue:
-        emit_simple(aw, INST_WIRInst_Continue);
+        emit_simple(aw, E_INST_Continue);
         return;
     case NODE_StmtBreak: 
-        emit_simple(aw, INST_WIRInst_Break);
+        emit_simple(aw, E_INST_Break);
         return;
     case NODE_StmtCmd: {
         StmtCmd *s = (StmtCmd *)stmt;
@@ -538,8 +577,8 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
             VEC_PUSH(sargs, visit_Expr(aw, s->str_operands.at[i]), aw->arena);
 
         // TODO: Currently, let all relative indent values be 0.
-        WIRInst_Cmd *inst;
-        ALLOC_WIR(inst, WIRInst_Cmd, (WIRInst_Cmd){
+        INST_Cmd *inst;
+        ALLOC_WIR(inst, INST_Cmd, (INST_Cmd){
             .op = cmd_id, .open_close = 0, .iargs = iargs, .sargs = sargs});
 
         emit_to_current_cev(aw, (WIRInst *)inst);
@@ -548,6 +587,19 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
     case NODE_StmtExpr: {
         StmtExpr *s = (StmtExpr *)stmt;
         visit_Expr(aw, s->expr);
+        
+        // Currently, only function calls are valid expression statements.
+        WIRInst *last = get_last_inst(aw);
+        assert(last->kind == E_INST_Call);
+
+        // Calls used as an expression statement have no destination:
+        // Therefore they can just have a 0 destination to save
+        // a temporary.
+        ((INST_Call *)last)->dest = (WIROperand){
+            .kind = OPKIND_IMM_INT,
+            .as.imm_int = 0
+        };
+
         return;
     }
     case NODE_StmtDBDecl: {
@@ -568,8 +620,6 @@ void ast2wir_pass(VEC_Module *modules, Arena *arena) {
     for (size_t i = 0; i < modules->count; i++) {
         Ast2Wir aw = (Ast2Wir){
             .arena = arena,
-            .tmp = { 0 },
-            .global = { 0 },
             .wir = arena_alloc_assert(arena, sizeof(WIR)),
             .local_frames = VEC_EMPTY,
         };

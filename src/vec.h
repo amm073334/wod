@@ -53,4 +53,12 @@
 
 #define VEC_POP(vec) ((vec).count--)
 
+#define VEC_REMOVE(vec, pos) \
+    do { \
+        for (size_t _i = (pos) + 1; _i < (vec).count; _i++) { \
+            (vec).at[_i - 1] = (vec).at[_i]; \
+        } \
+        (vec).count--; \
+    } while (0)
+
 #endif // WOD_VEC_H_

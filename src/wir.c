@@ -6,6 +6,7 @@
 #define CSELF_STR_BASE 1600005
 #define CSELF_STR_MAX  1600009
 
+#define RC_THRESHOLD 1000000
 #define NORMAL_VAR_BASE 2000000
 #define STRING_VAR_BASE 3000000
 #define CEV_BASE 500000
@@ -26,6 +27,10 @@ typedef struct WIRCompiler {
     VEC_GlobalEntry g_ints;
     VEC_GlobalEntry g_strs;
 
+    // Maps temporaries to concrete references.
+    VEC_int32_t temp_map; 
+
+    // Information about the current common event.
     CommonEvent *cev;
     uint8_t indent;
 
@@ -33,7 +38,7 @@ typedef struct WIRCompiler {
     Arena *arena;
 } WIRCompiler;
 
-bool is_string(WIROperand wop) {
+bool op_is_string(WIROperand wop) {
     switch (wop.kind) {
         case OPKIND_IMM_STR:
         case OPKIND_INTERP:
@@ -54,45 +59,136 @@ bool is_string(WIROperand wop) {
     return false;
 }
 
-bool is_strlit(WIROperand wop) {
+static bool op_is_strlit(WIROperand wop) {
     return wop.kind == OPKIND_IMM_STR
         || wop.kind == OPKIND_INTERP;
 }
 
-// TODO: It seems like disabling rc isn't really viable at the wir layer,
-//       because allocating space for temporaries requires knowledge
-//       of the state of the compile-time stack (which means it should
-//       be done during AST traversal).
-//
-//       That said, the wir layer is still necessary for distinguishing
-//       between locals and temporaries, and potentially for handling
-//       if-else chains.
-static int32_t disable_rc(Arena *arena, CommonEvent *cev, int32_t imm) {
-    (void) arena;
-    (void) cev;
-    if (imm < 1000000) return imm;
-    
-    // int32_t temp = push_i_temp();
-
-    // VEC_int32_t i_vec;
-    // VEC_StringView s_vec;
-    // VEC_INIT(i_vec);
-    // VEC_PUSH(i_vec, temp, arena);
-    // VEC_PUSH(i_vec, 0, arena);
-    // VEC_PUSH(i_vec, -wop.as.integer, arena);
-    // VEC_PUSH(i_vec, VAR_OP_MINUS, arena);
-
-    // VEC_INIT(s_vec);
-
-    // cev_push_cmd(cev, CMD_VAR, indent, i_vec, s_vec);
-
-    // return temp;
-    return 0;
+static size_t i_temp(WIRCev *wcev) {
+    return wcev->next_temp_int++;
 }
 
-// If `yobidasi` is true, returns the 呼び出し値.
-// Otherwise, returns the index (for example, CSelf index).
-int32_t resolve(WIRCompiler *wc, WIROperand wop, bool yobidasi) {
+static void insert_inst(Arena *arena, WIRCev *wcev, size_t pos, WIRInst *inst) {
+    assert(pos <= wcev->insts.count);
+
+    if (pos == wcev->insts.count) {
+        VEC_PUSH(wcev->insts, inst, arena);
+        return;
+    }
+
+    // If `pos` is strictly greater than the vector length, there must
+    // be at least one element in the vector.
+    size_t last = wcev->insts.count - 1;
+
+    VEC_PUSH(wcev->insts, NULL, arena);
+    for (size_t i = last; i >= pos; i--) {
+        wcev->insts.at[i + 1] = wcev->insts.at[i];
+    }
+
+    wcev->insts.at[pos] = inst;
+}
+
+// If applicable, patches the operand to avoid reference conversion,
+// inserting a new binop instruction at the given position.
+// The input position is updated to jump over any newly-inserted instructions.
+static void disable_rc(Arena *arena, WIRCev *wcev, size_t *inst_pos, WIROperand *wop) {
+    if (wop->kind != OPKIND_IMM_INT) return;
+    if (wop->as.imm_int < RC_THRESHOLD) return;
+    
+    size_t temp = i_temp(wcev);
+
+    INST_Binop *inst = arena_alloc_assert(arena, sizeof(INST_Binop));
+
+    *inst = (INST_Binop){
+        .base.kind = E_INST_Binop,
+        .dest = { .kind = OPKIND_TEMP_INT, .as.offset = temp },
+        .op = WIR_SUB,
+        .a = { .kind = OPKIND_IMM_INT, .as.imm_int = 0 },
+        .b = { .kind = OPKIND_IMM_INT, .as.imm_int = -wop->as.imm_int}
+    };
+
+    insert_inst(arena, wcev, *inst_pos, (WIRInst *)inst);
+    *wop = (WIROperand){
+        .kind = OPKIND_TEMP_INT,
+        .as.offset = temp
+    };
+
+    // There is no need to analyze the newly-inserted instruction.
+    *inst_pos++;
+}
+
+// For a given `WIRCev`, update integer immediates to use a temporary if they would
+// otherwise be treated as a reference.
+static void disable_rc_pass(Arena *arena, WIRCev *wcev) {
+    for (size_t i = 0; i < wcev->insts.count; i++) {
+        WIRInst *wirinst = wcev->insts.at[i];
+        switch (wirinst->kind) {
+        case E_INST_TOMBSTONE:
+        case E_INST_PushInt:
+        case E_INST_PopIntN:
+        case E_INST_StrAssign:
+        case E_INST_Cmd:
+        case E_INST_ReturnVoid:
+        case E_INST_Continue:
+        case E_INST_Break:
+        case E_INST_LoopEnd:
+        case E_INST_Else:
+        case E_INST_IfEnd:
+        case E_INST_Label:
+        case E_INST_Goto:
+        case E_INST_LoopBegin:
+            break;
+        case E_INST_Binop: {
+            INST_Binop *inst = (INST_Binop *)wirinst;
+            disable_rc(arena, wcev, &i, &inst->a);
+            disable_rc(arena, wcev, &i, &inst->b);
+            break;
+        }
+        case E_INST_IfBegin: {
+            INST_IfBegin *inst = (INST_IfBegin *)wirinst;
+            disable_rc(arena, wcev, &i, &inst->cond);
+            break;
+        }
+        case E_INST_LoopBeginN: {
+            INST_LoopBeginN *inst = (INST_LoopBeginN *)wirinst;
+            disable_rc(arena, wcev, &i, &inst->count);
+            break;
+        }
+        case E_INST_Call: {
+            INST_Call *inst = (INST_Call *)wirinst;
+            // Disabling reference conversion for the destination
+            // is unnecessary, assuming that you can't store a
+            // value into an immediate.
+            for (size_t arg = 0; arg < inst->args.count; arg++)
+                disable_rc(arena, wcev, &arg, &inst->args.at[arg]);
+            break;
+        }
+        case E_INST_ReturnVal: {
+            INST_ReturnVal *inst = (INST_ReturnVal *)wirinst;
+            disable_rc(arena, wcev, &i, &inst->val);
+            break;
+        }
+        case E_INST_DBLoad: {
+            INST_DBLoad *inst = (INST_DBLoad *)wirinst;
+            disable_rc(arena, wcev, &i, &inst->db_type);
+            disable_rc(arena, wcev, &i, &inst->db_data);
+            disable_rc(arena, wcev, &i, &inst->db_field);
+            break;
+        }
+        case E_INST_DBStore: {
+            INST_DBStore *inst = (INST_DBStore *)wirinst;
+            disable_rc(arena, wcev, &i, &inst->db_type);
+            disable_rc(arena, wcev, &i, &inst->db_data);
+            disable_rc(arena, wcev, &i, &inst->db_field);
+            break;
+        }
+        }
+    }
+}
+
+// Resolves a non-string `WIROperand` into a concrete integer value.
+// Assumes reference conversion has already been disabled.
+static int32_t resolve(WIRCompiler *wc, WIROperand wop) {
     assert(wop.kind != OPKIND_IMM_STR && wop.kind != OPKIND_INTERP);
     
     VEC_GlobalEntry *g_vec = NULL;
@@ -100,21 +196,25 @@ int32_t resolve(WIRCompiler *wc, WIROperand wop, bool yobidasi) {
 
     switch (wop.kind) {
     case OPKIND_IMM_INT: {
+        assert(wop.as.imm_int < RC_THRESHOLD);
         return wop.as.imm_int;
     }
-    case OPKIND_LOCAL_INT:
-    case OPKIND_LOCAL_STR:
+    // For the time being, don't allow addresses to escape the CSelf space.
+    case OPKIND_LOCAL_INT: {
+        int32_t ref = wop.as.offset + CSELF_INT_BASE;
+        assert(ref <= CSELF_INT_MAX);
+        return ref;
+    }
+    case OPKIND_LOCAL_STR: {
+        int32_t ref = wop.as.offset + CSELF_STR_BASE;
+        assert(ref <= CSELF_STR_MAX);
+        return ref;
+    }
     case OPKIND_TEMP_INT: {
-        // TODO: Fix temp offsets.
-        int32_t ref;
-        if (wop.kind == OPKIND_LOCAL_STR) {
-            ref = wop.as.local_offset + CSELF_STR_BASE;
-            assert(ref <= CSELF_STR_MAX);
-        } else {
-            ref = wop.as.local_offset + CSELF_INT_BASE;
-            assert(ref <= CSELF_INT_MAX);
-        }
-        return yobidasi ? ref : ref - CSELF_BASE;
+        int32_t ref = wc->temp_map.at[wop.as.offset];
+        assert(ref >= RC_THRESHOLD);
+        assert(ref <= CSELF_INT_MAX);
+        return ref;
     }
     case OPKIND_GLOBAL_INT: g_vec = &wc->g_ints; offset = NORMAL_VAR_BASE; break;
     case OPKIND_GLOBAL_STR: g_vec = &wc->g_strs; offset = STRING_VAR_BASE; break;
@@ -131,7 +231,7 @@ int32_t resolve(WIRCompiler *wc, WIROperand wop, bool yobidasi) {
         if (sv_equals(wop.as.global.path, g_vec->at[i].path)
             && sv_equals(wop.as.global.name, g_vec->at[i].name)) {
                 
-            return yobidasi ? offset + i : i;
+            return offset + i;
         }
     }
 
@@ -139,8 +239,8 @@ int32_t resolve(WIRCompiler *wc, WIROperand wop, bool yobidasi) {
     return 0;
 }
 
-StringView interpolate(WIRCompiler *wc, WIROperand wop) {
-    assert(is_strlit(wop));
+static StringView interpolate(WIRCompiler *wc, WIROperand wop) {
+    assert(op_is_strlit(wop));
 
     if (wop.kind == OPKIND_IMM_STR)
         return wop.as.imm_str;
@@ -149,57 +249,328 @@ StringView interpolate(WIRCompiler *wc, WIROperand wop) {
 
     StringView out = SV("");
     for (size_t i = 0; i < wop.as.interp.count; i++) {
-        WIROperand w = wop.as.interp.at[i];
+        WIROperand frag = wop.as.interp.at[i];
 
+        StringView next = SV("");
         char buf[sizeof(int32_t) * 8 + 1];
-        switch (w.kind) {
+        switch (frag.kind) {
         case OPKIND_IMM_STR:
-            out = sv_concat(wc->arena, out, w.as.imm_str);
+            next = frag.as.imm_str;
             break;
         case OPKIND_INTERP:
-            out = sv_concat(wc->arena, out, interpolate(wc, w));
+            next = interpolate(wc, frag);
             break;
         case OPKIND_IMM_INT: {
-            snprintf(buf, sizeof(buf), "%d", w.as.imm_int);
-            out = sv_concat(wc->arena, out, to_sv(buf));
+            snprintf(buf, sizeof(buf), "%d", frag.as.imm_int);
+            next = to_sv(buf);
             break;
         }
-        case OPKIND_LOCAL_INT:
-        case OPKIND_LOCAL_STR:
+        case OPKIND_LOCAL_INT: {
+            assert(frag.as.offset <= CSELF_INT_MAX - CSELF_BASE);
+            snprintf(buf, sizeof(buf), "\\cself[%zu]", frag.as.offset);
+            next = to_sv(buf);
+            break;
+        }
+        case OPKIND_LOCAL_STR: {
+            assert(frag.as.offset <= CSELF_STR_MAX - CSELF_BASE);
+            snprintf(buf, sizeof(buf), "\\cself[%zu]", frag.as.offset);
+            next = to_sv(buf);
+            break;
+        }
         case OPKIND_TEMP_INT: {
-            // TODO: Maybe the string-processing stuff needs an upgrade.
-            snprintf(buf, sizeof(buf), "\\cself[%d]", resolve(wc, w, false));
-            out = sv_concat(wc->arena, out, to_sv(buf));
+            assert(wc->temp_map.at[frag.as.offset] < CSELF_INT_MAX);
+            snprintf(buf, sizeof(buf), "\\cself[%zu]", wc->temp_map.at[frag.as.offset] - CSELF_BASE);
+            next = to_sv(buf);
             break;
         }
         case OPKIND_GLOBAL_INT: {
-            snprintf(buf, sizeof(buf), "\\v[%d]", resolve(wc, w, false));
-            out = sv_concat(wc->arena, out, to_sv(buf));
+            for (size_t j = 0; j < wc->g_ints.count; j++) {
+                if (sv_equals(frag.as.global.path, wc->g_ints.at[j].path)
+                    && sv_equals(frag.as.global.name, wc->g_ints.at[j].name)) {
+                        
+                    snprintf(buf, sizeof(buf), "\\v[%zu]", j);
+                    next = to_sv(buf);
+                }
+            }
+            UNREACHABLE;
             break;
         }
         case OPKIND_GLOBAL_STR: {
-            snprintf(buf, sizeof(buf), "\\s[%d]", resolve(wc, w, false));
-            out = sv_concat(wc->arena, out, to_sv(buf));
+            for (size_t j = 0; j < wc->g_strs.count; j++) {
+                if (sv_equals(frag.as.global.path, wc->g_strs.at[j].path)
+                    && sv_equals(frag.as.global.name, wc->g_strs.at[j].name)) {
+                        
+                    snprintf(buf, sizeof(buf), "\\s[%zu]", j);
+                    next = to_sv(buf);
+                }
+            }
+            UNREACHABLE;
             break;
         }
         case OPKIND_GLOBAL_CEV:
         case OPKIND_GLOBAL_UDB:
         case OPKIND_GLOBAL_CDB:
-            out = sv_concat(wc->arena, out, w.as.global.name);
+            next = frag.as.global.name;
             break;
         }
+
+        out = sv_concat(wc->arena, out, next);
     }
 
     return out;
 }
 
-static void binop(WIRCompiler *wc, WIRInst_Binop *inst, int cmd_var_op) {
+typedef struct {
+    size_t id;
+    size_t start;
+    size_t end;
+} Interval;
+VEC_DEF(Interval);
+
+static int cb_interval_start_asc(const void *a, const void *b) {
+    const Interval *it_a = a;
+    const Interval *it_b = b;
+
+    if (it_a->start < it_b->start) return -1;
+    if (it_a->start > it_b->start) return 1;
+    return 0;
+}
+
+static int cb_interval_end_desc(const void *a, const void *b) {
+    const Interval *it_a = a;
+    const Interval *it_b = b;
+
+    if (it_a->end < it_b->end) return 1;
+    if (it_a->end > it_b->end) return -1;
+    return 0;
+}
+
+static void update_interval(VEC_Interval *intervals, size_t inst, WIROperand wop) {
+    if (wop.kind != OPKIND_TEMP_INT) return;
+    assert(wop.as.offset < intervals->count);
+
+    Interval *it = &intervals->at[wop.as.offset];
+    if (it->start == -1) it->start = inst;
+    it->end = inst;
+}
+
+static void update_map(VEC_int32_t *map, int stack_top, WIROperand wop) {
+    if (wop.kind != OPKIND_TEMP_INT) return;
+
+    // If temporary has already been given a concrete address, skip.
+    if (map->at[wop.as.offset] >= RC_THRESHOLD) return;
+
+    map->at[wop.as.offset] += CSELF_INT_BASE + stack_top; 
+}
+
+// Assigns concrete addresses to temporaries.
+static VEC_int32_t temp_alloc_pass(Arena *arena, WIRCev *wcev) {
+    // Compute liveness intervals of all temporaries.
+    size_t n_temps = wcev->next_temp_int;
+    if (wcev->next_temp_int == 0)
+        return (VEC_int32_t)VEC_EMPTY;
+
+    VEC_Interval intervals = VEC_EMPTY;
+    for (size_t i = 0; i < n_temps; i++)
+        VEC_PUSH(intervals, ((Interval){ .id = i,
+            .start = (size_t)-1, .end = (size_t)-1 }), arena);
+
+    for (size_t i = 0; i < wcev->insts.count; i++) {
+        WIRInst *wirinst = wcev->insts.at[i];
+        switch (wirinst->kind) {
+        case E_INST_TOMBSTONE:
+        case E_INST_PushInt:
+        case E_INST_PopIntN:
+        case E_INST_StrAssign:
+        case E_INST_Cmd:
+        case E_INST_ReturnVoid:
+        case E_INST_Continue:
+        case E_INST_Break:
+        case E_INST_LoopEnd:
+        case E_INST_Else:
+        case E_INST_IfEnd:
+        case E_INST_Label:
+        case E_INST_Goto:
+        case E_INST_LoopBegin:
+            break;
+        case E_INST_Binop: {
+            INST_Binop *inst = (INST_Binop *)wirinst;
+            update_interval(&intervals, i, inst->dest);
+            update_interval(&intervals, i, inst->a);
+            update_interval(&intervals, i, inst->b);
+            break;
+        }
+        case E_INST_IfBegin: {
+            INST_IfBegin *inst = (INST_IfBegin *)wirinst;
+            update_interval(&intervals, i, inst->cond);
+            break;
+        }
+        case E_INST_LoopBeginN: {
+            INST_LoopBeginN *inst = (INST_LoopBeginN *)wirinst;
+            update_interval(&intervals, i, inst->count);
+            break;
+        }
+        case E_INST_Call: {
+            INST_Call *inst = (INST_Call *)wirinst;
+            update_interval(&intervals, i, inst->dest);
+            for (size_t arg = 0; arg < inst->args.count; arg++)
+                update_interval(&intervals, i, inst->args.at[arg]);
+            break;
+        }
+        case E_INST_ReturnVal: {
+            INST_ReturnVal *inst = (INST_ReturnVal *)wirinst;
+            update_interval(&intervals, i, inst->val);
+            break;
+        }
+        case E_INST_DBLoad: {
+            INST_DBLoad *inst = (INST_DBLoad *)wirinst;
+            update_interval(&intervals, i, inst->db_type);
+            update_interval(&intervals, i, inst->db_data);
+            update_interval(&intervals, i, inst->db_field);
+            break;
+        }
+        case E_INST_DBStore: {
+            INST_DBStore *inst = (INST_DBStore *)wirinst;
+            update_interval(&intervals, i, inst->db_type);
+            update_interval(&intervals, i, inst->db_data);
+            update_interval(&intervals, i, inst->db_field);
+            break;
+        }
+        }
+    }
+
+    // If a temporary wasn't found, remove its interval.
+    for (size_t i = 0; i < intervals.count;) {
+        if (intervals.at[i].start != -1) {
+            i++;
+            continue;
+        }
+        VEC_REMOVE(intervals, i);
+    }
+
+    // Allocate offsets to temporaries.
+    // Essentially, this is linear register allocation but with an
+    // infinite number of physical registers.
+    // (https://en.wikipedia.org/wiki/Register_allocation#Linear_scan)
+    VEC_int32_t map = VEC_EMPTY;
+    for (size_t i = 0; i < n_temps; i++)
+        VEC_PUSH(map, 0, arena);
+    
+    // Whether or not a register is active.
+    VEC_DEF(bool);
+    VEC_bool regs = VEC_EMPTY;
+    for (size_t i = 0; i < n_temps; i++)
+        VEC_PUSH(regs, false, arena);
+    
+    VEC_Interval active = VEC_EMPTY;
+
+    qsort(intervals.at, intervals.count,
+        sizeof(intervals.at[0]), cb_interval_start_asc);
+
+    for (size_t i = 0; i < intervals.count; i++) {
+        qsort(active.at, active.count,
+            sizeof(active.at[0]), cb_interval_end_desc);
+        
+        for (size_t j = 0; j < active.count;) {
+            if (active.at[j].end >= intervals.at[i].start)
+                break;
+
+            VEC_REMOVE(active, j);
+            regs.at[active.at[j].id] = false;
+        }
+
+        assert(active.count <= regs.count);
+
+        for (size_t reg = 0; reg < regs.count; reg++) {
+            if (regs.at[reg]) continue;
+            map.at[intervals.at[i].id] = reg;
+            regs.at[reg] = true;
+            break;
+        }
+        VEC_PUSH(active, intervals.at[i], arena);
+    }
+
+    // Now do one more pass of the code, keeping track of the
+    // state of the local variable stack, to assign actual
+    // addresses to each temporary. Addresses are assigned such
+    // that they are always right above the local stack.
+    int i_top = 0;
+    for (size_t i = 0; i < wcev->insts.count; i++) {
+        WIRInst *wirinst = wcev->insts.at[i];
+        switch (wirinst->kind) {
+        case E_INST_PushInt:
+            i_top++;
+            break;
+        case E_INST_PopIntN: {
+            INST_PopIntN *inst = (INST_PopIntN *)wirinst;
+            i_top -= inst->n;
+            break;
+        }
+        case E_INST_Binop: {
+            INST_Binop *inst = (INST_Binop *)wirinst;
+            update_map(&map, i_top, inst->dest);
+            update_map(&map, i_top, inst->a);
+            update_map(&map, i_top, inst->b);
+            break;
+        }
+        case E_INST_IfBegin: {
+            INST_IfBegin *inst = (INST_IfBegin *)wirinst;
+            update_map(&map, i_top, inst->cond);
+            break;
+        }
+        case E_INST_LoopBeginN: {
+            INST_LoopBeginN *inst = (INST_LoopBeginN *)wirinst;
+            update_map(&map, i_top, inst->count);
+            break;
+        }
+        case E_INST_Call: {
+            INST_Call *inst = (INST_Call *)wirinst;
+            update_map(&map, i_top, inst->dest);
+            for (size_t arg = 0; arg < inst->args.count; arg++)
+                update_map(&map, i_top, inst->args.at[arg]);
+            break;
+        }
+        case E_INST_ReturnVal: {
+            INST_ReturnVal *inst = (INST_ReturnVal *)wirinst;
+            update_map(&map, i_top, inst->val);
+            break;
+        }
+        case E_INST_DBLoad: {
+            INST_DBLoad *inst = (INST_DBLoad *)wirinst;
+            update_map(&map, i_top, inst->db_type);
+            update_map(&map, i_top, inst->db_data);
+            update_map(&map, i_top, inst->db_field);
+            break;
+        }
+        case E_INST_DBStore: {
+            INST_DBStore *inst = (INST_DBStore *)wirinst;
+            update_map(&map, i_top, inst->db_type);
+            update_map(&map, i_top, inst->db_data);
+            update_map(&map, i_top, inst->db_field);
+            break;
+        }
+        case E_INST_TOMBSTONE:
+        case E_INST_StrAssign:
+        case E_INST_Cmd:
+        case E_INST_ReturnVoid:
+        case E_INST_Continue:
+        case E_INST_Break:
+        case E_INST_LoopEnd:
+        case E_INST_Else:
+        case E_INST_IfEnd:
+        case E_INST_Label:
+        case E_INST_Goto:
+        case E_INST_LoopBegin:
+            break;
+        }
+    }
+
+    return map;
+}
+
+static void push_binop_command(WIRCompiler *wc, int32_t dest, int32_t a, int32_t b, int cmd_var_op) {
     VEC_int32_t i_vec = VEC_EMPTY;
     
-    int32_t dest = resolve(wc, inst->dest, true);
-    int32_t a = resolve(wc, inst->a, true);
-    int32_t b = resolve(wc, inst->b, true);
-
     VEC_PUSH(i_vec, dest, wc->arena);
     VEC_PUSH(i_vec, a, wc->arena);
     VEC_PUSH(i_vec, b, wc->arena);
@@ -208,20 +579,44 @@ static void binop(WIRCompiler *wc, WIRInst_Binop *inst, int cmd_var_op) {
     cev_push_cmd(wc->cev, CMD_VAR, wc->indent, i_vec, (VEC_StringView)VEC_EMPTY);
 }
 
+static void compile_binop(WIRCompiler *wc, INST_Binop *inst, int cmd_var_op) {
+    push_binop_command(wc,
+        resolve(wc, inst->dest), resolve(wc, inst->a), resolve(wc, inst->b),
+        cmd_var_op);
+}
+
+static void push_str_command(WIRCompiler *wc, int32_t dest_ref, WIROperand src) {
+    VEC_int32_t int_fields = VEC_EMPTY;
+    VEC_StringView str_fields = VEC_EMPTY;
+    if (op_is_strlit(src)) {
+        VEC_PUSH(int_fields, dest_ref, wc->arena);
+        VEC_PUSH(int_fields, 0, wc->arena);
+        VEC_PUSH(int_fields, 0, wc->arena);
+        VEC_PUSH(str_fields, interpolate(wc, src), wc->arena);
+    } else {
+        VEC_PUSH(int_fields, dest_ref, wc->arena);
+        VEC_PUSH(int_fields, 0, wc->arena);
+        VEC_PUSH(int_fields, resolve(wc, src), wc->arena);
+    }
+    
+    cev_push_cmd(wc->cev, CMD_STRING, wc->indent,
+        int_fields, str_fields);
+}
+
 static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
     switch (wi->kind) {
-    case INST_WIRInst_Binop: {
-        WIRInst_Binop *inst = (WIRInst_Binop *)wi;
+    case E_INST_Binop: {
+        INST_Binop *inst = (INST_Binop *)wi;
         switch (inst->op) {
-        case WIR_ADD: binop(wc, inst, VAR_OP_PLUS); break;
-        case WIR_SUB: binop(wc, inst, VAR_OP_MINUS); break;
-        case WIR_MUL: binop(wc, inst, VAR_OP_TIMES); break;
-        case WIR_DIV: binop(wc, inst, VAR_OP_DIV); break;
-        case WIR_MOD: binop(wc, inst, VAR_OP_MOD); break;
-        case WIR_XOR: binop(wc, inst, VAR_OP_XOR); break;
-        case WIR_LSH: binop(wc, inst, VAR_OP_LSHIFT); break;
-        case WIR_AND: binop(wc, inst, VAR_OP_AND); break;
-        case WIR_OR:  binop(wc, inst, VAR_OP_OR); break;
+        case WIR_ADD: compile_binop(wc, inst, VAR_OP_PLUS); break;
+        case WIR_SUB: compile_binop(wc, inst, VAR_OP_MINUS); break;
+        case WIR_MUL: compile_binop(wc, inst, VAR_OP_TIMES); break;
+        case WIR_DIV: compile_binop(wc, inst, VAR_OP_DIV); break;
+        case WIR_MOD: compile_binop(wc, inst, VAR_OP_MOD); break;
+        case WIR_XOR: compile_binop(wc, inst, VAR_OP_XOR); break;
+        case WIR_LSH: compile_binop(wc, inst, VAR_OP_LSHIFT); break;
+        case WIR_AND: compile_binop(wc, inst, VAR_OP_AND); break;
+        case WIR_OR:  compile_binop(wc, inst, VAR_OP_OR); break;
         
         case WIR_EQ: UNIMPLEMENTED;
         case WIR_NEQ: UNIMPLEMENTED;
@@ -234,44 +629,29 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
         }
         break;                
     }
-    case INST_WIRInst_StrAssign: {
-        WIRInst_StrAssign *inst = (WIRInst_StrAssign *)wi;
-
-        VEC_int32_t int_fields = VEC_EMPTY;
-        VEC_StringView str_fields = VEC_EMPTY;
-        if (inst->src.kind == OPKIND_IMM_STR) {
-            VEC_PUSH(int_fields, resolve(wc, inst->dest, true), wc->arena);
-            VEC_PUSH(int_fields, 0, wc->arena);
-            VEC_PUSH(int_fields, 0, wc->arena);
-            VEC_PUSH(str_fields, inst->src.as.imm_str, wc->arena);
-        } else {
-            VEC_PUSH(int_fields, resolve(wc, inst->dest, true), wc->arena);
-            VEC_PUSH(int_fields, 0, wc->arena);
-            VEC_PUSH(int_fields, resolve(wc, inst->src, true), wc->arena);
-        }
-        
-        cev_push_cmd(wc->cev, CMD_STRING, wc->indent,
-            int_fields, str_fields);
+    case E_INST_StrAssign: {
+        INST_StrAssign *inst = (INST_StrAssign *)wi;
+        push_str_command(wc, resolve(wc, inst->dest), inst->src);
         break;
     }
     // TODO
-    case INST_WIRInst_IfBegin: {
+    case E_INST_IfBegin: {
         cev_push_simple_cmd(wc->cev, CMD_IF_INT, wc->indent);
         
         wc->indent++;
         break;
     }
-    case INST_WIRInst_LoopBegin: {
+    case E_INST_LoopBegin: {
         cev_push_simple_cmd(wc->cev, CMD_LOOP, wc->indent);
         
         wc->indent++;
         break;
     }
-    case INST_WIRInst_LoopBeginN: {
-        WIRInst_LoopBeginN *inst = (WIRInst_LoopBeginN *)wi;
+    case E_INST_LoopBeginN: {
+        INST_LoopBeginN *inst = (INST_LoopBeginN *)wi;
 
         VEC_int32_t i_vec = VEC_EMPTY;
-        int32_t n = resolve(wc, inst->count, true);
+        int32_t n = resolve(wc, inst->count);
         
         VEC_PUSH(i_vec, n, wc->arena);
         
@@ -281,30 +661,72 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
         wc->indent++;
         break;
     }
-    case INST_WIRInst_LoopEnd: {
+    case E_INST_LoopEnd: {
         wc->indent--;
 
         cev_push_simple_cmd(wc->cev, CMD_LOOP_END, wc->indent);
         break;
     }
-    case INST_WIRInst_ReturnVal: {
+    case E_INST_ReturnVal: {
+        INST_ReturnVal *inst = (INST_ReturnVal *)wi;
+
+        // TODO: Optimize by not moving values if they are already in
+        //       the correct index to return.
+        //
+        //       This is a little awkward because of all the possible cases:
+        //       If a value is already stored in the right CSelf, then
+        //       don't move; but if a value is stored in a global (because
+        //       for example it overflowed the CSelf space), then move.
+        //       If a value is an immediate, it has to be stored first.
+        //       Temporaries use a map instead of the offset field, so they
+        //       have to be handled separately. And so on.
+
+        int32_t *target = &wc->cev->RETURN_VAL_TARGET;
+
+        switch (inst->val.kind) {
+            case OPKIND_IMM_INT:
+            case OPKIND_LOCAL_INT:
+            case OPKIND_TEMP_INT:
+            case OPKIND_GLOBAL_INT:
+            case OPKIND_GLOBAL_CEV:
+                *target = 99;
+                push_binop_command(wc, *target + CSELF_BASE,
+                    resolve(wc, inst->val), 0, VAR_OP_PLUS);
+                break;
+            case OPKIND_IMM_STR:
+            case OPKIND_INTERP:
+            case OPKIND_LOCAL_STR:
+            case OPKIND_GLOBAL_STR:
+                *target = 9;
+                push_str_command(wc, 
+                    *target + CSELF_BASE, inst->val);
+                break;
+            case OPKIND_GLOBAL_UDB:
+            case OPKIND_GLOBAL_CDB:
+                UNREACHABLE;
+        }
+
         cev_push_simple_cmd(wc->cev, CMD_RETURN, wc->indent);
         break;
     }
-    case INST_WIRInst_Cmd: {
-        WIRInst_Cmd *inst = (WIRInst_Cmd *)wi;
+    case E_INST_ReturnVoid: {
+        cev_push_simple_cmd(wc->cev, CMD_RETURN, wc->indent);
+        break;
+    }
+    case E_INST_Cmd: {
+        INST_Cmd *inst = (INST_Cmd *)wi;
         assert(inst->open_close >= -1
                 && inst->open_close <= 1);
 
         VEC_int32_t int_fields = VEC_EMPTY;
         for (size_t i = 0; i < inst->iargs.count; i++) {
-            VEC_PUSH(int_fields, resolve(wc, inst->iargs.at[i], true), wc->arena);
+            VEC_PUSH(int_fields, resolve(wc, inst->iargs.at[i]), wc->arena);
         }
 
         VEC_StringView str_fields = VEC_EMPTY;
         for (size_t i = 0; i < inst->sargs.count; i++) {
             WIROperand wop = inst->sargs.at[i];
-            if (is_strlit(wop))
+            if (op_is_strlit(wop))
                 VEC_PUSH(str_fields, interpolate(wc, wop), wc->arena);
             else UNREACHABLE;
         }
@@ -322,10 +744,10 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
         
         break;
     }
-    case INST_WIRInst_Call: {
-        WIRInst_Call *inst = (WIRInst_Call *)wi;
+    case E_INST_Call: {
+        INST_Call *inst = (INST_Call *)wi;
 
-        int32_t cev = resolve(wc, inst->cev, true);
+        int32_t cev = resolve(wc, inst->cev);
 
         VEC_int32_t int_args = VEC_EMPTY;
         VEC_int32_t str_ref_args = VEC_EMPTY;
@@ -337,18 +759,18 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
         int32_t strlit_flags = 0;
         for (size_t i = 0; i < inst->args.count; i++) {
             WIROperand wop = inst->args.at[i];
-            if (is_string(wop)) {
-                if (is_strlit(wop)) {
+            if (op_is_string(wop)) {
+                if (op_is_strlit(wop)) {
                     VEC_PUSH(str_ref_args, 0, wc->arena);
                     VEC_PUSH(str_lit_args, interpolate(wc, wop), wc->arena);
                     strlit_flags |= (1 << total_str_args);
                 } else {
-                    VEC_PUSH(str_ref_args, resolve(wc, wop, true), wc->arena);
+                    VEC_PUSH(str_ref_args, resolve(wc, wop), wc->arena);
                     VEC_PUSH(str_lit_args, SV(""), wc->arena);
                 }
                 total_str_args++;
             } else {
-                VEC_PUSH(int_args, resolve(wc, wop, true), wc->arena);
+                VEC_PUSH(int_args, resolve(wc, wop), wc->arena);
                 total_int_args++;
             }
         }
@@ -361,9 +783,12 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
             | total_str_args << 4
             | strlit_flags << 12;
 
-        if (inst->dest.kind == OPKIND_IMM_INT
-            && inst->dest.as.imm_int == 0)
+        // Handle storing the result.
+        if (!(inst->dest.kind == OPKIND_IMM_INT
+            && inst->dest.as.imm_int == 0)) {
+
             flags |= CALL_STORES_RETURN;
+        }
 
         VEC_int32_t int_fields = VEC_EMPTY;
         VEC_PUSH(int_fields, cev, wc->arena);
@@ -376,7 +801,7 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
             VEC_PUSH(int_fields, str_ref_args.at[i], wc->arena);
 
         if (flags & CALL_STORES_RETURN)
-            VEC_PUSH(int_fields, resolve(wc, inst->dest, true), wc->arena);
+            VEC_PUSH(int_fields, resolve(wc, inst->dest), wc->arena);
 
         cev_push_cmd(wc->cev,
             CMD_CALL_ID, wc->indent,
@@ -385,20 +810,19 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
         );
         break;
     }
-    case INST_TOMBSTONE: break;
-    default:
-        UNIMPLEMENTED;
+    case E_INST_TOMBSTONE: break;
     }        
 }
 
-// If the temporary result of a calculation is moved directly into a
-// variable, rewrite to store the result directly into the variable.
-static void temp_copy_propagation(WIRCev *wcev) {
+// For the current WIRCev, if the temporary result of a calculation
+// is moved directly into a variable, rewrite to store the result
+// directly into the variable.
+static void temp_copy_propagation_pass(WIRCev *wcev) {
     for (size_t i = 0; i < wcev->insts.count; i++) {
-        if (wcev->insts.at[i]->kind != INST_WIRInst_Binop)
+        if (wcev->insts.at[i]->kind != E_INST_Binop)
             continue;
         
-        WIRInst_Binop *inst = (WIRInst_Binop *)wcev->insts.at[i]; 
+        INST_Binop *inst = (INST_Binop *)wcev->insts.at[i]; 
 
         if (inst->op != WIR_ADD) continue;
         if (inst->a.kind != OPKIND_TEMP_INT) continue;
@@ -408,13 +832,13 @@ static void temp_copy_propagation(WIRCev *wcev) {
         assert(i > 0);
         WIRInst *prev = wcev->insts.at[i - 1];
 
-        if (prev->kind == INST_WIRInst_Binop) {
-            WIRInst_Binop *p = (WIRInst_Binop *)prev;
+        if (prev->kind == E_INST_Binop) {
+            INST_Binop *p = (INST_Binop *)prev;
             if (p->dest.kind == OPKIND_TEMP_INT
-                && p->dest.as.local_offset == inst->a.as.local_offset) {
+                && p->dest.as.offset == inst->a.as.offset) {
 
                 p->dest = inst->dest;
-                inst->base.kind = INST_TOMBSTONE;
+                inst->base.kind = E_INST_TOMBSTONE;
             }
         }
     }
@@ -443,18 +867,25 @@ static void compile_wir(WIRCompiler *wc, Module *mod) {
         
         #undef LOAD_SYMBOLS
     }
+    print_wir(mod->wir);
     
-    // Then compile all the common events.
+    // Process every `WIRCev`.
     for (size_t i = 0; i < wir->g_cevs.count; i++) {
-        CommonEvent cev;
-        cev_init(&cev, wc->arena);
-
-        wc->cev = &cev;
-        wc->indent = 0;
-
         WIRCev *wcev = &wir->g_cevs.at[i];
 
-        temp_copy_propagation(wcev);
+        // First, apply transformations to the code.
+        temp_copy_propagation_pass(wcev);
+        disable_rc_pass(wc->arena, wcev);
+        
+        // Map concrete addresses to temporaries.
+        wc->temp_map = temp_alloc_pass(wc->arena, wcev);
+
+        // Then compile the code into commands.
+        CommonEvent cev;
+        cev_init(&cev, wc->arena);
+        cev.COMMON_NAME = wcev->name;
+        wc->cev = &cev;
+        wc->indent = 0;
 
         for (size_t j = 0; j < wcev->insts.count; j++) {
             compile_inst(wc, wcev->insts.at[j]);
@@ -466,6 +897,25 @@ static void compile_wir(WIRCompiler *wc, Module *mod) {
 
         VEC_PUSH(wc->gd.cevs, cev, wc->arena);
     }
+}
+
+// Ensures that the IR is sane. That is:
+// - Local variables are not referenced unless they are pushed onto 
+//   the virtual stack.
+// - Loops and conditionals have a matching beginning and end.
+// - Convenience properties of the IR cached in the struct actually
+//   properly reflect the properties of the IR. (i.e. The "next unused
+//   temporaries" should actually be unused.)
+// - Instructions that store a value (like binop or call) do not attempt
+//   to store values into immediates (which have no addresses).
+// It's expected that any WIR generated by AST2WIR has these properties,
+// so the compiler will just crash if those requirements are not met.
+static bool validate(WIRCompiler *wc, WIRCev *wcev) {
+    // TODO: Basically this is a massive assertion which wouldn't
+    //       actually change the output so just holding off on this for now.
+    (void) wc;
+    (void) wcev;
+    return true;
 }
 
 GameData wir_pass(VEC_Module *modules, Arena *arena) {
@@ -518,16 +968,16 @@ static void print_wop(WIROperand wop) {
             for (size_t i = 0; i < wop.as.interp.count; i++) {
                 print_wop(wop.as.interp.at[i]);
             }
-            printf("}");
+            printf(" }");
             return;
         case OPKIND_LOCAL_INT:
-            printf(" $LI(%zu)", wop.as.local_offset);
+            printf(" $LI(%zu)", wop.as.offset);
             return;
         case OPKIND_LOCAL_STR:
-            printf(" $LS(%zu)", wop.as.local_offset);
+            printf(" $LS(%zu)", wop.as.offset);
             return;
         case OPKIND_TEMP_INT:
-            printf(" $T(%zu)", wop.as.local_offset);
+            printf(" $TI(%zu)", wop.as.offset);
             return;
         case OPKIND_GLOBAL_INT:
             printf(" $GINT[" SV_FMT ":" SV_FMT "]",
@@ -556,24 +1006,57 @@ void print_wir(WIR *wir) {
     for (size_t cev = 0; cev < wir->g_cevs.count; cev++) {
         VEC_PTR_WIRInst arr = wir->g_cevs.at[cev].insts;
 
+        size_t stack_i = 0;
+
         printf(SV_FMT ":\n", SV_FMT_VAL(wir->g_cevs.at[cev].name));
 
         for (size_t i = 0; i < arr.count; i++) {
             WIRInst *inst = arr.at[i];
-            printf("[OP %d]:", inst->kind);
             switch (inst->kind) {
-            case INST_WIRInst_Binop: {
-                WIRInst_Binop *in = (WIRInst_Binop *)inst;
-                printf(" %d", in->op);
+            case E_INST_PushInt:
+                printf("pushi \t\t\t; (max i: %zu)", stack_i);
+                stack_i++;
+                break;
+            case E_INST_PopIntN: {
+                stack_i--;
+                INST_PopIntN *in = (INST_PopIntN *)inst;
+                printf("popi %zu \t\t\t", in->n);
+                if (stack_i == 0)
+                    printf("; (max i: -)");
+                else
+                    printf("; (max i: %zu)", stack_i);
+                break;
+            }
+            case E_INST_Binop: {
+                printf("binop");
+                INST_Binop *in = (INST_Binop *)inst;
                 print_wop(in->dest);
+                printf(" %d", in->op);
                 print_wop(in->a);
                 print_wop(in->b);
                 break;
             }
-            case INST_TOMBSTONE:
-                printf(" X");
+            case E_INST_ReturnVal: {
+                printf("ret");
+                INST_ReturnVal *in = (INST_ReturnVal *)inst;
+                print_wop(in->val);
+                break;
+            }
+            case E_INST_Call: {
+                printf("call");
+                INST_Call *in = (INST_Call *)inst;
+                print_wop(in->dest);
+                print_wop(in->cev);
+                for (size_t arg = 0; arg < in->args.count; arg++) {
+                    print_wop(in->args.at[arg]);
+                }
+                break;
+            }
+            case E_INST_TOMBSTONE:
+                printf("nop");
                 break;
             default:
+                printf("(op %d)", inst->kind);
                 printf(" (print not implemented)");
                 break;
             }

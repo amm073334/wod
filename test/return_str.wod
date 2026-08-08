@@ -1,0 +1,14 @@
+// EXPECT: asdf
+
+apply "bin";
+
+import "_test.wod";
+
+str test() {
+    return "asdf";
+}
+
+void main() {
+    output(test());
+    exit();
+}

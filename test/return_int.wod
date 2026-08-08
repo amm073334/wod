@@ -1,0 +1,16 @@
+// EXPECT: 56162
+
+apply "bin";
+
+import "_test.wod";
+
+int test() {
+    int a = 123;
+    int b = a * 456 + 1;
+    return a ^ b;
+}
+
+void main() {
+    output("${test()}");
+    exit();
+}
