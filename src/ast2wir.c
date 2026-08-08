@@ -80,7 +80,15 @@ static WIROperand tmp_int(Ast2Wir *aw) {
     WIRCev *cur_cev = &aw->wir->g_cevs.at[aw->wir->g_cevs.count - 1];
     return (WIROperand){
         .kind = OPKIND_TEMP_INT,
-        .as.offset = cur_cev->next_temp_int++ 
+        .as.offset = cur_cev->n_temp_ints++ 
+    };
+}
+
+static WIROperand tmp_str(Ast2Wir *aw) {
+    WIRCev *cur_cev = &aw->wir->g_cevs.at[aw->wir->g_cevs.count - 1];
+    return (WIROperand){
+        .kind = OPKIND_TEMP_STR,
+        .as.offset = cur_cev->n_temp_strs++ 
     };
 }
 
@@ -102,19 +110,30 @@ static void close_frame(Ast2Wir *aw) {
     TwoStack *to_pop = &aw->local_frames.at[aw->local_frames.count - 1];
 
     size_t prev_ints;
+    size_t prev_strs;
     if (aw->local_frames.count > 1) {
         TwoStack *prev = &aw->local_frames.at[aw->local_frames.count - 2];
         prev_ints = prev->int_top;
+        prev_strs = prev->str_top;
     } else {
         prev_ints = 0;
+        prev_strs = 0;
     }
     assert(prev_ints <= to_pop->int_top);
+    assert(prev_strs <= to_pop->str_top);
 
     size_t allocated_ints = to_pop->int_top - prev_ints;
+    size_t allocated_strs = to_pop->str_top - prev_strs;
 
     if (allocated_ints > 0) {
         INST_PopIntN *inst; 
         ALLOC_WIR(inst, INST_PopIntN, (INST_PopIntN){ .n = allocated_ints });
+        emit_to_current_cev(aw, (WIRInst *)inst);
+    }
+
+    if (allocated_strs > 0) {
+        INST_PopStrN *inst; 
+        ALLOC_WIR(inst, INST_PopStrN, (INST_PopStrN){ .n = allocated_strs });
         emit_to_current_cev(aw, (WIRInst *)inst);
     }
 
@@ -130,6 +149,7 @@ static size_t new_local_int(Ast2Wir *aw) {
 
 static size_t new_local_str(Ast2Wir *aw) {
     assert(aw->local_frames.count > 0);
+    emit_simple(aw, E_INST_PushStr);
     TwoStack *top = &aw->local_frames.at[aw->local_frames.count - 1];
     return top->str_top++;
 }
@@ -352,7 +372,12 @@ static WIROperand visit_Expr(Ast2Wir *aw, Expr *expr) {
                 visit_Expr(aw, e->args.at[i]), aw->arena);
         }
 
-        WIROperand dest = tmp_int(aw);
+        WIROperand dest;
+        if (e->base.type.basetype == TYPE_STR)
+            dest = tmp_str(aw);
+        else
+            dest = tmp_int(aw);
+
         INST_Call *inst;
         ALLOC_WIR(inst, INST_Call,
             (INST_Call){.dest = dest, .cev = callee, .args = args});
@@ -482,7 +507,7 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
             ((WIRCev){
                 .name = s->name,
                 .insts = VEC_EMPTY,
-                .next_temp_int = 0,
+                .n_temp_ints = 0,
             }), aw->arena);
 
         open_frame(aw);

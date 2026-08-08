@@ -28,7 +28,8 @@ typedef struct WIRCompiler {
     VEC_GlobalEntry g_strs;
 
     // Maps temporaries to concrete references.
-    VEC_int32_t temp_map; 
+    VEC_int32_t int_map;
+    VEC_int32_t str_map;
 
     // Information about the current common event.
     CommonEvent *cev;
@@ -43,6 +44,7 @@ bool op_is_string(WIROperand wop) {
         case OPKIND_IMM_STR:
         case OPKIND_INTERP:
         case OPKIND_LOCAL_STR:
+        case OPKIND_TEMP_STR:
         case OPKIND_GLOBAL_STR:
             return true;
         case OPKIND_IMM_INT:
@@ -65,7 +67,7 @@ static bool op_is_strlit(WIROperand wop) {
 }
 
 static size_t i_temp(WIRCev *wcev) {
-    return wcev->next_temp_int++;
+    return wcev->n_temp_ints++;
 }
 
 static void insert_inst(Arena *arena, WIRCev *wcev, size_t pos, WIRInst *inst) {
@@ -125,7 +127,9 @@ static void disable_rc_pass(Arena *arena, WIRCev *wcev) {
         switch (wirinst->kind) {
         case E_INST_TOMBSTONE:
         case E_INST_PushInt:
+        case E_INST_PushStr:
         case E_INST_PopIntN:
+        case E_INST_PopStrN:
         case E_INST_StrAssign:
         case E_INST_Cmd:
         case E_INST_ReturnVoid:
@@ -210,9 +214,15 @@ static int32_t resolve(WIRCompiler *wc, WIROperand wop) {
         return ref;
     }
     case OPKIND_TEMP_INT: {
-        int32_t ref = wc->temp_map.at[wop.as.offset];
+        int32_t ref = wc->int_map.at[wop.as.offset];
         assert(ref >= RC_THRESHOLD);
         assert(ref <= CSELF_INT_MAX);
+        return ref;
+    }
+    case OPKIND_TEMP_STR: {
+        int32_t ref = wc->str_map.at[wop.as.offset];
+        assert(ref >= RC_THRESHOLD);
+        assert(ref <= CSELF_STR_MAX);
         return ref;
     }
     case OPKIND_GLOBAL_INT: g_vec = &wc->g_ints; offset = NORMAL_VAR_BASE; break;
@@ -266,19 +276,25 @@ static StringView interpolate(WIRCompiler *wc, WIROperand wop) {
         }
         case OPKIND_LOCAL_INT: {
             assert(frag.as.offset <= CSELF_INT_MAX - CSELF_BASE);
-            snprintf(buf, sizeof(buf), "\\cself[%zu]", frag.as.offset);
+            snprintf(buf, sizeof(buf), "\\cself[%zu]", frag.as.offset + CSELF_INT_BASE - CSELF_BASE);
             next = to_sv(buf);
             break;
         }
         case OPKIND_LOCAL_STR: {
             assert(frag.as.offset <= CSELF_STR_MAX - CSELF_BASE);
-            snprintf(buf, sizeof(buf), "\\cself[%zu]", frag.as.offset);
+            snprintf(buf, sizeof(buf), "\\cself[%zu]", frag.as.offset + CSELF_STR_BASE - CSELF_BASE);
             next = to_sv(buf);
             break;
         }
         case OPKIND_TEMP_INT: {
-            assert(wc->temp_map.at[frag.as.offset] < CSELF_INT_MAX);
-            snprintf(buf, sizeof(buf), "\\cself[%zu]", wc->temp_map.at[frag.as.offset] - CSELF_BASE);
+            assert(wc->int_map.at[frag.as.offset] < CSELF_INT_MAX);
+            snprintf(buf, sizeof(buf), "\\cself[%zu]", wc->int_map.at[frag.as.offset] - CSELF_BASE);
+            next = to_sv(buf);
+            break;
+        }
+        case OPKIND_TEMP_STR: {
+            assert(wc->str_map.at[frag.as.offset] < CSELF_STR_MAX);
+            snprintf(buf, sizeof(buf), "\\cself[%zu]", wc->str_map.at[frag.as.offset] - CSELF_BASE);
             next = to_sv(buf);
             break;
         }
@@ -344,34 +360,100 @@ static int cb_interval_end_desc(const void *a, const void *b) {
     return 0;
 }
 
-static void update_interval(VEC_Interval *intervals, size_t inst, WIROperand wop) {
-    if (wop.kind != OPKIND_TEMP_INT) return;
-    assert(wop.as.offset < intervals->count);
+static void update_interval(VEC_Interval *i_its, VEC_Interval *s_its, size_t inst, WIROperand wop) {
+    if (wop.kind != OPKIND_TEMP_INT && wop.kind != OPKIND_TEMP_STR) return;
 
-    Interval *it = &intervals->at[wop.as.offset];
+    Interval *it;
+    if (wop.kind == OPKIND_TEMP_INT) {
+        assert(wop.as.offset < i_its->count);
+        it = &i_its->at[wop.as.offset];
+    } else {
+        assert(wop.as.offset < s_its->count);
+        it = &s_its->at[wop.as.offset];
+    }
+
     if (it->start == -1) it->start = inst;
     it->end = inst;
 }
 
-static void update_map(VEC_int32_t *map, int stack_top, WIROperand wop) {
-    if (wop.kind != OPKIND_TEMP_INT) return;
+static void update_map(VEC_int32_t *i_map, size_t i_top, VEC_int32_t *s_map, size_t s_top, WIROperand wop) {
+    if (wop.kind == OPKIND_TEMP_INT) {
+        // If temporary has already been given a concrete address, skip.
+        if (i_map->at[wop.as.offset] >= RC_THRESHOLD) return;
 
-    // If temporary has already been given a concrete address, skip.
-    if (map->at[wop.as.offset] >= RC_THRESHOLD) return;
+        i_map->at[wop.as.offset] += CSELF_INT_BASE + i_top;
 
-    map->at[wop.as.offset] += CSELF_INT_BASE + stack_top; 
+        // Crash when overflowing the CSelf space for now.
+        assert(i_map->at[wop.as.offset] <= CSELF_INT_MAX);
+    } else if (wop.kind == OPKIND_TEMP_STR) {
+        if (s_map->at[wop.as.offset] >= RC_THRESHOLD) return;
+
+        s_map->at[wop.as.offset] += CSELF_STR_BASE + s_top;
+
+        assert(s_map->at[wop.as.offset] <= CSELF_STR_MAX);
+    }
+}
+
+// Allocate offsets to temporaries.
+// Essentially, this is linear register allocation but with an
+// infinite number of physical registers.
+// (https://en.wikipedia.org/wiki/Register_allocation#Linear_scan)
+static VEC_int32_t reg_alloc(Arena *arena, VEC_Interval *its) {
+    VEC_int32_t map = VEC_EMPTY;
+    for (size_t i = 0; i < its->count; i++)
+        VEC_PUSH(map, 0, arena);
+    
+    // Whether or not a register is active.
+    VEC_DEF(bool);
+    VEC_bool regs = VEC_EMPTY;
+    for (size_t i = 0; i < its->count; i++)
+        VEC_PUSH(regs, false, arena);
+    
+    VEC_Interval i_active = VEC_EMPTY;
+
+    qsort(its->at, its->count,
+        sizeof(its->at[0]), cb_interval_start_asc);
+
+    for (size_t i = 0; i < its->count; i++) {
+        qsort(i_active.at, i_active.count,
+            sizeof(i_active.at[0]), cb_interval_end_desc);
+        
+        for (size_t j = 0; j < i_active.count;) {
+            if (i_active.at[j].end >= its->at[i].start)
+                break;
+
+            VEC_REMOVE(i_active, j);
+            regs.at[i_active.at[j].id] = false;
+        }
+
+        assert(i_active.count <= regs.count);
+
+        for (size_t reg = 0; reg < regs.count; reg++) {
+            if (regs.at[reg]) continue;
+            map.at[its->at[i].id] = reg;
+            regs.at[reg] = true;
+            break;
+        }
+        VEC_PUSH(i_active, its->at[i], arena);
+    }
+
+    return map;
 }
 
 // Assigns concrete addresses to temporaries.
-static VEC_int32_t temp_alloc_pass(Arena *arena, WIRCev *wcev) {
+static void temp_alloc_pass(Arena *arena, WIRCev *wcev, VEC_int32_t *i_map, VEC_int32_t *s_map) {
     // Compute liveness intervals of all temporaries.
-    size_t n_temps = wcev->next_temp_int;
-    if (wcev->next_temp_int == 0)
-        return (VEC_int32_t)VEC_EMPTY;
+    size_t n_i_temps = wcev->n_temp_ints;
+    size_t n_s_temps = wcev->n_temp_strs;
 
-    VEC_Interval intervals = VEC_EMPTY;
-    for (size_t i = 0; i < n_temps; i++)
-        VEC_PUSH(intervals, ((Interval){ .id = i,
+    VEC_Interval i_its = VEC_EMPTY;
+    for (size_t i = 0; i < n_i_temps; i++)
+        VEC_PUSH(i_its, ((Interval){ .id = i,
+            .start = (size_t)-1, .end = (size_t)-1 }), arena);
+    
+    VEC_Interval s_its = VEC_EMPTY;
+    for (size_t i = 0; i < n_s_temps; i++)
+        VEC_PUSH(s_its, ((Interval){ .id = i,
             .start = (size_t)-1, .end = (size_t)-1 }), arena);
 
     for (size_t i = 0; i < wcev->insts.count; i++) {
@@ -379,8 +461,9 @@ static VEC_int32_t temp_alloc_pass(Arena *arena, WIRCev *wcev) {
         switch (wirinst->kind) {
         case E_INST_TOMBSTONE:
         case E_INST_PushInt:
+        case E_INST_PushStr:
         case E_INST_PopIntN:
-        case E_INST_StrAssign:
+        case E_INST_PopStrN:
         case E_INST_Cmd:
         case E_INST_ReturnVoid:
         case E_INST_Continue:
@@ -388,168 +471,174 @@ static VEC_int32_t temp_alloc_pass(Arena *arena, WIRCev *wcev) {
         case E_INST_LoopEnd:
         case E_INST_Else:
         case E_INST_IfEnd:
-        case E_INST_Label:
-        case E_INST_Goto:
         case E_INST_LoopBegin:
             break;
+        case E_INST_StrAssign: {
+            INST_StrAssign *inst = (INST_StrAssign *)wirinst;
+            update_interval(&i_its, &s_its, i, inst->dest);
+            update_interval(&i_its, &s_its, i, inst->src);
+            break;
+        }
+        case E_INST_Label: {
+            INST_Label *inst = (INST_Label *)wirinst;
+            update_interval(&i_its, &s_its, i, inst->name);
+            break;
+        }
+        case E_INST_Goto: {
+            INST_Goto *inst = (INST_Goto *)wirinst;
+            update_interval(&i_its, &s_its, i, inst->name);
+            break;
+        }
         case E_INST_Binop: {
             INST_Binop *inst = (INST_Binop *)wirinst;
-            update_interval(&intervals, i, inst->dest);
-            update_interval(&intervals, i, inst->a);
-            update_interval(&intervals, i, inst->b);
+            update_interval(&i_its, &s_its, i, inst->dest);
+            update_interval(&i_its, &s_its, i, inst->a);
+            update_interval(&i_its, &s_its, i, inst->b);
             break;
         }
         case E_INST_IfBegin: {
             INST_IfBegin *inst = (INST_IfBegin *)wirinst;
-            update_interval(&intervals, i, inst->cond);
+            update_interval(&i_its, &s_its, i, inst->cond);
             break;
         }
         case E_INST_LoopBeginN: {
             INST_LoopBeginN *inst = (INST_LoopBeginN *)wirinst;
-            update_interval(&intervals, i, inst->count);
+            update_interval(&i_its, &s_its, i, inst->count);
             break;
         }
         case E_INST_Call: {
             INST_Call *inst = (INST_Call *)wirinst;
-            update_interval(&intervals, i, inst->dest);
+            update_interval(&i_its, &s_its, i, inst->dest);
             for (size_t arg = 0; arg < inst->args.count; arg++)
-                update_interval(&intervals, i, inst->args.at[arg]);
+                update_interval(&i_its, &s_its, i, inst->args.at[arg]);
             break;
         }
         case E_INST_ReturnVal: {
             INST_ReturnVal *inst = (INST_ReturnVal *)wirinst;
-            update_interval(&intervals, i, inst->val);
+            update_interval(&i_its, &s_its, i, inst->val);
             break;
         }
         case E_INST_DBLoad: {
             INST_DBLoad *inst = (INST_DBLoad *)wirinst;
-            update_interval(&intervals, i, inst->db_type);
-            update_interval(&intervals, i, inst->db_data);
-            update_interval(&intervals, i, inst->db_field);
+            update_interval(&i_its, &s_its, i, inst->db_type);
+            update_interval(&i_its, &s_its, i, inst->db_data);
+            update_interval(&i_its, &s_its, i, inst->db_field);
             break;
         }
         case E_INST_DBStore: {
             INST_DBStore *inst = (INST_DBStore *)wirinst;
-            update_interval(&intervals, i, inst->db_type);
-            update_interval(&intervals, i, inst->db_data);
-            update_interval(&intervals, i, inst->db_field);
+            update_interval(&i_its, &s_its, i, inst->db_type);
+            update_interval(&i_its, &s_its, i, inst->db_data);
+            update_interval(&i_its, &s_its, i, inst->db_field);
             break;
         }
         }
     }
 
     // If a temporary wasn't found, remove its interval.
-    for (size_t i = 0; i < intervals.count;) {
-        if (intervals.at[i].start != -1) {
+    for (size_t i = 0; i < i_its.count;) {
+        if (i_its.at[i].start != -1) {
             i++;
             continue;
         }
-        VEC_REMOVE(intervals, i);
+        VEC_REMOVE(i_its, i);
+    }
+    for (size_t i = 0; i < s_its.count;) {
+        if (s_its.at[i].start != -1) {
+            i++;
+            continue;
+        }
+        VEC_REMOVE(s_its, i);
     }
 
-    // Allocate offsets to temporaries.
-    // Essentially, this is linear register allocation but with an
-    // infinite number of physical registers.
-    // (https://en.wikipedia.org/wiki/Register_allocation#Linear_scan)
-    VEC_int32_t map = VEC_EMPTY;
-    for (size_t i = 0; i < n_temps; i++)
-        VEC_PUSH(map, 0, arena);
-    
-    // Whether or not a register is active.
-    VEC_DEF(bool);
-    VEC_bool regs = VEC_EMPTY;
-    for (size_t i = 0; i < n_temps; i++)
-        VEC_PUSH(regs, false, arena);
-    
-    VEC_Interval active = VEC_EMPTY;
-
-    qsort(intervals.at, intervals.count,
-        sizeof(intervals.at[0]), cb_interval_start_asc);
-
-    for (size_t i = 0; i < intervals.count; i++) {
-        qsort(active.at, active.count,
-            sizeof(active.at[0]), cb_interval_end_desc);
-        
-        for (size_t j = 0; j < active.count;) {
-            if (active.at[j].end >= intervals.at[i].start)
-                break;
-
-            VEC_REMOVE(active, j);
-            regs.at[active.at[j].id] = false;
-        }
-
-        assert(active.count <= regs.count);
-
-        for (size_t reg = 0; reg < regs.count; reg++) {
-            if (regs.at[reg]) continue;
-            map.at[intervals.at[i].id] = reg;
-            regs.at[reg] = true;
-            break;
-        }
-        VEC_PUSH(active, intervals.at[i], arena);
-    }
+    *i_map = reg_alloc(arena, &i_its);
+    *s_map = reg_alloc(arena, &s_its);
 
     // Now do one more pass of the code, keeping track of the
     // state of the local variable stack, to assign actual
     // addresses to each temporary. Addresses are assigned such
     // that they are always right above the local stack.
-    int i_top = 0;
+    size_t i_top = 0;
+    size_t s_top = 0;
     for (size_t i = 0; i < wcev->insts.count; i++) {
         WIRInst *wirinst = wcev->insts.at[i];
         switch (wirinst->kind) {
         case E_INST_PushInt:
             i_top++;
             break;
+        case E_INST_PushStr:
+            s_top++;
+            break;
         case E_INST_PopIntN: {
             INST_PopIntN *inst = (INST_PopIntN *)wirinst;
             i_top -= inst->n;
             break;
         }
+        case E_INST_PopStrN: {
+            INST_PopStrN *inst = (INST_PopStrN *)wirinst;
+            s_top -= inst->n;
+            break;
+        }
         case E_INST_Binop: {
             INST_Binop *inst = (INST_Binop *)wirinst;
-            update_map(&map, i_top, inst->dest);
-            update_map(&map, i_top, inst->a);
-            update_map(&map, i_top, inst->b);
+            update_map(i_map, i_top, s_map, s_top, inst->dest);
+            update_map(i_map, i_top, s_map, s_top, inst->a);
+            update_map(i_map, i_top, s_map, s_top, inst->b);
             break;
         }
         case E_INST_IfBegin: {
             INST_IfBegin *inst = (INST_IfBegin *)wirinst;
-            update_map(&map, i_top, inst->cond);
+            update_map(i_map, i_top, s_map, s_top, inst->cond);
             break;
         }
         case E_INST_LoopBeginN: {
             INST_LoopBeginN *inst = (INST_LoopBeginN *)wirinst;
-            update_map(&map, i_top, inst->count);
+            update_map(i_map, i_top, s_map, s_top, inst->count);
             break;
         }
         case E_INST_Call: {
             INST_Call *inst = (INST_Call *)wirinst;
-            update_map(&map, i_top, inst->dest);
+            update_map(i_map, i_top, s_map, s_top, inst->dest);
             for (size_t arg = 0; arg < inst->args.count; arg++)
-                update_map(&map, i_top, inst->args.at[arg]);
+                update_map(i_map, i_top, s_map, s_top, inst->args.at[arg]);
             break;
         }
         case E_INST_ReturnVal: {
             INST_ReturnVal *inst = (INST_ReturnVal *)wirinst;
-            update_map(&map, i_top, inst->val);
+            update_map(i_map, i_top, s_map, s_top, inst->val);
             break;
         }
         case E_INST_DBLoad: {
             INST_DBLoad *inst = (INST_DBLoad *)wirinst;
-            update_map(&map, i_top, inst->db_type);
-            update_map(&map, i_top, inst->db_data);
-            update_map(&map, i_top, inst->db_field);
+            update_map(i_map, i_top, s_map, s_top, inst->db_type);
+            update_map(i_map, i_top, s_map, s_top, inst->db_data);
+            update_map(i_map, i_top, s_map, s_top, inst->db_field);
             break;
         }
         case E_INST_DBStore: {
             INST_DBStore *inst = (INST_DBStore *)wirinst;
-            update_map(&map, i_top, inst->db_type);
-            update_map(&map, i_top, inst->db_data);
-            update_map(&map, i_top, inst->db_field);
+            update_map(i_map, i_top, s_map, s_top, inst->db_type);
+            update_map(i_map, i_top, s_map, s_top, inst->db_data);
+            update_map(i_map, i_top, s_map, s_top, inst->db_field);
+            break;
+        }
+        case E_INST_StrAssign: {
+            INST_StrAssign *inst = (INST_StrAssign *)wirinst;
+            update_map(i_map, i_top, s_map, s_top, inst->dest);
+            update_map(i_map, i_top, s_map, s_top, inst->src);
+            break;
+        }
+        case E_INST_Label: {
+            INST_Label *inst = (INST_Label *)wirinst;
+            update_map(i_map, i_top, s_map, s_top, inst->name);
+            break;
+        }
+        case E_INST_Goto: {
+            INST_Goto *inst = (INST_Goto *)wirinst;
+            update_map(i_map, i_top, s_map, s_top, inst->name);
             break;
         }
         case E_INST_TOMBSTONE:
-        case E_INST_StrAssign:
         case E_INST_Cmd:
         case E_INST_ReturnVoid:
         case E_INST_Continue:
@@ -557,14 +646,12 @@ static VEC_int32_t temp_alloc_pass(Arena *arena, WIRCev *wcev) {
         case E_INST_LoopEnd:
         case E_INST_Else:
         case E_INST_IfEnd:
-        case E_INST_Label:
-        case E_INST_Goto:
         case E_INST_LoopBegin:
             break;
         }
     }
 
-    return map;
+    return ;
 }
 
 static void push_binop_command(WIRCompiler *wc, int32_t dest, int32_t a, int32_t b, int cmd_var_op) {
@@ -695,6 +782,7 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
             case OPKIND_IMM_STR:
             case OPKIND_INTERP:
             case OPKIND_LOCAL_STR:
+            case OPKIND_TEMP_STR:
             case OPKIND_GLOBAL_STR:
                 *target = 9;
                 push_str_command(wc, 
@@ -877,7 +965,7 @@ static void compile_wir(WIRCompiler *wc, Module *mod) {
         disable_rc_pass(wc->arena, wcev);
         
         // Map concrete addresses to temporaries.
-        wc->temp_map = temp_alloc_pass(wc->arena, wcev);
+        temp_alloc_pass(wc->arena, wcev, &wc->int_map, &wc->str_map);
 
         // Then compile the code into commands.
         CommonEvent cev;
@@ -978,6 +1066,9 @@ static void print_wop(WIROperand wop) {
         case OPKIND_TEMP_INT:
             printf(" $TI(%zu)", wop.as.offset);
             return;
+        case OPKIND_TEMP_STR:
+            printf(" $TS(%zu)", wop.as.offset);
+            return;
         case OPKIND_GLOBAL_INT:
             printf(" $GINT[" SV_FMT ":" SV_FMT "]",
                 SV_FMT_VAL(wop.as.global.path), SV_FMT_VAL(wop.as.global.name));
@@ -1006,6 +1097,7 @@ void print_wir(WIR *wir) {
         VEC_PTR_WIRInst arr = wir->g_cevs.at[cev].insts;
 
         size_t stack_i = 0;
+        size_t stack_s = 0;
 
         printf(SV_FMT ":\n", SV_FMT_VAL(wir->g_cevs.at[cev].name));
 
@@ -1016,14 +1108,28 @@ void print_wir(WIR *wir) {
                 printf("pushi \t\t\t; (max i: %zu)", stack_i);
                 stack_i++;
                 break;
+            case E_INST_PushStr:
+                printf("pushs \t\t\t; (max s: %zu)", stack_s);
+                stack_i++;
+                break;
             case E_INST_PopIntN: {
-                stack_i--;
                 INST_PopIntN *in = (INST_PopIntN *)inst;
+                stack_i -= in->n;
                 printf("popi %zu \t\t\t", in->n);
                 if (stack_i == 0)
                     printf("; (max i: -)");
                 else
                     printf("; (max i: %zu)", stack_i);
+                break;
+            }
+            case E_INST_PopStrN: {
+                INST_PopStrN *in = (INST_PopStrN *)inst;
+                stack_s -= in->n;
+                printf("pops %zu \t\t\t", in->n);
+                if (stack_s == 0)
+                    printf("; (max s: -)");
+                else
+                    printf("; (max s: %zu)", stack_s);
                 break;
             }
             case E_INST_Binop: {
@@ -1092,6 +1198,7 @@ bool op_is_local(WIROperand wop) {
         case OPKIND_IMM_STR:
         case OPKIND_INTERP:
         case OPKIND_TEMP_INT:
+        case OPKIND_TEMP_STR:
         case OPKIND_GLOBAL_INT:
         case OPKIND_GLOBAL_STR:
         case OPKIND_GLOBAL_CEV:
@@ -1112,6 +1219,7 @@ bool op_is_global(WIROperand wop) {
         case OPKIND_IMM_STR:
         case OPKIND_INTERP:
         case OPKIND_TEMP_INT:
+        case OPKIND_TEMP_STR:
         case OPKIND_LOCAL_INT:
         case OPKIND_LOCAL_STR:
             return false;

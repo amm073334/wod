@@ -33,12 +33,10 @@ struct WIROperand {
         // and is never meant to decrease over the course of a
         // function. Instead, temporaries are allocated in the
         // CSelf space such that they don't overlap with the locals.
-        //
-        // There are no temporary strings as strings can't currently
-        // be used as parts of expressions.
         OPKIND_LOCAL_INT,
         OPKIND_LOCAL_STR,
         OPKIND_TEMP_INT,
+        OPKIND_TEMP_STR,
 
         // Uses the `global` field to qualify a top-level identifier.
         // Integer variables are assumed to index into 通常変数.
@@ -72,7 +70,9 @@ typedef struct {
         // Used to manipulate the compile-time stack.
         // Does not actually correspond to a real command.
         E_INST_PushInt,
+        E_INST_PushStr,
         E_INST_PopIntN,
+        E_INST_PopStrN,
 
         // Generally corresponds to a real command.
         E_INST_Binop,
@@ -101,6 +101,11 @@ typedef struct {
     WIRInst base;
     size_t n;
 } INST_PopIntN;
+
+typedef struct {
+    WIRInst base;
+    size_t n;
+} INST_PopStrN;
 
 typedef struct {
     WIRInst base;
@@ -223,7 +228,8 @@ typedef struct WIRCev {
 
     // Convenience fields to keep track of the lowest unused
     // virtual temporary.
-    size_t next_temp_int;
+    size_t n_temp_ints;
+    size_t n_temp_strs;
 } WIRCev;
 VEC_DEF(WIRCev);
 
