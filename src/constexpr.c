@@ -163,8 +163,8 @@ static void visit_Stmt(Arena *arena, Stmt *stmt) {
     switch (stmt->kind) {
     case NODE_StmtAssign: {
         StmtAssign *s = (StmtAssign *)stmt;
-        visit_Expr(arena, s->left);
-        visit_Expr(arena, s->right);
+        s->left = visit_Expr(arena, s->left);
+        s->right = visit_Expr(arena, s->right);
         return;
     }
     case NODE_StmtVarDecl: {
@@ -197,12 +197,12 @@ static void visit_Stmt(Arena *arena, Stmt *stmt) {
     case NODE_StmtReturn: {
         StmtReturn *s = (StmtReturn *)stmt;
         if (s->expr)
-            visit_Expr(arena, s->expr);
+            s->expr = visit_Expr(arena, s->expr);
         return;
     }
     case NODE_StmtIf: {
         StmtIf *s = (StmtIf *)stmt;
-        visit_Expr(arena, s->condition);
+        s->condition = visit_Expr(arena, s->condition);
         visit_Stmt(arena, s->then_branch);
 
         if (s->else_branch)
@@ -211,14 +211,14 @@ static void visit_Stmt(Arena *arena, Stmt *stmt) {
     }
     case NODE_StmtLoop: {
         StmtLoop *s = (StmtLoop *)stmt;
-        visit_Expr(arena, s->count);
+        s->count = visit_Expr(arena, s->count);
         visit_Stmt(arena, s->body);
         return;
     }
     case NODE_StmtFor: {
         StmtFor *s = (StmtFor *)stmt;
-        visit_Expr(arena, s->left_bound);
-        visit_Expr(arena, s->right_bound);
+        s->left_bound = visit_Expr(arena, s->left_bound);
+        s->right_bound = visit_Expr(arena, s->right_bound);
         visit_Stmt(arena, s->body);
         return;
     }
@@ -228,9 +228,9 @@ static void visit_Stmt(Arena *arena, Stmt *stmt) {
     case NODE_StmtCmd: {
         StmtCmd *s = (StmtCmd *)stmt;
         for (size_t i = 0; i < s->int_operands.count; i++)
-            visit_Expr(arena, s->int_operands.at[i]);
+            s->int_operands.at[i] = visit_Expr(arena, s->int_operands.at[i]);
         for (size_t i = 0; i < s->str_operands.count; i++)
-            visit_Expr(arena, s->str_operands.at[i]);
+            s->str_operands.at[i] = visit_Expr(arena, s->str_operands.at[i]);
         return;
     }
     case NODE_StmtDBDecl: {
@@ -241,7 +241,7 @@ static void visit_Stmt(Arena *arena, Stmt *stmt) {
     }
     case NODE_StmtExpr: {
         StmtExpr *s = (StmtExpr *)stmt;
-        visit_Expr(arena, s->expr);
+        s->expr = visit_Expr(arena, s->expr);
         return;
     }
     }

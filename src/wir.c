@@ -104,7 +104,7 @@ static void disable_rc(Arena *arena, WIRCev *wcev, size_t *inst_pos, WIROperand 
     *inst = (WIRInst_Binop){
         .base.kind = _WIRInst_Binop,
         .dest = { .kind = OPKIND_TEMP_INT, .as.offset = temp },
-        .op = WIR_SUB,
+        .op = WIR_BINOP_SUB,
         .a = { .kind = OPKIND_IMM_INT, .as.imm_int = 0 },
         .b = { .kind = OPKIND_IMM_INT, .as.imm_int = -wop->as.imm_int}
     };
@@ -125,7 +125,7 @@ static void disable_rc_pass(Arena *arena, WIRCev *wcev) {
     for (size_t i = 0; i < wcev->insts.count; i++) {
         WIRInst *wirinst = wcev->insts.at[i];
         switch (wirinst->kind) {
-        case _WIRInst_TOMBSTONE:
+        case _WIRInst_NOP:
         case _WIRInst_PushInt:
         case _WIRInst_PushStr:
         case _WIRInst_PopIntN:
@@ -459,7 +459,7 @@ static void temp_alloc_pass(Arena *arena, WIRCev *wcev, VEC_int32_t *i_map, VEC_
     for (size_t i = 0; i < wcev->insts.count; i++) {
         WIRInst *wirinst = wcev->insts.at[i];
         switch (wirinst->kind) {
-        case _WIRInst_TOMBSTONE:
+        case _WIRInst_NOP:
         case _WIRInst_PushInt:
         case _WIRInst_PushStr:
         case _WIRInst_PopIntN:
@@ -638,7 +638,7 @@ static void temp_alloc_pass(Arena *arena, WIRCev *wcev, VEC_int32_t *i_map, VEC_
             update_map(i_map, i_top, s_map, s_top, inst->name);
             break;
         }
-        case _WIRInst_TOMBSTONE:
+        case _WIRInst_NOP:
         case _WIRInst_Cmd:
         case _WIRInst_ReturnVoid:
         case _WIRInst_Continue:
@@ -654,21 +654,21 @@ static void temp_alloc_pass(Arena *arena, WIRCev *wcev, VEC_int32_t *i_map, VEC_
     return ;
 }
 
-static void push_binop_command(WIRCompiler *wc, int32_t dest, int32_t a, int32_t b, int cmd_var_op) {
+static void push_binop_command(WIRCompiler *wc, int32_t dest, int cmd_assign, int32_t a, int32_t b, int cmd_var_op) {
     VEC_int32_t i_vec = VEC_EMPTY;
     
     VEC_PUSH(i_vec, dest, wc->arena);
     VEC_PUSH(i_vec, a, wc->arena);
     VEC_PUSH(i_vec, b, wc->arena);
-    VEC_PUSH(i_vec, cmd_var_op, wc->arena);
+    VEC_PUSH(i_vec, cmd_assign | cmd_var_op, wc->arena);
 
     cev_push_cmd(wc->cev, CMD_VAR, wc->indent, i_vec, (VEC_StringView)VEC_EMPTY);
 }
 
-static void compile_binop(WIRCompiler *wc, WIRInst_Binop *inst, int cmd_var_op) {
+static void compile_binop(WIRCompiler *wc, WIRInst_Binop *inst, int cmd_assign, int cmd_var_op) {
     push_binop_command(wc,
-        resolve(wc, inst->dest), resolve(wc, inst->a), resolve(wc, inst->b),
-        cmd_var_op);
+        resolve(wc, inst->dest), cmd_assign,
+        resolve(wc, inst->a), resolve(wc, inst->b), cmd_var_op);
 }
 
 static void push_str_command(WIRCompiler *wc, int32_t dest_ref, WIROperand src) {
@@ -693,25 +693,35 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
     switch (wi->kind) {
     case _WIRInst_Binop: {
         WIRInst_Binop *inst = (WIRInst_Binop *)wi;
+        int cmd_assign = 0;
+        switch (inst->assign) {
+        case WIR_ASSIGN_EQ:  cmd_assign = VAR_ASSIGN_EQ; break;
+        case WIR_ASSIGN_ADD: cmd_assign = VAR_ASSIGN_PLUS_EQ; break;
+        case WIR_ASSIGN_SUB: cmd_assign = VAR_ASSIGN_MINUS_EQ; break;
+        case WIR_ASSIGN_MUL: cmd_assign = VAR_ASSIGN_TIMES_EQ; break;
+        case WIR_ASSIGN_DIV: cmd_assign = VAR_ASSIGN_DIV_EQ; break;
+        case WIR_ASSIGN_MOD: cmd_assign = VAR_ASSIGN_MOD_EQ; break;
+        }
+
         switch (inst->op) {
-        case WIR_ADD: compile_binop(wc, inst, VAR_OP_PLUS); break;
-        case WIR_SUB: compile_binop(wc, inst, VAR_OP_MINUS); break;
-        case WIR_MUL: compile_binop(wc, inst, VAR_OP_TIMES); break;
-        case WIR_DIV: compile_binop(wc, inst, VAR_OP_DIV); break;
-        case WIR_MOD: compile_binop(wc, inst, VAR_OP_MOD); break;
-        case WIR_XOR: compile_binop(wc, inst, VAR_OP_XOR); break;
-        case WIR_LSH: compile_binop(wc, inst, VAR_OP_LSHIFT); break;
-        case WIR_AND: compile_binop(wc, inst, VAR_OP_AND); break;
-        case WIR_OR:  compile_binop(wc, inst, VAR_OP_OR); break;
+        case WIR_BINOP_ADD: compile_binop(wc, inst, cmd_assign, VAR_OP_PLUS); break;
+        case WIR_BINOP_SUB: compile_binop(wc, inst, cmd_assign, VAR_OP_MINUS); break;
+        case WIR_BINOP_MUL: compile_binop(wc, inst, cmd_assign, VAR_OP_TIMES); break;
+        case WIR_BINOP_DIV: compile_binop(wc, inst, cmd_assign, VAR_OP_DIV); break;
+        case WIR_BINOP_MOD: compile_binop(wc, inst, cmd_assign, VAR_OP_MOD); break;
+        case WIR_BINOP_XOR: compile_binop(wc, inst, cmd_assign, VAR_OP_XOR); break;
+        case WIR_BINOP_LSH: compile_binop(wc, inst, cmd_assign, VAR_OP_LSHIFT); break;
+        case WIR_BINOP_AND: compile_binop(wc, inst, cmd_assign, VAR_OP_AND); break;
+        case WIR_BINOP_OR:  compile_binop(wc, inst, cmd_assign, VAR_OP_OR); break;
         
-        case WIR_EQ: UNIMPLEMENTED;
-        case WIR_NEQ: UNIMPLEMENTED;
-        case WIR_LT: UNIMPLEMENTED;
-        case WIR_LTE: UNIMPLEMENTED;
-        case WIR_GT: UNIMPLEMENTED;
-        case WIR_GTE: UNIMPLEMENTED;
-        case WIR_LAND: UNIMPLEMENTED;
-        case WIR_LOR: UNIMPLEMENTED;
+        case WIR_BINOP_EQ: UNIMPLEMENTED;
+        case WIR_BINOP_NEQ: UNIMPLEMENTED;
+        case WIR_BINOP_LT: UNIMPLEMENTED;
+        case WIR_BINOP_LTE: UNIMPLEMENTED;
+        case WIR_BINOP_GT: UNIMPLEMENTED;
+        case WIR_BINOP_GTE: UNIMPLEMENTED;
+        case WIR_BINOP_LAND: UNIMPLEMENTED;
+        case WIR_BINOP_LOR: UNIMPLEMENTED;
         }
         break;                
     }
@@ -777,7 +787,7 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
             case OPKIND_GLOBAL_CEV:
                 *target = 99;
                 push_binop_command(wc, *target + CSELF_BASE,
-                    resolve(wc, inst->val), 0, VAR_OP_PLUS);
+                    VAR_ASSIGN_EQ, resolve(wc, inst->val), 0, VAR_OP_PLUS);
                 break;
             case OPKIND_IMM_STR:
             case OPKIND_INTERP:
@@ -897,7 +907,7 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
         );
         break;
     }
-    case _WIRInst_TOMBSTONE: break;
+    case _WIRInst_NOP: break;
     }        
 }
 
@@ -911,7 +921,7 @@ static void temp_copy_propagation_pass(WIRCev *wcev) {
         
         WIRInst_Binop *inst = (WIRInst_Binop *)wcev->insts.at[i]; 
 
-        if (inst->op != WIR_ADD) continue;
+        if (inst->op != WIR_BINOP_ADD) continue;
         if (inst->a.kind != OPKIND_TEMP_INT) continue;
         if (inst->b.kind != OPKIND_IMM_INT) continue;
         if (inst->b.as.imm_int != 0) continue;
@@ -922,10 +932,12 @@ static void temp_copy_propagation_pass(WIRCev *wcev) {
         if (prev->kind == _WIRInst_Binop) {
             WIRInst_Binop *p = (WIRInst_Binop *)prev;
             if (p->dest.kind == OPKIND_TEMP_INT
+                && p->assign == WIR_ASSIGN_EQ
                 && p->dest.as.offset == inst->a.as.offset) {
 
                 p->dest = inst->dest;
-                inst->base.kind = _WIRInst_TOMBSTONE;
+                p->assign = inst->assign;
+                inst->base.kind = _WIRInst_NOP;
             }
         }
     }
@@ -1136,8 +1148,9 @@ void print_wir(WIR *wir) {
                 printf("binop");
                 WIRInst_Binop *in = (WIRInst_Binop *)inst;
                 print_wop(in->dest);
-                printf(" %d", in->op);
+                printf(" %d", in->assign);
                 print_wop(in->a);
+                printf(" %d", in->op);
                 print_wop(in->b);
                 break;
             }
@@ -1167,7 +1180,7 @@ void print_wir(WIR *wir) {
                     print_wop(in->sargs.at[arg]);
                 break;
             }
-            case _WIRInst_TOMBSTONE:
+            case _WIRInst_NOP:
                 printf("nop");
                 break;
             default:

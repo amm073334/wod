@@ -49,10 +49,10 @@ static void emit_to_current_cev(Ast2Wir *aw, WIRInst *inst) {
     VEC_PUSH(last->insts, inst, aw->arena);
 }
 
-static void emit_binop(Ast2Wir *aw, WIROperand dest, WIROperand a, WIROperand b, int op) {
+static void emit_binop(Ast2Wir *aw, WIROperand dest, int assign, WIROperand a, WIROperand b, int op) {
     WIRInst_Binop *inst;
     ALLOC_WIR(inst, WIRInst_Binop,
-        (WIRInst_Binop){ .dest = dest, .op = op, .a = a, .b = b });
+        (WIRInst_Binop){ .dest = dest, .op = op, .assign = assign, .a = a, .b = b });
     emit_to_current_cev(aw, (WIRInst *)inst);
 }
 
@@ -282,55 +282,49 @@ static WIROperand visit_Expr(Ast2Wir *aw, Expr *expr) {
 
         WIROperand left = visit_Expr(aw, e->left);
         WIROperand right = visit_Expr(aw, e->right);
-        
-        // Allocate temporaries in order of their use for
-        // optimization purposes later.
-        WIROperand negated = {0};
-        if (e->op.type == TOK_GREATER_GREATER)
-            negated = tmp_int(aw);
-        
         WIROperand dest = tmp_int(aw);
 
         switch (e->op.type) {
         case TOK_PLUS:
-            emit_binop(aw, dest, left, right, WIR_ADD); break;
+            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, right, WIR_BINOP_ADD); break;
         case TOK_MINUS:
-            emit_binop(aw, dest, left, right, WIR_SUB); break;
+            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, right, WIR_BINOP_SUB); break;
         case TOK_STAR:
-            emit_binop(aw, dest, left, right, WIR_MUL); break;
+            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, right, WIR_BINOP_MUL); break;
         case TOK_SLASH:
-            emit_binop(aw, dest, left, right, WIR_DIV); break;
+            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, right, WIR_BINOP_DIV); break;
         case TOK_PERCENT:
-            emit_binop(aw, dest, left, right, WIR_MOD); break;
+            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, right, WIR_BINOP_MOD); break;
         case TOK_CARET:
-            emit_binop(aw, dest, left, right, WIR_XOR); break;
+            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, right, WIR_BINOP_XOR); break;
         case TOK_PIPE:
-            emit_binop(aw, dest, left, right, WIR_OR); break;
+            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, right, WIR_BINOP_OR); break;
         case TOK_AMP:
-            emit_binop(aw, dest, left, right, WIR_AND); break;
+            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, right, WIR_BINOP_AND); break;
         case TOK_LESS_LESS:
-            emit_binop(aw, dest, left, right, WIR_LSH); break;
+            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, right, WIR_BINOP_LSH); break;
         case TOK_GREATER_GREATER: {
-            emit_binop(aw, negated, WIR_IMM_I(0), right, WIR_SUB);
-            emit_binop(aw, dest, left, negated, WIR_LSH);
+            WIROperand negated = tmp_int(aw);
+            emit_binop(aw, negated, WIR_ASSIGN_EQ, WIR_IMM_I(0), right, WIR_BINOP_SUB);
+            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, negated, WIR_BINOP_LSH);
             break;
         }
         case TOK_EQUAL_EQUAL:
-            emit_binop(aw, dest, left, right, WIR_EQ); break;
+            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, right, WIR_BINOP_EQ); break;
         case TOK_BANG_EQUAL:
-            emit_binop(aw, dest, left, right, WIR_NEQ); break;
+            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, right, WIR_BINOP_NEQ); break;
         case TOK_LESS:
-            emit_binop(aw, dest, left, right, WIR_LT); break;
+            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, right, WIR_BINOP_LT); break;
         case TOK_LESS_EQUAL:
-            emit_binop(aw, dest, left, right, WIR_LTE); break;
+            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, right, WIR_BINOP_LTE); break;
         case TOK_GREATER:
-            emit_binop(aw, dest, left, right, WIR_GT); break;
+            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, right, WIR_BINOP_GT); break;
         case TOK_GREATER_EQUAL:
-            emit_binop(aw, dest, left, right, WIR_GTE); break;
+            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, right, WIR_BINOP_GTE); break;
         case TOK_AMP_AMP:
-            emit_binop(aw, dest, left, right, WIR_LAND); break;
+            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, right, WIR_BINOP_LAND); break;
         case TOK_PIPE_PIPE:
-            emit_binop(aw, dest, left, right, WIR_LOR); break;
+            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, right, WIR_BINOP_LOR); break;
         default: UNREACHABLE;
         }
 
@@ -344,13 +338,13 @@ static WIROperand visit_Expr(Ast2Wir *aw, Expr *expr) {
         switch (e->op.type) {
         case TOK_MINUS: {
             WIROperand dest = tmp_int(aw);
-            emit_binop(aw, dest, WIR_IMM_I(0), right, WIR_SUB);
+            emit_binop(aw, dest, WIR_ASSIGN_EQ, WIR_IMM_I(0), right, WIR_BINOP_SUB);
             return dest;
         }
         case TOK_BANG: {
             // Assumes that booleans are either zero or one.
             WIROperand dest = tmp_int(aw);
-            emit_binop(aw, dest, WIR_IMM_I(1), right, WIR_XOR);
+            emit_binop(aw, dest, WIR_ASSIGN_EQ, WIR_IMM_I(1), right, WIR_BINOP_XOR);
             return dest;
         }
         case TOK_AMP: {
@@ -433,7 +427,35 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
             assert(op_is_string(left));
             emit_str(aw, left, right);
         } else {
-            emit_binop(aw, left, right, WIR_IMM_I(0), WIR_ADD);
+            switch (s->assign_type.type) {
+            case TOK_EQUAL:
+                emit_binop(aw, left, WIR_ASSIGN_EQ, right, WIR_IMM_I(0), WIR_BINOP_ADD);
+                break;
+            case TOK_PLUS_EQUAL:
+                emit_binop(aw, left, WIR_ASSIGN_ADD, right, WIR_IMM_I(0), WIR_BINOP_ADD);
+                break;
+            case TOK_MINUS_EQUAL:
+                emit_binop(aw, left, WIR_ASSIGN_SUB, right, WIR_IMM_I(0), WIR_BINOP_ADD);
+                break;
+            case TOK_STAR_EQUAL:
+                emit_binop(aw, left, WIR_ASSIGN_MUL, right, WIR_IMM_I(0), WIR_BINOP_ADD);
+                break;
+            case TOK_SLASH_EQUAL:
+                emit_binop(aw, left, WIR_ASSIGN_DIV, right, WIR_IMM_I(0), WIR_BINOP_ADD);
+                break;
+            case TOK_PERCENT_EQUAL:
+                emit_binop(aw, left, WIR_ASSIGN_MOD, right, WIR_IMM_I(0), WIR_BINOP_ADD);
+                break;
+            case TOK_AMP_EQUAL: {
+                emit_binop(aw, left, WIR_ASSIGN_EQ, left, right, WIR_BINOP_AND);
+                break;
+            }
+            case TOK_PIPE_EQUAL: {
+                emit_binop(aw, left, WIR_ASSIGN_EQ, left, right, WIR_BINOP_OR);
+                break;
+            }
+            default: UNREACHABLE;
+            }
         }
         return;
     }
@@ -482,7 +504,7 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
                         .kind = OPKIND_LOCAL_INT,
                         .as.offset = s->sym->offset
                     },
-                    init, WIR_IMM_I(0), WIR_ADD);
+                    WIR_ASSIGN_EQ, init, WIR_IMM_I(0), WIR_BINOP_ADD);
             }
 
             if (!s->sym->env->parent) {

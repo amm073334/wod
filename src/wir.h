@@ -65,7 +65,7 @@ struct WIROperand {
 typedef struct {
     enum {
         // No-op.
-        _WIRInst_TOMBSTONE,
+        _WIRInst_NOP,
 
         // Used to manipulate the compile-time stack.
         // Does not actually correspond to a real command.
@@ -110,12 +110,20 @@ typedef struct {
 typedef struct {
     WIRInst base;
     enum {
-        WIR_ADD, WIR_SUB, WIR_MUL, WIR_DIV, WIR_MOD,
-        WIR_AND, WIR_OR, WIR_XOR, WIR_LSH,
-        WIR_EQ, WIR_NEQ, WIR_LT, WIR_LTE,
-        WIR_GT, WIR_GTE,
-        WIR_LAND, WIR_LOR,
+        WIR_BINOP_ADD, WIR_BINOP_SUB, WIR_BINOP_MUL, WIR_BINOP_DIV, WIR_BINOP_MOD,
+        WIR_BINOP_AND, WIR_BINOP_OR, WIR_BINOP_XOR, WIR_BINOP_LSH,
+        WIR_BINOP_EQ, WIR_BINOP_NEQ, WIR_BINOP_LT, WIR_BINOP_LTE,
+        WIR_BINOP_GT, WIR_BINOP_GTE,
+        WIR_BINOP_LAND, WIR_BINOP_LOR,
     } op;
+    enum {
+        WIR_ASSIGN_EQ,
+        WIR_ASSIGN_ADD,
+        WIR_ASSIGN_SUB,
+        WIR_ASSIGN_MUL,
+        WIR_ASSIGN_DIV,
+        WIR_ASSIGN_MOD,
+    } assign;
     WIROperand dest;
     WIROperand a;
     WIROperand b;

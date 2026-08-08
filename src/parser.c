@@ -639,7 +639,18 @@ static Stmt *assign_stmt(Parser *parser) {
         return (Stmt *)stmt;
     }
 
-    consume(parser, TOK_EQUAL, SV("Expected '='."));
+    if (!(match(parser, TOK_EQUAL)
+        || match(parser, TOK_PLUS_EQUAL)
+        || match(parser, TOK_MINUS_EQUAL)
+        || match(parser, TOK_SLASH_EQUAL)
+        || match(parser, TOK_STAR_EQUAL)
+        || match(parser, TOK_PERCENT_EQUAL)
+        || match(parser, TOK_AMP_EQUAL)
+        || match(parser, TOK_PIPE_EQUAL)))
+    {
+        error_current(parser, SV("Expected assignment operator."));
+    }
+    
     Token tok = parser->previous;
     Expr *rhs = expression(parser);
     consume(parser, TOK_SEMICOLON, SV("Expected ';' after assignment."));

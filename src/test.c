@@ -80,7 +80,7 @@ static StringView read_from_handle(HANDLE handle, Arena *arena) {
     return (StringView){ .data = buf, .len = n };
 }
 
-bool test_one(const char *input_file) {
+void test_one(const char *input_file) {
     Arena arena;
     arena_init(&arena);
 

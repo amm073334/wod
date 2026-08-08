@@ -442,6 +442,11 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
         if (!s->left->type.is_assignable)
             tc_error(tc, &s->left->tok, SV("Cannot assign to this expression."));
 
+        if (s->left->type.basetype == TYPE_STR
+            && s->assign_type.type != TOK_EQUAL)
+            tc_error(tc, &s->assign_type,
+                SV("Only simple assignment ('=') can be used for strings."));
+
         visit_Expr(tc, s->right);
 
         if (!wt_equal(s->left->type, s->right->type))
