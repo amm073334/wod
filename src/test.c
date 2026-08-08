@@ -12,6 +12,8 @@
 #define C_GRN "\x1b[32m"
 #define C_RESET "\x1b[m"
 
+char *base_dir;
+
 static bool starts_with(const char *str, const char *substr) {
     for (size_t i = 0; substr[i] != '\0'; i++) {
         if (str[i] != substr[i]) return false;
@@ -77,23 +79,21 @@ static StringView read_from_handle(HANDLE handle, Arena *arena) {
     return (StringView){ .data = buf, .len = n };
 }
 
-int main(int argc, char **argv) {
-    if (argc != 2) exit(1);
-
+bool test_one(const char *input_file) {
     Arena arena;
     arena_init(&arena);
 
-    DWORD path_len = GetFullPathNameA(argv[1], 0, NULL, NULL);
+    DWORD path_len = GetFullPathNameA(input_file, 0, NULL, NULL);
     char *path = arena_alloc(&arena, path_len);
     char *file_name = arena_alloc(&arena, path_len);
     if (!path || !file_name) {
         fprintf(stderr, "Failed to allocate memory.\n");
         exit(1);
     }
-    GetFullPathNameA(argv[1], path_len, path, &file_name);
+    GetFullPathNameA(input_file, path_len, path, &file_name);
 
-    StringView command = 
-        sv_concat(&arena, SV(".\\wodc.exe "), to_sv(path));
+    StringView command = sv_concat(&arena, sv_concat(&arena,
+        to_sv(base_dir), SV("\\wodc.exe ")), to_sv(path));
     
     command = sv_concat(&arena, command, to_sv(" 2> nul 1> nul"));
 
@@ -168,7 +168,8 @@ int main(int argc, char **argv) {
         si.cb = sizeof(si);
         ZeroMemory(&pi, sizeof(pi));
     
-        if (!CreateProcessA("test\\bin\\Game.exe",
+        StringView game = sv_concat(&arena, to_sv(base_dir), SV("test\\bin\\Game.exe"));
+        if (!CreateProcessA(game.data,
             NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
     
             fprintf(stderr, "Failed to create process.\n");
@@ -211,5 +212,62 @@ int main(int argc, char **argv) {
 
     end:
     arena_free(&arena);
+}
+
+bool ends_with_wod(const char *s) {
+    size_t len = strlen(s);
+    if (len < 4) return false;
+    if (strcmp(s + len - 3, "wod") != 0) return false;
+    return true;
+}
+
+void test_dir(Arena *arena, const char *rel_path) {
+    WIN32_FIND_DATAA ffd;
+
+    DWORD full_len = GetFullPathNameA(rel_path, 0, NULL, NULL);
+    char *abs_path = arena_alloc_assert(arena, full_len);
+    GetFullPathNameA(rel_path, full_len, abs_path, NULL);
+    SetCurrentDirectoryA(abs_path);
+
+    StringView search = sv_concat(arena, to_sv(abs_path), SV("\\*"));
+    HANDLE handle = FindFirstFileA(search.data, &ffd);
+    if (handle == INVALID_HANDLE_VALUE) {
+        fprintf(stderr, "Error occurred while traversing '%s'.\n", rel_path);
+        return;
+    }
+
+    do {
+        if (strcmp(ffd.cFileName, ".") == 0
+            || strcmp(ffd.cFileName, "..") == 0)
+            continue;
+
+        if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            test_dir(arena, ffd.cFileName);
+            SetCurrentDirectoryA(abs_path);
+        } else if (ends_with_wod(ffd.cFileName)) {
+            test_one(ffd.cFileName);
+        }
+    } while (FindNextFileA(handle, &ffd) != 0);
+
+    FindClose(handle);
+}
+
+int main(int argc, char **argv) {
+    Arena arena;
+    arena_init(&arena);
+
+    DWORD len = GetCurrentDirectoryA(0, NULL);
+    base_dir = arena_alloc_assert(&arena, len);
+    GetCurrentDirectoryA(len, base_dir);
+
+    if (argc == 2) {
+        test_one(argv[1]);
+        return 0;
+    }
+    if (argc != 3) exit(1);
+    if (strcmp(argv[1], "-f") != 0) exit(1);
+
+    test_dir(&arena, argv[2]);
+
     return 0;
 }
