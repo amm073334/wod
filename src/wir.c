@@ -689,8 +689,64 @@ static void push_str_command(WIRCompiler *wc, int32_t dest_ref, WIROperand src) 
         int_fields, str_fields);
 }
 
+static void compile_compare_binop(WIRCompiler *wc, WIRInst_Binop *inst, int cmd_comp_op) {
+    {
+        VEC_int32_t i_vec = VEC_EMPTY;
+        VEC_PUSH(i_vec, 1 | 0x10, wc->arena);
+        VEC_PUSH(i_vec, resolve(wc, inst->a), wc->arena);
+        VEC_PUSH(i_vec, resolve(wc, inst->b), wc->arena);
+        VEC_PUSH(i_vec, cmd_comp_op, wc->arena);
+        cev_push_cmd(wc->cev, CMD_IF_INT, wc->indent,
+            i_vec, (VEC_StringView)VEC_EMPTY);
+    }
+
+    {
+        VEC_int32_t i_vec = VEC_EMPTY;
+        VEC_PUSH(i_vec, 1, wc->arena);
+
+        cev_push_cmd(wc->cev, CMD_BRANCH, wc->indent,
+            i_vec, (VEC_StringView)VEC_EMPTY);
+    }
+
+    {
+        VEC_int32_t i_vec = VEC_EMPTY;
+        VEC_PUSH(i_vec, resolve(wc, inst->dest), wc->arena);
+        VEC_PUSH(i_vec, 1, wc->arena);
+        VEC_PUSH(i_vec, 0, wc->arena);
+        VEC_PUSH(i_vec, 0, wc->arena);
+        cev_push_cmd(wc->cev, CMD_VAR, wc->indent + 1,
+            i_vec, (VEC_StringView)VEC_EMPTY);
+    }
+
+    {
+        VEC_int32_t i_vec = VEC_EMPTY;
+        VEC_PUSH(i_vec, 0, wc->arena);
+
+        cev_push_cmd(wc->cev, CMD_BRANCH_ELSE, wc->indent,
+            i_vec, (VEC_StringView)VEC_EMPTY);
+    }
+
+    {
+        VEC_int32_t i_vec = VEC_EMPTY;
+        VEC_PUSH(i_vec, resolve(wc, inst->dest), wc->arena);
+        VEC_PUSH(i_vec, 0, wc->arena);
+        VEC_PUSH(i_vec, 0, wc->arena);
+        VEC_PUSH(i_vec, 0, wc->arena);
+        cev_push_cmd(wc->cev, CMD_VAR, wc->indent + 1,
+            i_vec, (VEC_StringView)VEC_EMPTY);
+    }
+
+    cev_push_simple_cmd(wc->cev, CMD_IF_END, wc->indent);
+}
+
 static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
     switch (wi->kind) {
+    case _WIRInst_NOP:
+    case _WIRInst_PushInt:
+    case _WIRInst_PushStr:
+    case _WIRInst_PopIntN:
+    case _WIRInst_PopStrN:
+        break;
     case _WIRInst_Binop: {
         WIRInst_Binop *inst = (WIRInst_Binop *)wi;
         int cmd_assign = 0;
@@ -714,14 +770,15 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
         case WIR_BINOP_AND: compile_binop(wc, inst, cmd_assign, VAR_OP_AND); break;
         case WIR_BINOP_OR:  compile_binop(wc, inst, cmd_assign, VAR_OP_OR); break;
         
-        case WIR_BINOP_EQ: UNIMPLEMENTED;
-        case WIR_BINOP_NEQ: UNIMPLEMENTED;
-        case WIR_BINOP_LT: UNIMPLEMENTED;
-        case WIR_BINOP_LTE: UNIMPLEMENTED;
-        case WIR_BINOP_GT: UNIMPLEMENTED;
-        case WIR_BINOP_GTE: UNIMPLEMENTED;
-        case WIR_BINOP_LAND: UNIMPLEMENTED;
-        case WIR_BINOP_LOR: UNIMPLEMENTED;
+        case WIR_BINOP_EQ:   compile_compare_binop(wc, inst, IF_INT_OP_EQ); break;
+        case WIR_BINOP_NEQ:  compile_compare_binop(wc, inst, IF_INT_OP_NEQ); break;
+        case WIR_BINOP_LT:   compile_compare_binop(wc, inst, IF_INT_OP_LT); break;
+        case WIR_BINOP_LTE:  compile_compare_binop(wc, inst, IF_INT_OP_LTE); break;
+        case WIR_BINOP_GT:   compile_compare_binop(wc, inst, IF_INT_OP_GT); break;
+        case WIR_BINOP_GTE:  compile_compare_binop(wc, inst, IF_INT_OP_GTE); break;
+        case WIR_BINOP_LAND: 
+        case WIR_BINOP_LOR:  
+            UNIMPLEMENTED;
         }
         break;                
     }
@@ -730,11 +787,33 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
         push_str_command(wc, resolve(wc, inst->dest), inst->src);
         break;
     }
-    // TODO
     case _WIRInst_IfBegin: {
-        cev_push_simple_cmd(wc->cev, CMD_IF_INT, wc->indent);
+        WIRInst_IfBegin *inst = (WIRInst_IfBegin *)wi;
+        {
+            VEC_int32_t int_fields = VEC_EMPTY;
+            VEC_PUSH(int_fields, 1, wc->arena);
+            VEC_PUSH(int_fields, resolve(wc, inst->cond), wc->arena);
+            VEC_PUSH(int_fields, 0, wc->arena);
+            VEC_PUSH(int_fields, IF_INT_OP_NEQ, wc->arena);
+    
+            cev_push_cmd(wc->cev, CMD_IF_INT, wc->indent,
+                int_fields, (VEC_StringView)VEC_EMPTY);
+        }
+
+        {
+            VEC_int32_t int_fields = VEC_EMPTY;
+            VEC_PUSH(int_fields, 1, wc->arena);
+    
+            cev_push_cmd(wc->cev, CMD_BRANCH, wc->indent,
+                int_fields, (VEC_StringView)VEC_EMPTY);
+        }
         
         wc->indent++;
+        break;
+    }
+    case _WIRInst_IfEnd: {
+        wc->indent--;
+        cev_push_simple_cmd(wc->cev, CMD_IF_END, wc->indent);
         break;
     }
     case _WIRInst_LoopBegin: {
@@ -759,7 +838,6 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
     }
     case _WIRInst_LoopEnd: {
         wc->indent--;
-
         cev_push_simple_cmd(wc->cev, CMD_LOOP_END, wc->indent);
         break;
     }
@@ -780,33 +858,29 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
         int32_t *target = &wc->cev->RETURN_VAL_TARGET;
 
         switch (inst->val.kind) {
-            case OPKIND_IMM_INT:
-            case OPKIND_LOCAL_INT:
-            case OPKIND_TEMP_INT:
-            case OPKIND_GLOBAL_INT:
-            case OPKIND_GLOBAL_CEV:
-                *target = 99;
-                push_binop_command(wc, *target + CSELF_BASE,
-                    VAR_ASSIGN_EQ, resolve(wc, inst->val), 0, VAR_OP_PLUS);
-                break;
-            case OPKIND_IMM_STR:
-            case OPKIND_INTERP:
-            case OPKIND_LOCAL_STR:
-            case OPKIND_TEMP_STR:
-            case OPKIND_GLOBAL_STR:
-                *target = 9;
-                push_str_command(wc, 
-                    *target + CSELF_BASE, inst->val);
-                break;
-            case OPKIND_GLOBAL_UDB:
-            case OPKIND_GLOBAL_CDB:
-                UNREACHABLE;
+        case OPKIND_IMM_INT:
+        case OPKIND_LOCAL_INT:
+        case OPKIND_TEMP_INT:
+        case OPKIND_GLOBAL_INT:
+        case OPKIND_GLOBAL_CEV:
+            *target = 99;
+            push_binop_command(wc, *target + CSELF_BASE,
+                VAR_ASSIGN_EQ, resolve(wc, inst->val), 0, VAR_OP_PLUS);
+            break;
+        case OPKIND_IMM_STR:
+        case OPKIND_INTERP:
+        case OPKIND_LOCAL_STR:
+        case OPKIND_TEMP_STR:
+        case OPKIND_GLOBAL_STR:
+            *target = 9;
+            push_str_command(wc, 
+                *target + CSELF_BASE, inst->val);
+            break;
+        case OPKIND_GLOBAL_UDB:
+        case OPKIND_GLOBAL_CDB:
+            UNREACHABLE;
         }
 
-        cev_push_simple_cmd(wc->cev, CMD_RETURN, wc->indent);
-        break;
-    }
-    case _WIRInst_ReturnVoid: {
         cev_push_simple_cmd(wc->cev, CMD_RETURN, wc->indent);
         break;
     }
@@ -907,8 +981,19 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
         );
         break;
     }
-    case _WIRInst_NOP: break;
-    }        
+    case _WIRInst_Continue: {
+        cev_push_simple_cmd(wc->cev, CMD_CONTINUE, wc->indent);
+        break;
+    }
+    case _WIRInst_Break: {
+        cev_push_simple_cmd(wc->cev, CMD_BREAK, wc->indent);
+        break;
+    }
+    case _WIRInst_ReturnVoid: {
+        cev_push_simple_cmd(wc->cev, CMD_RETURN, wc->indent);
+        break;
+    }
+    }
 }
 
 // For the current WIRCev, if the temporary result of a calculation
@@ -1131,7 +1216,7 @@ void print_wir(WIR *wir) {
                 if (stack_i == 0)
                     printf("; (max i: -)");
                 else
-                    printf("; (max i: %zu)", stack_i);
+                    printf("; (max i: %zu)", stack_i - 1);
                 break;
             }
             case _WIRInst_PopStrN: {
@@ -1141,12 +1226,12 @@ void print_wir(WIR *wir) {
                 if (stack_s == 0)
                     printf("; (max s: -)");
                 else
-                    printf("; (max s: %zu)", stack_s);
+                    printf("; (max s: %zu)", stack_s - 1);
                 break;
             }
             case _WIRInst_Binop: {
-                printf("binop");
                 WIRInst_Binop *in = (WIRInst_Binop *)inst;
+                printf("binop");
                 print_wop(in->dest);
                 printf(" %d", in->assign);
                 print_wop(in->a);
@@ -1155,14 +1240,18 @@ void print_wir(WIR *wir) {
                 break;
             }
             case _WIRInst_ReturnVal: {
-                printf("ret");
                 WIRInst_ReturnVal *in = (WIRInst_ReturnVal *)inst;
+                printf("retv");
                 print_wop(in->val);
                 break;
             }
+            case _WIRInst_ReturnVoid: {
+                printf("ret");
+                break;
+            }
             case _WIRInst_Call: {
-                printf("call");
                 WIRInst_Call *in = (WIRInst_Call *)inst;
+                printf("call");
                 print_wop(in->dest);
                 print_wop(in->cev);
                 for (size_t arg = 0; arg < in->args.count; arg++) {
@@ -1171,13 +1260,43 @@ void print_wir(WIR *wir) {
                 break;
             }
             case _WIRInst_Cmd: {
-                printf("cmd");
                 WIRInst_Cmd *in = (WIRInst_Cmd *)inst;
-                printf(" %d %d", in->op, in->open_close);
+                printf("cmd %d %d", in->op, in->open_close);
                 for (size_t arg = 0; arg < in->iargs.count; arg++)
                     print_wop(in->iargs.at[arg]);
                 for (size_t arg = 0; arg < in->sargs.count; arg++)
                     print_wop(in->sargs.at[arg]);
+                break;
+            }
+            case _WIRInst_LoopBegin: {
+                printf("loop");
+                break;
+            }
+            case _WIRInst_LoopBeginN: {
+                WIRInst_LoopBeginN *in = (WIRInst_LoopBeginN *)inst;
+                printf("loopn %d", in->count);
+                break;
+            }
+            case _WIRInst_LoopEnd: {
+                printf("loopend");
+                break;
+            }
+            case _WIRInst_IfBegin: {
+                WIRInst_IfBegin *in = (WIRInst_IfBegin *)inst;
+                printf("if");
+                print_wop(in->cond);
+                break;
+            }
+            case _WIRInst_IfEnd: {
+                printf("ifend");
+                break;
+            }
+            case _WIRInst_Continue: {
+                printf("continue");
+                break;
+            }
+            case _WIRInst_Break: {
+                printf("break");
                 break;
             }
             case _WIRInst_NOP:

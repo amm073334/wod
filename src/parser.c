@@ -447,7 +447,7 @@ static Stmt *return_stmt(Parser *parser) {
     ALLOC_NODE(stmt, parser->previous, StmtReturn,
         (StmtReturn){ .expr = expr });
 
-    consume(parser, TOK_SEMICOLON, SV("Expected ';' after 'return'."));
+    consume(parser, TOK_SEMICOLON, SV("Expected ';' after 'return' statement."));
     return (Stmt *)stmt;
 }
 
@@ -469,7 +469,7 @@ static Stmt *break_stmt(Parser *parser) {
     return (Stmt *)stmt;
 }
 
-static Stmt *var_decl(Parser *parser, bool parse_const, bool parse_initializer) {
+static StmtVarDecl *var_decl(Parser *parser, bool parse_const, bool parse_initializer) {
     bool is_const = false;
     
     if (parse_const && match(parser, TOK_CONST)) {
@@ -503,6 +503,53 @@ static Stmt *var_decl(Parser *parser, bool parse_const, bool parse_initializer) 
         (StmtVarDecl){ .type = var_type, .name = param_name,
             .array_length = array_length, .initializer = initializer,
             .is_const = is_const });
+
+    return stmt;
+}
+
+static Stmt *expr_like_stmt(Parser *parser) {
+    Expr *lhs = expression(parser);
+    if (lhs && lhs->kind == NODE_ExprCall &&
+        check(parser, TOK_SEMICOLON)) {
+
+        StmtCall *stmt;
+        ALLOC_NODE(stmt, lhs->tok, StmtCall,
+            (StmtCall){ .call = (ExprCall *)lhs });
+        return (Stmt *)stmt;
+    }
+
+    if (match(parser, TOK_PLUS_PLUS)) {
+        StmtInc *stmt;
+        ALLOC_NODE(stmt, lhs->tok, StmtInc,
+            (StmtInc){ .expr = lhs });
+        return (Stmt *)stmt;
+    }
+
+    if (match(parser, TOK_MINUS_MINUS)) {
+        StmtDec *stmt;
+        ALLOC_NODE(stmt, lhs->tok, StmtDec,
+            (StmtDec){ .expr = lhs });
+        return (Stmt *)stmt;
+    }
+
+    if (!(match(parser, TOK_EQUAL)
+        || match(parser, TOK_PLUS_EQUAL)
+        || match(parser, TOK_MINUS_EQUAL)
+        || match(parser, TOK_SLASH_EQUAL)
+        || match(parser, TOK_STAR_EQUAL)
+        || match(parser, TOK_PERCENT_EQUAL)
+        || match(parser, TOK_AMP_EQUAL)
+        || match(parser, TOK_PIPE_EQUAL)))
+    {
+        error_current(parser, SV("Unterminated statement."));
+    }
+
+    Token tok = parser->previous;
+    Expr *rhs = expression(parser);
+
+    StmtAssign *stmt;
+    ALLOC_NODE(stmt, tok, StmtAssign,
+        (StmtAssign){ .left = lhs, .assign_type = tok, .right = rhs });
 
     return (Stmt *)stmt;
 }
@@ -571,26 +618,57 @@ static Stmt *for_stmt(Parser *parser) {
     Token tok = parser->previous;
 
     consume(parser, TOK_LEFT_PAREN, SV("Expected '(' after 'for'."));
-    
-    consume(parser, TOK_INT, SV("Expected 'int'."));
-    consume(parser, TOK_IDENTIFIER, SV("Expected variable name."));
-    Token ident = parser->previous;
-    
-    consume(parser, TOK_IN, SV("Expected 'in' after declaration."));
-    
-    Expr *left_bound = expression(parser);
-    consume(parser, TOK_DOT_DOT, SV("Expected '..' after left bound."));
-    Expr *right_bound = expression(parser);
 
-    consume(parser, TOK_RIGHT_PAREN, SV("Expected ')' after 'for' condition."));
+    bool init_is_decl = false;
+    Stmt *init = NULL;
+    if (!check(parser, TOK_SEMICOLON)) {
+        if (check_vartype(parser)) {
+            init_is_decl = true;
+            init = (Stmt *)var_decl(parser, false, true);
+            if (!((StmtVarDecl *)init)->initializer)
+                error_previous(parser, SV("Expected initializer."));
+        } else {
+            init = expr_like_stmt(parser);
+        }
+    }
+
+    // If iterating over a range.
+    if (match(parser, TOK_DOT_DOT)) {
+        if (!init_is_decl)
+            parse_error(parser, &init->tok,
+                SV("Range iteration needs an 'int' declaration."));
+
+        Expr *right_bound = expression(parser);
+        consume(parser, TOK_RIGHT_PAREN, SV("Expected ')' after 'for' condition."));
+        Stmt *body = statement(parser);
+        StmtForRange *stmt;
+        ALLOC_NODE(stmt, tok, StmtForRange,
+            (StmtForRange){ .decl = (StmtVarDecl *)init,
+                .right_bound = right_bound, .body = body });
+
+        return (Stmt *)stmt;
+    }
+     
+    // C-style `for`.
+    consume(parser, TOK_SEMICOLON, SV("Expected ';' after 'for' initializer."));
+    
+    Expr *condition = NULL;
+    if (!check(parser, TOK_SEMICOLON))
+        condition = expression(parser);
+    consume(parser, TOK_SEMICOLON, SV("Expected ';' after 'for' condition."));
+
+    Stmt *iter_stmt = NULL;
+    if (!check(parser, TOK_RIGHT_PAREN))
+        iter_stmt = expr_like_stmt(parser);
+    consume(parser, TOK_RIGHT_PAREN, SV("Expected ')' after 'for' iteration statement."));
 
     Stmt *body = statement(parser);
 
-    StmtFor *stmt;
-    ALLOC_NODE(stmt, tok, StmtFor,
-        (StmtFor){ .iterator = ident.text,
-            .left_bound = left_bound, .right_bound = right_bound, .body = body });
-    
+    StmtForC *stmt;
+    ALLOC_NODE(stmt, tok, StmtForC,
+        (StmtForC){ .init = init,
+            .condition = condition, .iter_stmt = iter_stmt, .body = body });
+
     return (Stmt *)stmt;
 }
 
@@ -628,46 +706,12 @@ static Stmt *cmd_stmt(Parser *parser) {
     return (Stmt *)stmt;
 }
 
-static Stmt *assign_stmt(Parser *parser) {
-    Expr *lhs = expression(parser);
-    if (lhs && lhs->kind == NODE_ExprCall &&
-        match(parser, TOK_SEMICOLON)) {
-
-        StmtExpr *stmt;
-        ALLOC_NODE(stmt, lhs->tok, StmtExpr,
-            (StmtExpr){ .expr = lhs });
-        return (Stmt *)stmt;
-    }
-
-    if (!(match(parser, TOK_EQUAL)
-        || match(parser, TOK_PLUS_EQUAL)
-        || match(parser, TOK_MINUS_EQUAL)
-        || match(parser, TOK_SLASH_EQUAL)
-        || match(parser, TOK_STAR_EQUAL)
-        || match(parser, TOK_PERCENT_EQUAL)
-        || match(parser, TOK_AMP_EQUAL)
-        || match(parser, TOK_PIPE_EQUAL)))
-    {
-        error_current(parser, SV("Expected assignment operator."));
-    }
-    
-    Token tok = parser->previous;
-    Expr *rhs = expression(parser);
-    consume(parser, TOK_SEMICOLON, SV("Expected ';' after assignment."));
-
-    StmtAssign *stmt;
-    ALLOC_NODE(stmt, tok, StmtAssign,
-        (StmtAssign){ .left = lhs, .assign_type = tok, .right = rhs });
-
-    return (Stmt *)stmt;
-}
-
 static Stmt *declaration(Parser *parser) {
     if (parser->panic_mode) synchronize(parser);
     if (check_vartype(parser) || 
         check(parser, TOK_CONST)) {
 
-        Stmt *stmt = var_decl(parser, true, true);
+        Stmt *stmt = (Stmt *)var_decl(parser, true, true);
         consume(parser, TOK_SEMICOLON, SV("Expected ';' after declaration."));
         return stmt;
     }
@@ -708,7 +752,9 @@ static Stmt *statement(Parser *parser) {
     if (match(parser, TOK_VOID))
         error_previous(parser, SV("Attempted to declare variable of type void."));
 
-    return assign_stmt(parser);
+    Stmt *stmt = expr_like_stmt(parser);
+    consume(parser, TOK_SEMICOLON, SV("Expected ';' after statement."));
+    return stmt;
 }
 
 static Stmt *function_decl(Parser *parser) {
@@ -737,7 +783,7 @@ static Stmt *function_decl(Parser *parser) {
     VEC_PTR_StmtVarDecl params;
     VEC_INIT(params);
     if (!check(parser, TOK_RIGHT_PAREN)) do {
-        StmtVarDecl *stmt = (StmtVarDecl *)var_decl(parser, false, false);
+        StmtVarDecl *stmt = var_decl(parser, false, false);
         VEC_PUSH(params, stmt, parser->arena);
     } while (match(parser, TOK_COMMA));
 
@@ -765,7 +811,7 @@ static Stmt *db_decl(Parser *parser) {
     VEC_PTR_StmtVarDecl fields;
     VEC_INIT(fields);
     while (check_vartype(parser)) {
-        StmtVarDecl *stmt = (StmtVarDecl *)var_decl(parser, false, false);
+        StmtVarDecl *stmt = var_decl(parser, false, false);
         consume(parser, TOK_SEMICOLON, SV("Expected ';' after declaration."));
         VEC_PUSH(fields, stmt, parser->arena);
     }
@@ -795,7 +841,7 @@ static Stmt *top_decl(Parser *parser) {
     }
 
     if (match(parser, TOK_CONST)) {
-        return var_decl(parser, true, true);
+        return (Stmt *)var_decl(parser, true, true);
     }
 
     if (match(parser, TOK_IMPORT)) {

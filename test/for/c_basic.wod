@@ -1,0 +1,15 @@
+// EXPECT: 7503
+
+apply "../bin";
+
+import "../_test.wod";
+
+void main() {
+    int total = 0;
+    
+    for (int i = 0; i < 123; i++)
+        total += i;
+    
+    output("${total}");
+    exit();
+}

@@ -68,7 +68,7 @@ static CFGNode *visit_Stmt(CFGNode *parent, Stmt *stmt, CFGNode *end, Arena *are
         }
         case NODE_StmtLoop:
             UNIMPLEMENTED;
-        case NODE_StmtFor:
+        case NODE_StmtForRange:
             UNIMPLEMENTED;
         case NODE_StmtContinue:
             UNIMPLEMENTED;

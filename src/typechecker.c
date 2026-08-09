@@ -206,10 +206,6 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
         case TOK_STAR:
         case TOK_SLASH:
         case TOK_PERCENT:
-        case TOK_GREATER:
-        case TOK_GREATER_EQUAL:
-        case TOK_LESS:
-        case TOK_LESS_EQUAL:
         case TOK_LESS_LESS:
         case TOK_GREATER_GREATER:
         case TOK_AMP:
@@ -218,7 +214,21 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
             bt = TYPE_INT;
 
             StringView err = 
-                SV("Operand of arithmetic or comparison operation must be of integer type.");
+                SV("Operand of arithmetic operation must be of integer type.");
+            if (e->left->type.basetype != TYPE_INT)    
+                tc_expr_error(tc, expr, &e->left->tok, err);
+            if (e->right->type.basetype != TYPE_INT)
+                tc_expr_error(tc, expr, &e->right->tok, err);
+            break;
+        }
+        case TOK_GREATER:
+        case TOK_GREATER_EQUAL:
+        case TOK_LESS:
+        case TOK_LESS_EQUAL: {
+            bt = TYPE_BOOL;
+
+            StringView err = 
+                SV("Operand of comparison operation must be of integer type.");
             if (e->left->type.basetype != TYPE_INT)    
                 tc_expr_error(tc, expr, &e->left->tok, err);
             if (e->right->type.basetype != TYPE_INT)
@@ -543,21 +553,42 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
         tc->loop_depth--;
         return;
     }
-    case NODE_StmtFor: {
-        StmtFor *s = (StmtFor *)stmt;
+    case NODE_StmtForC: {
+        StmtForC *s = (StmtForC *)stmt;
         open_scope(tc);
 
-        s->sym = env_insert(tc->current_env, s->iterator,
-            (WodType){ .basetype = TYPE_INT, .is_assignable = false,
-                .is_compile_time = false }, tc->arena);
-        
-        if (!s->sym)
-            tc_error(tc, &s->base.tok, SV("Redeclaration of iterator name."));
+        if (s->init)
+            visit_Stmt(tc, s->init);
 
-        visit_Expr(tc, s->left_bound);
-        if (s->left_bound->type.basetype != TYPE_INT)
-            tc_error(tc, &s->left_bound->tok,
-                SV("Iteration bound must be of integer type."));
+        if (s->condition) {
+            visit_Expr(tc, s->condition);
+            if (s->condition->type.basetype != TYPE_BOOL)
+                tc_error(tc, &s->condition->tok,
+                    SV("Condition must be of boolean type."));
+        }
+
+        if (s->iter_stmt)
+            visit_Stmt(tc, s->iter_stmt);
+
+        tc->loop_depth++;
+        visit_Stmt(tc, s->body);
+        tc->loop_depth--;
+
+        close_scope(tc);
+        return;
+    }
+    case NODE_StmtForRange: {
+        StmtForRange *s = (StmtForRange *)stmt;
+        open_scope(tc);
+
+        Symbol *sym = try_insert_vardecl(tc, s->decl);
+        if (sym) {
+            if (sym->type.basetype != TYPE_INT)
+                tc_error(tc, &s->decl->type, SV("'for' variable must be integer type."));
+
+            // Do not allow assigning to the iterator variable of a range loop.
+            sym->type.is_assignable = false;
+        }
         
         visit_Expr(tc, s->right_bound);
         if (s->right_bound->type.basetype != TYPE_INT)
@@ -620,9 +651,29 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
         }
         return;
     }
-    case NODE_StmtExpr: {
-        StmtExpr *s = (StmtExpr *)stmt;
+    case NODE_StmtCall: {
+        StmtCall *s = (StmtCall *)stmt;
+        visit_Expr(tc, (Expr *)s->call);
+        return;
+    }
+    case NODE_StmtInc: {
+        StmtInc *s = (StmtInc *)stmt;
         visit_Expr(tc, s->expr);
+        if (!s->expr->type.is_assignable)
+            tc_error(tc, &s->base.tok, SV("Cannot increment expression."));
+
+        if (s->expr->type.basetype != TYPE_INT)
+            tc_error(tc, &s->base.tok, SV("Can only increment integers."));
+        return;
+    }
+    case NODE_StmtDec: {
+        StmtDec *s = (StmtDec *)stmt;
+        visit_Expr(tc, s->expr);
+        if (!s->expr->type.is_assignable)
+            tc_error(tc, &s->base.tok, SV("Cannot decrement expression."));
+
+        if (s->expr->type.basetype != TYPE_INT)
+            tc_error(tc, &s->base.tok, SV("Can only decrement integers."));
         return;
     }
 

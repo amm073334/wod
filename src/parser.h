@@ -38,12 +38,15 @@ typedef enum {
     NODE_StmtReturn,
     NODE_StmtIf,
     NODE_StmtLoop,
-    NODE_StmtFor,
+    NODE_StmtForC,
+    NODE_StmtForRange,
     NODE_StmtContinue,
     NODE_StmtBreak,
     NODE_StmtCmd,
     NODE_StmtDBDecl,
-    NODE_StmtExpr,
+    NODE_StmtCall,
+    NODE_StmtInc,
+    NODE_StmtDec,
 } StmtKind;
 
 typedef struct Stmt {
@@ -196,13 +199,18 @@ typedef struct {
 
 typedef struct {
     Stmt base;
-    StringView iterator;
-    Expr *left_bound;
+    Stmt *init;
+    Expr *condition;
+    Stmt *iter_stmt;
+    Stmt *body;
+} StmtForC;
+
+typedef struct {
+    Stmt base;
+    StmtVarDecl *decl;
     Expr *right_bound;
     Stmt *body;
-
-    Symbol *sym;
-} StmtFor;
+} StmtForRange;
 
 typedef struct {
     Stmt base;
@@ -230,8 +238,18 @@ typedef struct {
 
 typedef struct {
     Stmt base;
+    ExprCall *call;
+} StmtCall;
+
+typedef struct {
+    Stmt base;
     Expr *expr;
-} StmtExpr;
+} StmtInc;
+
+typedef struct {
+    Stmt base;
+    Expr *expr;
+} StmtDec;
 
 // Return a topological sort of all modules, or an empty vector
 // if an error occurred.

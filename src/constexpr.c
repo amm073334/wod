@@ -179,7 +179,7 @@ static void visit_Stmt(Arena *arena, Stmt *stmt) {
         }
         
         if (s->initializer)
-            visit_Expr(arena, s->initializer);
+            s->initializer = visit_Expr(arena, s->initializer);
         return;
     }
     case NODE_StmtFuncDecl: {
@@ -215,9 +215,23 @@ static void visit_Stmt(Arena *arena, Stmt *stmt) {
         visit_Stmt(arena, s->body);
         return;
     }
-    case NODE_StmtFor: {
-        StmtFor *s = (StmtFor *)stmt;
-        s->left_bound = visit_Expr(arena, s->left_bound);
+    case NODE_StmtForC: {
+        StmtForC *s = (StmtForC *)stmt;
+        if (s->init)
+            visit_Stmt(arena, s->init);
+
+        if (s->condition)
+            s->condition = visit_Expr(arena, s->condition);
+        
+        if (s->iter_stmt)
+            visit_Stmt(arena, s->iter_stmt);
+    
+        visit_Stmt(arena, s->body);
+        return;
+    }
+    case NODE_StmtForRange: {
+        StmtForRange *s = (StmtForRange *)stmt;
+        visit_Stmt(arena, (Stmt *)s->decl);
         s->right_bound = visit_Expr(arena, s->right_bound);
         visit_Stmt(arena, s->body);
         return;
@@ -239,8 +253,18 @@ static void visit_Stmt(Arena *arena, Stmt *stmt) {
             visit_Stmt(arena, (Stmt *)s->fields.at[i]);
         return;
     }
-    case NODE_StmtExpr: {
-        StmtExpr *s = (StmtExpr *)stmt;
+    case NODE_StmtCall: {
+        StmtCall *s = (StmtCall *)stmt;
+        visit_Expr(arena, (Expr *)s->call);
+        return;
+    }
+    case NODE_StmtInc: {
+        StmtInc *s = (StmtInc *)stmt;
+        s->expr = visit_Expr(arena, s->expr);
+        return;
+    }
+    case NODE_StmtDec: {
+        StmtDec *s = (StmtDec *)stmt;
         s->expr = visit_Expr(arena, s->expr);
         return;
     }

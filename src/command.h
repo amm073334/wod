@@ -66,6 +66,16 @@ typedef enum {
 } CommandVarFlag;
 
 typedef enum {
+    IF_INT_OP_GT = 0,
+    IF_INT_OP_GTE,
+    IF_INT_OP_EQ,
+    IF_INT_OP_LTE,
+    IF_INT_OP_LT,
+    IF_INT_OP_NEQ,
+    IF_INT_OP_MITASU,
+} CommandIfIntFlag;
+
+typedef enum {
     CALL_EVAL_NAME      =     0x100,
     CALL_STORES_RETURN  = 0x1000000,
 } CallFlag;

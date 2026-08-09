@@ -26,7 +26,6 @@ static const Keyword keywords[] = {
     {.name = "break",    .type = TOK_BREAK},
     {.name = "while",    .type = TOK_WHILE},
     {.name = "for",      .type = TOK_FOR},
-    {.name = "in",       .type = TOK_IN},
     {.name = "true",     .type = TOK_TRUE},
     {.name = "false",    .type = TOK_FALSE},
     {.name = "cmd",      .type = TOK_CMD},
@@ -260,11 +259,17 @@ Token scan_token(Lexer *lexer) {
         case '^': return make_token(lexer, TOK_CARET);
         case ';': return make_token(lexer, TOK_SEMICOLON);
         case '+':
-            return make_token(lexer,
-                match(lexer, '=') ? TOK_PLUS_EQUAL : TOK_PLUS);
+            if (match(lexer, '='))
+                return make_token(lexer, TOK_PLUS_EQUAL);
+            else if (match(lexer, '+'))
+                return make_token(lexer, TOK_PLUS_PLUS);
+            else make_token(lexer, TOK_PLUS);
         case '-':
-            return make_token(lexer,
-                match(lexer, '=') ? TOK_MINUS_EQUAL : TOK_MINUS);
+            if (match(lexer, '='))
+                return make_token(lexer, TOK_MINUS_EQUAL);
+            else if (match(lexer, '-'))
+                return make_token(lexer, TOK_MINUS_MINUS);
+            else make_token(lexer, TOK_MINUS);
         case '/':
             return make_token(lexer,
                 match(lexer, '=') ? TOK_SLASH_EQUAL : TOK_SLASH);
