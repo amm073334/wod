@@ -211,7 +211,8 @@ static void visit_Stmt(Arena *arena, Stmt *stmt) {
     }
     case NODE_StmtLoop: {
         StmtLoop *s = (StmtLoop *)stmt;
-        s->count = visit_Expr(arena, s->count);
+        if (s->count)
+            s->count = visit_Expr(arena, s->count);
         visit_Stmt(arena, s->body);
         return;
     }

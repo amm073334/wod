@@ -1,0 +1,14 @@
+// EXPECT: 2048
+
+apply "../bin";
+
+import "../_test.wod";
+
+void main() {
+    int i = 2;
+    while (i < 1234)
+        i *= 2;
+    
+    output("${i}");
+    exit();
+}

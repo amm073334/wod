@@ -781,7 +781,31 @@ static void compile_compare(WIRCompiler *wc, WIRInst_Compare *inst,
     cev_push_simple_cmd(wc->cev, CMD_IF_END, wc->indent);
 }
 
-static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
+static bool find_else(WIRCev *wcev, size_t head_index) {
+    size_t if_depth = 0;
+    for (size_t i = head_index + 1; i < wcev->insts.count; i++) {
+        switch (wcev->insts.at[i]->kind) {
+            case _WIRInst_IfBegin:
+            case _WIRInst_IfBeginOp:
+                if_depth++;
+                break;
+            case _WIRInst_Else:
+                if (if_depth == 0)
+                    return true;
+            case _WIRInst_IfEnd:
+                if (if_depth == 0)
+                    return false;
+                if_depth--;
+                break;
+            default: break;
+        }
+    }
+    UNREACHABLE;
+    return false;
+}
+
+static void compile_inst(WIRCompiler *wc, WIRCev *wcev, size_t index) {
+    WIRInst *wi = wcev->insts.at[index];
     switch (wi->kind) {
     case _WIRInst_NOP:
     case _WIRInst_PushInt:
@@ -833,9 +857,14 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
     }
     case _WIRInst_IfBegin: {
         WIRInst_IfBegin *inst = (WIRInst_IfBegin *)wi;
+        
+        int flag = 0;
+        if (find_else(wcev, index))
+            flag = 0x10;
+
         {
             VEC_int32_t int_fields = VEC_EMPTY;
-            VEC_PUSH(int_fields, 1, wc->arena);
+            VEC_PUSH(int_fields, 1 | flag, wc->arena);
             VEC_PUSH(int_fields, resolve(wc, inst->cond), wc->arena);
             VEC_PUSH(int_fields, 0, wc->arena);
             VEC_PUSH(int_fields, IF_INT_OP_NEQ, wc->arena);
@@ -857,9 +886,14 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
     }
     case _WIRInst_IfBeginOp: {
         WIRInst_IfBeginOp *inst = (WIRInst_IfBeginOp *)wi;
+        
+        int flag = 0;
+        if (find_else(wcev, index))
+            flag = 0x10;
+
         {
             VEC_int32_t int_fields = VEC_EMPTY;
-            VEC_PUSH(int_fields, 1, wc->arena);
+            VEC_PUSH(int_fields, 1 | flag, wc->arena);
             VEC_PUSH(int_fields, resolve(wc, inst->a), wc->arena);
             VEC_PUSH(int_fields, resolve(wc, inst->b), wc->arena);
 
@@ -891,6 +925,14 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
         }
         
         wc->indent++;
+        break;
+    }
+    case _WIRInst_Else: {
+        VEC_int32_t int_fields = VEC_EMPTY;
+        VEC_PUSH(int_fields, 0, wc->arena);
+
+        cev_push_cmd(wc->cev, CMD_BRANCH_ELSE, wc->indent - 1,
+            int_fields, (VEC_StringView)VEC_EMPTY);
         break;
     }
     case _WIRInst_IfEnd: {
@@ -1259,7 +1301,7 @@ static void compile_wir(WIRCompiler *wc, Module *mod) {
         wc->indent = 0;
 
         for (size_t j = 0; j < wcev->insts.count; j++) {
-            compile_inst(wc, wcev->insts.at[j]);
+            compile_inst(wc, wcev, j);
         }
         assert(wc->indent == 0);
     
@@ -1490,6 +1532,10 @@ void print_wir(WIR *wir) {
                 print_wop(in->a);
                 printf(" %d", in->op);
                 print_wop(in->b);
+                break;
+            }
+            case _WIRInst_Else: {
+                printf("else");
                 break;
             }
             case _WIRInst_IfEnd: {

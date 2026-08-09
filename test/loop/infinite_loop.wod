@@ -1,0 +1,20 @@
+// EXPECT: 1234807
+
+apply "../bin";
+
+import "../_test.wod";
+
+void main() {
+    int i = 1;
+    int j = 0;
+    loop {
+        j++;
+        i += j;
+
+        if (i > 1234567)
+            break;
+    }
+    
+    output("${i}");
+    exit();
+}

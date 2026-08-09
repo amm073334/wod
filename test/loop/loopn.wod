@@ -1,0 +1,14 @@
+// EXPECT: 8388608
+
+apply "../bin";
+
+import "../_test.wod";
+
+void main() {
+    int i = 1;
+    loop (23)
+        i += i;
+    
+    output("${i}");
+    exit();
+}

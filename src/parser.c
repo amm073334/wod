@@ -600,12 +600,15 @@ static Stmt *while_stmt(Parser *parser) {
     Expr *condition = expression(parser);
     consume(parser, TOK_RIGHT_PAREN, SV("Expected ')' after 'while' condition."));
 
+    StmtBreak *brk;
+    ALLOC_NODE(brk, parser->previous, StmtBreak, (StmtBreak){0});
+
     Stmt *body = statement(parser);
 
     StmtIf *if_wrapper;
     ALLOC_NODE(if_wrapper, tok, StmtIf,
         (StmtIf){ .condition = condition, .then_branch = body,
-            .else_branch = break_stmt(parser) });
+            .else_branch = (Stmt *)brk });
 
     StmtLoop *stmt;
     ALLOC_NODE(stmt, tok, StmtLoop,
