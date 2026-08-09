@@ -1,0 +1,15 @@
+// EXPECT: yes
+
+apply "../bin";
+
+import "../_test.wod";
+
+void main() {
+    int a = 5;
+    bool b = (a * 123) >> 4 == 38;
+    if (1 > a && a < 6 || b && a << 3 > 39)
+        output("yes");
+    else
+        output("no");
+    exit();
+}

@@ -541,7 +541,7 @@ static Stmt *expr_like_stmt(Parser *parser) {
         || match(parser, TOK_AMP_EQUAL)
         || match(parser, TOK_PIPE_EQUAL)))
     {
-        error_current(parser, SV("Unterminated statement."));
+        error_previous(parser, SV("Unterminated statement."));
     }
 
     Token tok = parser->previous;
