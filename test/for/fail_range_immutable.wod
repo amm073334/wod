@@ -1,0 +1,16 @@
+apply "../bin";
+
+import "../_test.wod";
+
+void main() {
+    int total = 0;
+    
+    for (int i = 0..123) {
+        total += i;
+        i += 1;
+        i++;
+    }
+    
+    output("${total}");
+    exit();
+}

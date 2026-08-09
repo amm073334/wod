@@ -148,9 +148,21 @@ static void disable_rc_pass(Arena *arena, WIRCev *wcev) {
             disable_rc(arena, wcev, &i, &inst->b);
             break;
         }
+        case _WIRInst_Compare: {
+            WIRInst_Compare *inst = (WIRInst_Compare *)wirinst;
+            disable_rc(arena, wcev, &i, &inst->a);
+            disable_rc(arena, wcev, &i, &inst->b);
+            break;
+        }
         case _WIRInst_IfBegin: {
             WIRInst_IfBegin *inst = (WIRInst_IfBegin *)wirinst;
             disable_rc(arena, wcev, &i, &inst->cond);
+            break;
+        }
+        case _WIRInst_IfBeginOp: {
+            WIRInst_IfBeginOp *inst = (WIRInst_IfBeginOp *)wirinst;
+            disable_rc(arena, wcev, &i, &inst->a);
+            disable_rc(arena, wcev, &i, &inst->b);
             break;
         }
         case _WIRInst_LoopBeginN: {
@@ -496,9 +508,22 @@ static void temp_alloc_pass(Arena *arena, WIRCev *wcev, VEC_int32_t *i_map, VEC_
             update_interval(&i_its, &s_its, i, inst->b);
             break;
         }
+        case _WIRInst_Compare: {
+            WIRInst_Compare *inst = (WIRInst_Compare *)wirinst;
+            update_interval(&i_its, &s_its, i, inst->dest);
+            update_interval(&i_its, &s_its, i, inst->a);
+            update_interval(&i_its, &s_its, i, inst->b);
+            break;
+        }
         case _WIRInst_IfBegin: {
             WIRInst_IfBegin *inst = (WIRInst_IfBegin *)wirinst;
             update_interval(&i_its, &s_its, i, inst->cond);
+            break;
+        }
+        case _WIRInst_IfBeginOp: {
+            WIRInst_IfBeginOp *inst = (WIRInst_IfBeginOp *)wirinst;
+            update_interval(&i_its, &s_its, i, inst->a);
+            update_interval(&i_its, &s_its, i, inst->b);
             break;
         }
         case _WIRInst_LoopBeginN: {
@@ -586,9 +611,22 @@ static void temp_alloc_pass(Arena *arena, WIRCev *wcev, VEC_int32_t *i_map, VEC_
             update_map(i_map, i_top, s_map, s_top, inst->b);
             break;
         }
+        case _WIRInst_Compare: {
+            WIRInst_Compare *inst = (WIRInst_Compare *)wirinst;
+            update_map(i_map, i_top, s_map, s_top, inst->dest);
+            update_map(i_map, i_top, s_map, s_top, inst->a);
+            update_map(i_map, i_top, s_map, s_top, inst->b);
+            break;
+        }
         case _WIRInst_IfBegin: {
             WIRInst_IfBegin *inst = (WIRInst_IfBegin *)wirinst;
             update_map(i_map, i_top, s_map, s_top, inst->cond);
+            break;
+        }
+        case _WIRInst_IfBeginOp: {
+            WIRInst_IfBeginOp *inst = (WIRInst_IfBeginOp *)wirinst;
+            update_map(i_map, i_top, s_map, s_top, inst->a);
+            update_map(i_map, i_top, s_map, s_top, inst->b);
             break;
         }
         case _WIRInst_LoopBeginN: {
@@ -665,7 +703,9 @@ static void push_binop_command(WIRCompiler *wc, int32_t dest, int cmd_assign, in
     cev_push_cmd(wc->cev, CMD_VAR, wc->indent, i_vec, (VEC_StringView)VEC_EMPTY);
 }
 
-static void compile_binop(WIRCompiler *wc, WIRInst_Binop *inst, int cmd_assign, int cmd_var_op) {
+static void compile_binop(WIRCompiler *wc, WIRInst_Binop *inst,
+    CommandVarFlag cmd_assign, CommandVarFlag cmd_var_op)
+{
     push_binop_command(wc,
         resolve(wc, inst->dest), cmd_assign,
         resolve(wc, inst->a), resolve(wc, inst->b), cmd_var_op);
@@ -689,7 +729,9 @@ static void push_str_command(WIRCompiler *wc, int32_t dest_ref, WIROperand src) 
         int_fields, str_fields);
 }
 
-static void compile_compare_binop(WIRCompiler *wc, WIRInst_Binop *inst, int cmd_comp_op) {
+static void compile_compare(WIRCompiler *wc, WIRInst_Compare *inst,
+    CommandIfIntFlag cmd_comp_op)
+{
     {
         VEC_int32_t i_vec = VEC_EMPTY;
         VEC_PUSH(i_vec, 1 | 0x10, wc->arena);
@@ -769,18 +811,20 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
         case WIR_BINOP_LSH: compile_binop(wc, inst, cmd_assign, VAR_OP_LSHIFT); break;
         case WIR_BINOP_AND: compile_binop(wc, inst, cmd_assign, VAR_OP_AND); break;
         case WIR_BINOP_OR:  compile_binop(wc, inst, cmd_assign, VAR_OP_OR); break;
-        
-        case WIR_BINOP_EQ:   compile_compare_binop(wc, inst, IF_INT_OP_EQ); break;
-        case WIR_BINOP_NEQ:  compile_compare_binop(wc, inst, IF_INT_OP_NEQ); break;
-        case WIR_BINOP_LT:   compile_compare_binop(wc, inst, IF_INT_OP_LT); break;
-        case WIR_BINOP_LTE:  compile_compare_binop(wc, inst, IF_INT_OP_LTE); break;
-        case WIR_BINOP_GT:   compile_compare_binop(wc, inst, IF_INT_OP_GT); break;
-        case WIR_BINOP_GTE:  compile_compare_binop(wc, inst, IF_INT_OP_GTE); break;
-        case WIR_BINOP_LAND: 
-        case WIR_BINOP_LOR:  
-            UNIMPLEMENTED;
         }
         break;                
+    }
+    case _WIRInst_Compare: {
+        WIRInst_Compare *inst = (WIRInst_Compare *)wi;
+        switch (inst->op) {
+            case WIR_CMP_EQ:   compile_compare(wc, inst, IF_INT_OP_EQ); break;
+            case WIR_CMP_NEQ:  compile_compare(wc, inst, IF_INT_OP_NEQ); break;
+            case WIR_CMP_LT:   compile_compare(wc, inst, IF_INT_OP_LT); break;
+            case WIR_CMP_LTE:  compile_compare(wc, inst, IF_INT_OP_LTE); break;
+            case WIR_CMP_GT:   compile_compare(wc, inst, IF_INT_OP_GT); break;
+            case WIR_CMP_GTE:  compile_compare(wc, inst, IF_INT_OP_GTE); break;
+        }
+        break;
     }
     case _WIRInst_StrAssign: {
         WIRInst_StrAssign *inst = (WIRInst_StrAssign *)wi;
@@ -795,6 +839,44 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
             VEC_PUSH(int_fields, resolve(wc, inst->cond), wc->arena);
             VEC_PUSH(int_fields, 0, wc->arena);
             VEC_PUSH(int_fields, IF_INT_OP_NEQ, wc->arena);
+    
+            cev_push_cmd(wc->cev, CMD_IF_INT, wc->indent,
+                int_fields, (VEC_StringView)VEC_EMPTY);
+        }
+
+        {
+            VEC_int32_t int_fields = VEC_EMPTY;
+            VEC_PUSH(int_fields, 1, wc->arena);
+    
+            cev_push_cmd(wc->cev, CMD_BRANCH, wc->indent,
+                int_fields, (VEC_StringView)VEC_EMPTY);
+        }
+        
+        wc->indent++;
+        break;
+    }
+    case _WIRInst_IfBeginOp: {
+        WIRInst_IfBeginOp *inst = (WIRInst_IfBeginOp *)wi;
+        {
+            VEC_int32_t int_fields = VEC_EMPTY;
+            VEC_PUSH(int_fields, 1, wc->arena);
+            VEC_PUSH(int_fields, resolve(wc, inst->a), wc->arena);
+            VEC_PUSH(int_fields, resolve(wc, inst->b), wc->arena);
+
+            switch (inst->op) {
+            case WIR_CMP_EQ:
+                VEC_PUSH(int_fields, IF_INT_OP_EQ, wc->arena); break;
+            case WIR_CMP_NEQ:
+                VEC_PUSH(int_fields, IF_INT_OP_NEQ, wc->arena); break;
+            case WIR_CMP_LT:
+                VEC_PUSH(int_fields, IF_INT_OP_LT, wc->arena); break;
+            case WIR_CMP_LTE:
+                VEC_PUSH(int_fields, IF_INT_OP_LTE, wc->arena); break;
+            case WIR_CMP_GT:
+                VEC_PUSH(int_fields, IF_INT_OP_GT, wc->arena); break;
+            case WIR_CMP_GTE:
+                VEC_PUSH(int_fields, IF_INT_OP_GTE, wc->arena); break;
+            }
     
             cev_push_cmd(wc->cev, CMD_IF_INT, wc->indent,
                 int_fields, (VEC_StringView)VEC_EMPTY);
@@ -1000,18 +1082,20 @@ static void compile_inst(WIRCompiler *wc, WIRInst *wi) {
 // is moved directly into a variable, rewrite to store the result
 // directly into the variable.
 static void temp_copy_propagation_pass(WIRCev *wcev) {
-    for (size_t i = 0; i < wcev->insts.count; i++) {
+    // Start from index 1, since this can't happen if there is no
+    // preceding instruction.
+    for (size_t i = 1; i < wcev->insts.count; i++) {
         if (wcev->insts.at[i]->kind != _WIRInst_Binop)
             continue;
         
         WIRInst_Binop *inst = (WIRInst_Binop *)wcev->insts.at[i]; 
 
-        if (inst->op != WIR_BINOP_ADD) continue;
-        if (inst->a.kind != OPKIND_TEMP_INT) continue;
-        if (inst->b.kind != OPKIND_IMM_INT) continue;
-        if (inst->b.as.imm_int != 0) continue;
+        if (!(inst->op == WIR_BINOP_ADD
+              && inst->a.kind == OPKIND_TEMP_INT
+              && inst->b.kind == OPKIND_IMM_INT
+              && inst->b.as.imm_int == 0))
+            continue;
 
-        assert(i > 0);
         WIRInst *prev = wcev->insts.at[i - 1];
 
         if (prev->kind == _WIRInst_Binop) {
@@ -1024,6 +1108,107 @@ static void temp_copy_propagation_pass(WIRCev *wcev) {
                 p->assign = inst->assign;
                 inst->base.kind = _WIRInst_NOP;
             }
+        } else if (prev->kind == _WIRInst_Compare) {
+            WIRInst_Compare *p = (WIRInst_Compare *)prev;
+            if (p->dest.kind == OPKIND_TEMP_INT
+                && p->dest.as.offset == inst->a.as.offset) {
+
+                p->dest = inst->dest;
+                inst->base.kind = _WIRInst_NOP;
+            }
+        } else if (prev->kind == _WIRInst_Call) {
+            WIRInst_Call *p = (WIRInst_Call *)prev;
+            if (p->dest.kind == OPKIND_TEMP_INT
+                && p->dest.as.offset == inst->a.as.offset) {
+
+                p->dest = inst->dest;
+                inst->base.kind = _WIRInst_NOP;
+            }
+        }
+    }
+}
+
+// If the temporary result of a comparison operation is immediately negated with
+// an XOR instruction, then merge the two instructions into one that just uses the
+// negated comparison.
+static void comp_reverse_pass(WIRCev *wcev) {
+    // Start from index 1, since this can't happen if there is no
+    // preceding instruction.
+    for (size_t i = 1; i < wcev->insts.count; i++) {
+        if (wcev->insts.at[i]->kind != _WIRInst_Binop)
+            continue;
+        
+        WIRInst_Binop *inst = (WIRInst_Binop *)wcev->insts.at[i]; 
+
+        if (!(inst->op == WIR_BINOP_XOR
+              && inst->a.kind == OPKIND_TEMP_INT
+              && inst->b.kind == OPKIND_IMM_INT
+              && inst->b.as.imm_int == 1))
+            continue;
+
+        WIRInst *prev = wcev->insts.at[i - 1];
+
+        if (prev->kind != _WIRInst_Compare) continue;
+
+        WIRInst_Compare *p = (WIRInst_Compare *)prev;
+        if (p->dest.kind == OPKIND_TEMP_INT
+            && p->dest.as.offset == inst->a.as.offset) {
+
+            p->dest = inst->dest;
+            switch (p->op) {
+                case WIR_CMP_EQ:  p->op = WIR_CMP_NEQ; break;
+                case WIR_CMP_NEQ: p->op = WIR_CMP_EQ; break;
+                case WIR_CMP_LT:  p->op = WIR_CMP_GTE; break;
+                case WIR_CMP_LTE: p->op = WIR_CMP_GT; break;
+                case WIR_CMP_GT:  p->op = WIR_CMP_LTE; break;
+                case WIR_CMP_GTE: p->op = WIR_CMP_LT; break;
+            }
+            
+            inst->base.kind = _WIRInst_NOP;
+
+            // Swap the binop and compare so that it's easier to chain
+            // into the `ifop` optimization (otherwise the NOPs would
+            // block the way).
+            wcev->insts.at[i - 1] = (WIRInst *)inst;
+            wcev->insts.at[i] = prev;
+        }
+    }
+}
+
+// If a raw `if` instruction immediately follows a compare instruction
+// and uses the compare's temporary result, then replace the `if`
+// with a more efficient `ifop`.
+static void comp_if_pass(WIRCev *wcev, Arena *arena) {
+    // Start from index 1, since this can't happen if there is no
+    // preceding instruction.
+    for (size_t i = 1; i < wcev->insts.count; i++) {
+        if (wcev->insts.at[i]->kind != _WIRInst_IfBegin)
+            continue;
+        
+        WIRInst_IfBegin *inst = (WIRInst_IfBegin *)wcev->insts.at[i]; 
+        WIRInst *prev = wcev->insts.at[i - 1];
+
+        if (prev->kind != _WIRInst_Compare) continue;
+        WIRInst_Compare *p = (WIRInst_Compare *)prev;
+            
+        // If the if condition is the temporary we just
+        // handled, then the `if` instruction can be upgraded
+        // to an `ifop`.
+        if (inst->cond.kind == OPKIND_TEMP_INT
+            && inst->cond.as.offset == p->dest.as.offset) {
+
+            WIRInst_IfBeginOp *ifop = 
+                arena_alloc_assert(arena, sizeof(WIRInst_IfBeginOp));
+        
+            *ifop = (WIRInst_IfBeginOp){
+                .base.kind = _WIRInst_IfBeginOp,
+                .a = p->a,
+                .b = p->b,
+                .op = p->op
+            };
+
+            prev->kind = _WIRInst_NOP;
+            wcev->insts.at[i] = (WIRInst *)ifop;
         }
     }
 }
@@ -1059,6 +1244,8 @@ static void compile_wir(WIRCompiler *wc, Module *mod) {
 
         // First, apply transformations to the code.
         temp_copy_propagation_pass(wcev);
+        comp_reverse_pass(wcev);
+        comp_if_pass(wcev, wc->arena);
         disable_rc_pass(wc->arena, wcev);
         
         // Map concrete addresses to temporaries.
@@ -1239,6 +1426,15 @@ void print_wir(WIR *wir) {
                 print_wop(in->b);
                 break;
             }
+            case _WIRInst_Compare: {
+                WIRInst_Compare *in = (WIRInst_Compare *)inst;
+                printf("cmp");
+                print_wop(in->dest);
+                print_wop(in->a);
+                printf(" %d", in->op);
+                print_wop(in->b);
+                break;
+            }
             case _WIRInst_ReturnVal: {
                 WIRInst_ReturnVal *in = (WIRInst_ReturnVal *)inst;
                 printf("retv");
@@ -1274,11 +1470,12 @@ void print_wir(WIR *wir) {
             }
             case _WIRInst_LoopBeginN: {
                 WIRInst_LoopBeginN *in = (WIRInst_LoopBeginN *)inst;
-                printf("loopn %d", in->count);
+                printf("loopn");
+                print_wop(in->count);
                 break;
             }
             case _WIRInst_LoopEnd: {
-                printf("loopend");
+                printf("endloop");
                 break;
             }
             case _WIRInst_IfBegin: {
@@ -1287,8 +1484,16 @@ void print_wir(WIR *wir) {
                 print_wop(in->cond);
                 break;
             }
+            case _WIRInst_IfBeginOp: {
+                WIRInst_IfBeginOp *in = (WIRInst_IfBeginOp *)inst;
+                printf("ifop");
+                print_wop(in->a);
+                printf(" %d", in->op);
+                print_wop(in->b);
+                break;
+            }
             case _WIRInst_IfEnd: {
-                printf("ifend");
+                printf("endif");
                 break;
             }
             case _WIRInst_Continue: {

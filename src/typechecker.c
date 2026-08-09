@@ -660,7 +660,7 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
         StmtInc *s = (StmtInc *)stmt;
         visit_Expr(tc, s->expr);
         if (!s->expr->type.is_assignable)
-            tc_error(tc, &s->base.tok, SV("Cannot increment expression."));
+            tc_error(tc, &s->base.tok, SV("Cannot increment this expression."));
 
         if (s->expr->type.basetype != TYPE_INT)
             tc_error(tc, &s->base.tok, SV("Can only increment integers."));

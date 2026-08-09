@@ -76,22 +76,24 @@ typedef struct {
 
         // Generally corresponds to a real command.
         _WIRInst_Binop,
+        _WIRInst_Compare,
         _WIRInst_StrAssign,
         _WIRInst_IfBegin,
+        _WIRInst_IfBeginOp,
+        _WIRInst_Else,
+        _WIRInst_IfEnd,
+        _WIRInst_LoopBegin,
         _WIRInst_LoopBeginN,
+        _WIRInst_LoopEnd,
+        _WIRInst_Continue,
+        _WIRInst_Break,
         _WIRInst_Call,
-        _WIRInst_ReturnVal,
         _WIRInst_Cmd,
         _WIRInst_DBLoad,
         _WIRInst_DBStore,
         _WIRInst_Label,
         _WIRInst_Goto,
-        _WIRInst_Else,
-        _WIRInst_IfEnd,
-        _WIRInst_LoopBegin,
-        _WIRInst_LoopEnd,
-        _WIRInst_Continue,
-        _WIRInst_Break,
+        _WIRInst_ReturnVal,
         _WIRInst_ReturnVoid,
     } kind;
 } WIRInst;
@@ -110,11 +112,9 @@ typedef struct {
 typedef struct {
     WIRInst base;
     enum {
-        WIR_BINOP_ADD, WIR_BINOP_SUB, WIR_BINOP_MUL, WIR_BINOP_DIV, WIR_BINOP_MOD,
+        WIR_BINOP_ADD, WIR_BINOP_SUB,
+        WIR_BINOP_MUL, WIR_BINOP_DIV, WIR_BINOP_MOD,
         WIR_BINOP_AND, WIR_BINOP_OR, WIR_BINOP_XOR, WIR_BINOP_LSH,
-        WIR_BINOP_EQ, WIR_BINOP_NEQ, WIR_BINOP_LT, WIR_BINOP_LTE,
-        WIR_BINOP_GT, WIR_BINOP_GTE,
-        WIR_BINOP_LAND, WIR_BINOP_LOR,
     } op;
     enum {
         WIR_ASSIGN_EQ,
@@ -128,6 +128,38 @@ typedef struct {
     WIROperand a;
     WIROperand b;
 } WIRInst_Binop;
+
+typedef enum {
+    WIR_CMP_EQ, WIR_CMP_NEQ,
+    WIR_CMP_LT, WIR_CMP_LTE,
+    WIR_CMP_GT, WIR_CMP_GTE,
+} WIRCmpOp;
+
+typedef struct {
+    WIRInst base;
+    WIRCmpOp op;
+    WIROperand dest;
+    WIROperand a;
+    WIROperand b;
+} WIRInst_Compare;
+
+typedef struct {
+    WIRInst base;
+    WIROperand dest;
+    WIROperand src;
+} WIRInst_StrAssign;
+
+typedef struct {
+    WIRInst base;
+    WIROperand cond;
+} WIRInst_IfBegin;
+
+typedef struct {
+    WIRInst base;
+    WIRCmpOp op;
+    WIROperand a;
+    WIROperand b;
+} WIRInst_IfBeginOp;
 
 typedef struct {
     WIRInst base;
@@ -143,6 +175,11 @@ typedef struct {
 
 typedef struct {
     WIRInst base;
+    WIROperand count;
+} WIRInst_LoopBeginN;
+
+typedef struct {
+    WIRInst base;
 } WIRInst_LoopEnd;
 
 typedef struct {
@@ -155,23 +192,29 @@ typedef struct {
 
 typedef struct {
     WIRInst base;
-} WIRInst_ReturnVoid;
-
-typedef struct {
-    WIRInst base;
+    
+    // Can be the immediate integer `0` if the
+    // return value is unused, or there is no return value.
     WIROperand dest;
-    WIROperand src;
-} WIRInst_StrAssign;
+
+    // Either a globally qualified name or a
+    // virtual register containing the cev address.
+    WIROperand cev;
+    
+    VEC_WIROperand args;
+} WIRInst_Call;
 
 typedef struct {
     WIRInst base;
-    WIROperand cond;
-} WIRInst_IfBegin;
+    int32_t op;
+    VEC_WIROperand iargs;
+    VEC_WIROperand sargs;
 
-typedef struct {
-    WIRInst base;
-    WIROperand count;
-} WIRInst_LoopBeginN;
+    // Can be 1 for `open` or -1 for `close`; or 0 for
+    // no change. Indicates commands with block-like
+    // structures, like loops and conditionals.
+    int open_close;
+} WIRInst_Cmd;
 
 typedef struct {
     WIRInst base;
@@ -191,17 +234,13 @@ typedef struct {
 
 typedef struct {
     WIRInst base;
-    
-    // Can be the immediate integer `0` if the
-    // return value is unused, or there is no return value.
-    WIROperand dest;
+    WIROperand name;
+} WIRInst_Label;
 
-    // Either a globally qualified name or a
-    // virtual register containing the cev address.
-    WIROperand cev;
-    
-    VEC_WIROperand args;
-} WIRInst_Call;
+typedef struct {
+    WIRInst base;
+    WIROperand name;
+} WIRInst_Goto;
 
 typedef struct {
     WIRInst base;
@@ -210,25 +249,7 @@ typedef struct {
 
 typedef struct {
     WIRInst base;
-    int32_t op;
-    VEC_WIROperand iargs;
-    VEC_WIROperand sargs;
-
-    // Can be 1 for `open` or -1 for `close`; or 0 for
-    // no change. Indicates commands with block-like
-    // structures, like loops and conditionals.
-    int open_close;
-} WIRInst_Cmd;
-
-typedef struct {
-    WIRInst base;
-    WIROperand name;
-} WIRInst_Label;
-
-typedef struct {
-    WIRInst base;
-    WIROperand name;
-} WIRInst_Goto;
+} WIRInst_ReturnVoid;
 
 typedef struct WIRCev {
     StringView name;

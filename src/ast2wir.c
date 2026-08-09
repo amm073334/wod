@@ -84,6 +84,20 @@ static void emit_binop(Ast2Wir *aw, WIROperand dest, int assign, WIROperand a, W
     emit_to_current_cev(aw, (WIRInst *)inst);
 }
 
+static void emit_compare(Ast2Wir *aw, WIROperand dest, WIROperand a, WIROperand b, int op) {
+    WIRInst_Compare *inst;
+    ALLOC_WIR(inst, WIRInst_Compare,
+        (WIRInst_Compare){ .dest = dest, .op = op, .a = a, .b = b });
+    emit_to_current_cev(aw, (WIRInst *)inst);
+}
+
+static void emit_if_begin(Ast2Wir *aw, WIROperand cond) {
+    WIRInst_IfBegin *inst;
+    ALLOC_WIR(inst, WIRInst_IfBegin,
+        (WIRInst_IfBegin){ .cond = cond });
+    emit_to_current_cev(aw, (WIRInst *)inst);
+}
+
 static void emit_str(Ast2Wir *aw, WIROperand dest, WIROperand a) {
     WIRInst_StrAssign *inst;
     ALLOC_WIR(inst, WIRInst_StrAssign,
@@ -312,9 +326,55 @@ static WIROperand visit_Expr(Ast2Wir *aw, Expr *expr) {
     case NODE_ExprBinary: {
         ExprBinary *e = (ExprBinary *)expr;
 
+        WIROperand dest = tmp_int(aw);
+
+        // Logical operators use short-circuit evaluation, so they need
+        // some special treatment. Otherwise, we could just evaluate both
+        // left and right operands up-front and use a binary operator on them to
+        // compute the result.
+        if (e->op.type == TOK_AMP_AMP) {
+            emit_binop(aw, dest, WIR_ASSIGN_EQ, WIR_IMM_I(0), WIR_IMM_I(0), WIR_BINOP_ADD);
+            
+            WIROperand left = visit_Expr(aw, e->left);
+            emit_if_begin(aw, left);
+            
+            WIROperand right = visit_Expr(aw, e->right);
+            emit_if_begin(aw, right);
+
+            emit_binop(aw, dest, WIR_ASSIGN_EQ, WIR_IMM_I(1), WIR_IMM_I(0), WIR_BINOP_ADD);
+            
+            emit_simple(aw, _WIRInst_IfEnd);
+            emit_simple(aw, _WIRInst_IfEnd);
+
+            return dest;
+        } else if (e->op.type == TOK_PIPE_PIPE) {
+            // By De Morgan's laws, a || b can be expressed as !(!a && !b).
+            // Doing things this way saves us from having to either duplicate code
+            // or use a label/goto. (Whether or not that is good performance-wise
+            // needs investigation.)
+
+            emit_binop(aw, dest, WIR_ASSIGN_EQ, WIR_IMM_I(1), WIR_IMM_I(0), WIR_BINOP_ADD);
+            
+            WIROperand left = visit_Expr(aw, e->left);
+            WIROperand tmp_left = tmp_int(aw);
+            emit_binop(aw, tmp_left, WIR_ASSIGN_EQ, left, WIR_IMM_I(1), WIR_BINOP_XOR);
+            emit_if_begin(aw, tmp_left);
+
+            WIROperand right = visit_Expr(aw, e->right);
+            WIROperand tmp_right = tmp_int(aw);
+            emit_binop(aw, tmp_right, WIR_ASSIGN_EQ, right, WIR_IMM_I(1), WIR_BINOP_XOR);
+            emit_if_begin(aw, tmp_right);
+
+            emit_binop(aw, dest, WIR_ASSIGN_EQ, WIR_IMM_I(0), WIR_IMM_I(0), WIR_BINOP_ADD);
+            
+            emit_simple(aw, _WIRInst_IfEnd);
+            emit_simple(aw, _WIRInst_IfEnd);
+
+            return dest;
+        }
+
         WIROperand left = visit_Expr(aw, e->left);
         WIROperand right = visit_Expr(aw, e->right);
-        WIROperand dest = tmp_int(aw);
 
         switch (e->op.type) {
         case TOK_PLUS:
@@ -342,21 +402,17 @@ static WIROperand visit_Expr(Ast2Wir *aw, Expr *expr) {
             break;
         }
         case TOK_EQUAL_EQUAL:
-            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, right, WIR_BINOP_EQ); break;
+            emit_compare(aw, dest, left, right, WIR_CMP_EQ); break;
         case TOK_BANG_EQUAL:
-            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, right, WIR_BINOP_NEQ); break;
+            emit_compare(aw, dest, left, right, WIR_CMP_NEQ); break;
         case TOK_LESS:
-            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, right, WIR_BINOP_LT); break;
+            emit_compare(aw, dest, left, right, WIR_CMP_LT); break;
         case TOK_LESS_EQUAL:
-            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, right, WIR_BINOP_LTE); break;
+            emit_compare(aw, dest, left, right, WIR_CMP_LTE); break;
         case TOK_GREATER:
-            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, right, WIR_BINOP_GT); break;
+            emit_compare(aw, dest, left, right, WIR_CMP_GT); break;
         case TOK_GREATER_EQUAL:
-            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, right, WIR_BINOP_GTE); break;
-        case TOK_AMP_AMP:
-            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, right, WIR_BINOP_LAND); break;
-        case TOK_PIPE_PIPE:
-            emit_binop(aw, dest, WIR_ASSIGN_EQ, left, right, WIR_BINOP_LOR); break;
+            emit_compare(aw, dest, left, right, WIR_CMP_GTE); break;
         default: UNREACHABLE;
         }
 
@@ -594,10 +650,7 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
         StmtIf *s = (StmtIf *)stmt;
         WIROperand cond = visit_Expr(aw, s->condition);
 
-        WIRInst_IfBegin *inst;
-        ALLOC_WIR(inst, WIRInst_IfBegin,
-            (WIRInst_IfBegin){ .cond = cond });
-        emit_to_current_cev(aw, (WIRInst *)inst);
+        emit_if_begin(aw, cond);
 
         visit_Stmt(aw, s->then_branch);
 
@@ -645,11 +698,12 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
         
         if (s->condition) {
             WIROperand cond = visit_Expr(aw, s->condition);
-            emit_binop(aw, cond, WIR_ASSIGN_EQ, cond, WIR_IMM_I(1), WIR_BINOP_XOR);
+            WIROperand tmp_cond = tmp_int(aw);
+            emit_binop(aw, tmp_cond, WIR_ASSIGN_EQ, cond, WIR_IMM_I(1), WIR_BINOP_XOR);
 
             WIRInst_IfBegin *if_begin;
             ALLOC_WIR(if_begin, WIRInst_IfBegin,
-                (WIRInst_IfBegin){ .cond = cond });
+                (WIRInst_IfBegin){ .cond = tmp_cond });
 
             emit_to_current_cev(aw, (WIRInst *)if_begin);
             emit_simple(aw, _WIRInst_Break);
