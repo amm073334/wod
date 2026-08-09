@@ -263,13 +263,13 @@ Token scan_token(Lexer *lexer) {
                 return make_token(lexer, TOK_PLUS_EQUAL);
             else if (match(lexer, '+'))
                 return make_token(lexer, TOK_PLUS_PLUS);
-            else make_token(lexer, TOK_PLUS);
+            else return make_token(lexer, TOK_PLUS);
         case '-':
             if (match(lexer, '='))
                 return make_token(lexer, TOK_MINUS_EQUAL);
             else if (match(lexer, '-'))
                 return make_token(lexer, TOK_MINUS_MINUS);
-            else make_token(lexer, TOK_MINUS);
+            else return make_token(lexer, TOK_MINUS);
         case '/':
             return make_token(lexer,
                 match(lexer, '=') ? TOK_SLASH_EQUAL : TOK_SLASH);
