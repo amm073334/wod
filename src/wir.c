@@ -1309,18 +1309,16 @@ static void compile_wir(WIRCompiler *wc, Module *mod) {
         
         #undef LOAD_SYMBOLS
     }
-    print_wir(mod->wir);
     
     // Process every `WIRCev`.
     for (size_t i = 0; i < wir->g_cevs.count; i++) {
         WIRCev *wcev = &wir->g_cevs.at[i];
 
         // First, apply transformations to the code.
+        disable_rc_pass(wc->arena, wcev);
         temp_copy_propagation_pass(wcev);
         comp_reverse_pass(wcev);
         comp_if_pass(wcev, wc->arena);
-        disable_rc_pass(wc->arena, wcev);
-    print_wir(mod->wir);
         
         // Map concrete addresses to temporaries.
         temp_alloc_pass(wc->arena, wcev, &wc->int_map, &wc->str_map);
