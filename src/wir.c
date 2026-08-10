@@ -410,15 +410,15 @@ static void update_map(VEC_int32_t *i_map, size_t i_top, VEC_int32_t *s_map, siz
 // Essentially, this is linear register allocation but with an
 // infinite number of physical registers.
 // (https://en.wikipedia.org/wiki/Register_allocation#Linear_scan)
-static VEC_int32_t reg_alloc(Arena *arena, VEC_Interval *its) {
+static VEC_int32_t reg_alloc(Arena *arena, VEC_Interval *its, size_t n_temps) {
     VEC_int32_t map = VEC_EMPTY;
-    for (size_t i = 0; i < its->count; i++)
+    for (size_t i = 0; i < n_temps; i++)
         VEC_PUSH(map, 0, arena);
     
     // Whether or not a register is active.
     VEC_DEF(bool);
     VEC_bool regs = VEC_EMPTY;
-    for (size_t i = 0; i < its->count; i++)
+    for (size_t i = 0; i < n_temps; i++)
         VEC_PUSH(regs, false, arena);
     
     VEC_Interval i_active = VEC_EMPTY;
@@ -576,8 +576,8 @@ static void temp_alloc_pass(Arena *arena, WIRCev *wcev, VEC_int32_t *i_map, VEC_
         VEC_REMOVE(s_its, i);
     }
 
-    *i_map = reg_alloc(arena, &i_its);
-    *s_map = reg_alloc(arena, &s_its);
+    *i_map = reg_alloc(arena, &i_its, n_i_temps);
+    *s_map = reg_alloc(arena, &s_its, n_s_temps);
 
     // Now do one more pass of the code, keeping track of the
     // state of the local variable stack, to assign actual
@@ -688,8 +688,6 @@ static void temp_alloc_pass(Arena *arena, WIRCev *wcev, VEC_int32_t *i_map, VEC_
             break;
         }
     }
-
-    return ;
 }
 
 static void push_binop_command(WIRCompiler *wc, int32_t dest, int cmd_assign, int32_t a, int32_t b, int cmd_var_op) {
@@ -1183,6 +1181,7 @@ static void comp_reverse_pass(WIRCev *wcev) {
         WIRInst_Binop *inst = (WIRInst_Binop *)wcev->insts.at[i]; 
 
         if (!(inst->op == WIR_BINOP_XOR
+              && inst->assign == WIR_ASSIGN_EQ
               && inst->a.kind == OPKIND_TEMP_INT
               && inst->b.kind == OPKIND_IMM_INT
               && inst->b.as.imm_int == 1))
@@ -1220,6 +1219,9 @@ static void comp_reverse_pass(WIRCev *wcev) {
 // If a raw `if` instruction immediately follows a compare instruction
 // and uses the compare's temporary result, then replace the `if`
 // with a more efficient `ifop`.
+//
+// Similarly, if a raw `if` immediately follows the negation of a
+// temporary, merge the negation into an `ifop`.
 static void comp_if_pass(WIRCev *wcev, Arena *arena) {
     // Start from index 1, since this can't happen if there is no
     // preceding instruction.
@@ -1228,29 +1230,58 @@ static void comp_if_pass(WIRCev *wcev, Arena *arena) {
             continue;
         
         WIRInst_IfBegin *inst = (WIRInst_IfBegin *)wcev->insts.at[i]; 
-        WIRInst *prev = wcev->insts.at[i - 1];
-
-        if (prev->kind != _WIRInst_Compare) continue;
-        WIRInst_Compare *p = (WIRInst_Compare *)prev;
-            
-        // If the if condition is the temporary we just
-        // handled, then the `if` instruction can be upgraded
-        // to an `ifop`.
-        if (inst->cond.kind == OPKIND_TEMP_INT
-            && inst->cond.as.offset == p->dest.as.offset) {
-
-            WIRInst_IfBeginOp *ifop = 
-                arena_alloc_assert(arena, sizeof(WIRInst_IfBeginOp));
+        if (inst->cond.kind != OPKIND_TEMP_INT) continue;
         
-            *ifop = (WIRInst_IfBeginOp){
-                .base.kind = _WIRInst_IfBeginOp,
-                .a = p->a,
-                .b = p->b,
-                .op = p->op
-            };
+        WIRInst *prev = wcev->insts.at[i - 1];
+        if (prev->kind == _WIRInst_Compare) {
+            WIRInst_Compare *p = (WIRInst_Compare *)prev;
+                
+            // If the if condition is the temporary we just
+            // handled, then the `if` instruction can be upgraded
+            // to an `ifop`.
+            if (p->dest.kind == OPKIND_TEMP_INT
+                && inst->cond.as.offset == p->dest.as.offset) {
+    
+                WIRInst_IfBeginOp *ifop = 
+                    arena_alloc_assert(arena, sizeof(WIRInst_IfBeginOp));
+            
+                *ifop = (WIRInst_IfBeginOp){
+                    .base.kind = _WIRInst_IfBeginOp,
+                    .a = p->a,
+                    .b = p->b,
+                    .op = p->op
+                };
+    
+                prev->kind = _WIRInst_NOP;
+                wcev->insts.at[i] = (WIRInst *)ifop;
+            }
+        } else if (prev->kind == _WIRInst_Binop) {
+            WIRInst_Binop *p = (WIRInst_Binop *)prev;
 
-            prev->kind = _WIRInst_NOP;
-            wcev->insts.at[i] = (WIRInst *)ifop;
+            // If the if condition is a negated temporary,
+            // then just negate the if condition and remove the
+            // negation instruction.
+            if (p->dest.kind == OPKIND_TEMP_INT
+                && inst->cond.as.offset == p->dest.as.offset
+                && p->op == WIR_BINOP_XOR
+                && p->assign == WIR_ASSIGN_EQ
+                && p->a.kind == OPKIND_TEMP_INT
+                && p->b.kind == OPKIND_IMM_INT
+                && p->b.as.imm_int == 1) {
+    
+                WIRInst_IfBeginOp *ifop = 
+                    arena_alloc_assert(arena, sizeof(WIRInst_IfBeginOp));
+            
+                *ifop = (WIRInst_IfBeginOp){
+                    .base.kind = _WIRInst_IfBeginOp,
+                    .a = p->a,
+                    .b = WIR_IMM_I(0),
+                    .op = WIR_CMP_EQ
+                };
+    
+                prev->kind = _WIRInst_NOP;
+                wcev->insts.at[i] = (WIRInst *)ifop;
+            }
         }
     }
 }
@@ -1289,6 +1320,7 @@ static void compile_wir(WIRCompiler *wc, Module *mod) {
         comp_reverse_pass(wcev);
         comp_if_pass(wcev, wc->arena);
         disable_rc_pass(wc->arena, wcev);
+    print_wir(mod->wir);
         
         // Map concrete addresses to temporaries.
         temp_alloc_pass(wc->arena, wcev, &wc->int_map, &wc->str_map);
