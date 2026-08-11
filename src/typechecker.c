@@ -833,12 +833,16 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
             for (size_t j = 0; j < s->fields.count; j++) {
                 StmtVarDecl *field = s->fields.at[j];
                 assert(!field->is_const);
-                if (field->initializer
-                    && !field->initializer->type.is_compile_time)
-                    tc_error(tc, &field->initializer->tok,
-                        SV("DB field initializer must be constant expression."));
-                else 
-                    try_insert_vardecl(tc, field);
+                try_insert_vardecl(tc, field);
+                if (field->initializer) {
+                    if (!field->initializer->type.is_compile_time)
+                        tc_error(tc, &field->initializer->tok,
+                            SV("DB field initializer must be constant expression."));
+                            
+                    if (field->initializer->type.basetype == TYPE_STR)
+                        tc_error(tc, &field->initializer->tok,
+                            SV("DB field initializer cannot be a string."));
+                }
             }
             tc->current_env = tc->top_level_env;
             break;

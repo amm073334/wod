@@ -1,0 +1,15 @@
+apply "../bin"
+
+import "../_test.wod"
+
+cdb TestCDB {
+    int a;
+    int b = 2;
+    str b = "asdf";
+    int c = 123;
+}
+
+void main() {
+    output("${TestCDB[0].a + TestCDB[1].b + TestCDB[3].c}");
+    exit();
+}

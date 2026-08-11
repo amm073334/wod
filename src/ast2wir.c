@@ -197,17 +197,16 @@ static size_t new_local_str(Ast2Wir *aw) {
     return top->str_top++;
 }
 
-static void visit_db_field_decl(Ast2Wir *aw, Stmt *stmt) {
+static void visit_db_field_decl(Ast2Wir *aw, Stmt *stmt, WIRDB *db) {
     assert(stmt->kind == NODE_StmtVarDecl);
 
     StmtVarDecl *s = (StmtVarDecl *)stmt;
     assert(!s->is_const);
 
-    WIRDB *last = &aw->wir->g_cdbs.at[aw->wir->g_cdbs.count - 1];
-
     WIRVar wdbf = {
         .name = s->name,
-        .type = s->sym->type,
+        .type = s->sym->type.basetype == TYPE_STR ?
+            WIRVAR_STR : WIRVAR_INT,
         .has_initializer = false
     };
 
@@ -216,14 +215,6 @@ static void visit_db_field_decl(Ast2Wir *aw, Stmt *stmt) {
         wdbf.has_initializer = true;
 
         switch (s->initializer->kind) {
-        case NODE_ExprStrLit: {
-            ExprStrLit *lit = (ExprStrLit *)s->initializer;
-            wdbf.initializer = (WIROperand){
-                .kind = OPKIND_IMM_STR,
-                .as.imm_str = lit->value
-            };
-            break;
-        }
         case NODE_ExprIntLit: {
             ExprIntLit *lit = (ExprIntLit *)s->initializer;
             wdbf.initializer = (WIROperand){
@@ -240,11 +231,12 @@ static void visit_db_field_decl(Ast2Wir *aw, Stmt *stmt) {
             };
             break;
         }
+        case NODE_ExprStrLit:
         default: UNREACHABLE;
         }
     }
 
-    VEC_PUSH(last->fields, wdbf, aw->arena);
+    VEC_PUSH(db->fields, wdbf, aw->arena);
 }
 
 static WIROperand visit_Expr(Ast2Wir *aw, Expr *expr) {
@@ -570,9 +562,10 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
             }
 
             if (!s->sym->env->parent) {
+                assert(!s->initializer);
                 WIRVar wv = {
                     .name = s->sym->name,
-                    .type = s->sym->type,
+                    .type = WIRVAR_STR,
                     .has_initializer = s->initializer != NULL,
                     .initializer = init
                 };
@@ -596,9 +589,10 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
             }
 
             if (!s->sym->env->parent) {
+                assert(!s->initializer);
                 WIRVar wv = {
                     .name = s->sym->name,
-                    .type = s->sym->type,
+                    .type = WIRVAR_INT,
                     .has_initializer = s->initializer != NULL,
                     .initializer = init
                 };
@@ -811,7 +805,8 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
                 .fields = VEC_EMPTY
             }), aw->arena);
         for (size_t i = 0; i < s->fields.count; i++)
-            visit_db_field_decl(aw, (Stmt *)s->fields.at[i]);
+            visit_db_field_decl(aw, (Stmt *)s->fields.at[i],
+                &aw->wir->g_cdbs.at[aw->wir->g_cdbs.count-1]);
         return;
     }
     case NODE_StmtInc: {

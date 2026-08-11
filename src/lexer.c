@@ -29,6 +29,7 @@ static const Keyword keywords[] = {
     {.name = "true",     .type = TOK_TRUE},
     {.name = "false",    .type = TOK_FALSE},
     {.name = "cmd",      .type = TOK_CMD},
+    {.name = "udb",      .type = TOK_UDB},
     {.name = "cdb",      .type = TOK_CDB},
     {.name = "cevtype",  .type = TOK_CEVTYPE},
     {.name = "apply",    .type = TOK_APPLY},

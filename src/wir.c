@@ -1309,6 +1309,30 @@ static void compile_wir(WIRCompiler *wc, Module *mod) {
         
         #undef LOAD_SYMBOLS
     }
+
+    // Process every CDB.
+    for (size_t i = 0; i < wir->g_cdbs.count; i++) {
+        WIRDB *wdb = &wir->g_cdbs.at[i];
+        
+        DB db;
+        db_init(&db);
+
+        for (size_t j = 0; j < wdb->fields.count; j++) {
+            WIRVar *field = &wdb->fields.at[i];
+            VEC_PUSH(db.fields, ((DBField){
+                .type = field->type == WIRVAR_INT ?
+                    DBFIELD_INT : DBFIELD_STR,
+                .ITEMNAME = field->name,
+                .VMEMO = SV(""),
+                .CHOICE_NAME = SV(""),
+                .CHOICE_VAL = 0,
+                .DEFAULT_VAL = field->has_initializer ?
+                    resolve(wc, field->initializer) : 0 
+            }), wc->arena);
+        }
+
+        VEC_PUSH(wc->gd.cdb, db, wc->arena);
+    }
     
     // Process every `WIRCev`.
     for (size_t i = 0; i < wir->g_cevs.count; i++) {
@@ -1383,9 +1407,16 @@ GameData wir_pass(VEC_Module *modules, Arena *arena) {
         }
     }
 
-    DB db;
-    db_init(&db);
-    VEC_PUSH(wc.gd.cdb, db, arena);
+    // The editor crashes if there are no DBs of a type,
+    // so if there are none then add an empty one.
+    if (wc.gd.udb.count == 0) {
+        DB db; db_init(&db);
+        VEC_PUSH(wc.gd.udb, db, arena);
+    }
+    if (wc.gd.cdb.count == 0) {
+        DB db; db_init(&db);
+        VEC_PUSH(wc.gd.cdb, db, arena);
+    }
 
     return wc.gd;
 }

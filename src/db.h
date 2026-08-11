@@ -6,8 +6,8 @@
 #include "common.h"
 
 typedef enum {
-    PROP_INT = 1000,
-    PROP_STR = 2000,
+    DBFIELD_INT = 1000,
+    DBFIELD_STR = 2000,
 } DBFieldType;
 
 typedef struct {
@@ -17,14 +17,13 @@ typedef struct {
     StringView CHOICE_NAME;
     int32_t CHOICE_VAL;
     int32_t DEFAULT_VAL;
-} DBProperty;
+} DBField;
 
-VEC_DEF(DBProperty);
+VEC_DEF(DBField);
 
 // NOTE: Struct format is not necessarily accurate to official binary format;
 //       integer widths need to be investigated.
 typedef struct {
-    // data
     int32_t TYPE_ID;
     int32_t DATANAME_LOAD_TYPE;
     StringView DATANAME_LOAD_NAME;
@@ -34,7 +33,7 @@ typedef struct {
 
     int32_t ITEMTYPE[100];
 
-    VEC_DBProperty properties;
+    VEC_DBField fields;
 } DB;
 
 void db_init(DB *db);

@@ -264,7 +264,10 @@ VEC_DEF(WIRCev);
 
 typedef struct WIRVar {
     StringView name;
-    WodType type;
+    enum {
+        WIRVAR_INT,
+        WIRVAR_STR,
+    } type;
 
     bool has_initializer;
     WIROperand initializer;

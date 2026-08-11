@@ -100,6 +100,7 @@ static const char *dummy_post =
 
 void gd_init(GameData *gd) {
     VEC_INIT(gd->cevs);
+    VEC_INIT(gd->udb);
     VEC_INIT(gd->cdb);
     gd->entry = 500000;
 }
@@ -166,6 +167,27 @@ void gd_write_dir(GameData *gd, StringView out) {
             cev_write_txt(&gd->cevs.at[i], cev_dat);
         }
         fclose(cev_dat);
+    }
+
+    {
+        StringView path = 
+            sv_concat(&arena, basic_data_dir, SV("DataBase.Auto.txt"));
+        if (!path.data)
+            goto alloc_error;
+
+        FILE *cdb_dat = fopen(path.data, "wb");
+        if (!cdb_dat) {
+            fprintf(stderr, "Failed to open DataBase.Auto.txt.");
+            goto cleanup;
+        }
+
+        fprintf(cdb_dat, "[DATABASE_TEXT_OUTPUT]\n");
+        fprintf(cdb_dat, "TYPE_NUM=%zu\n", gd->cdb.count);
+        for (size_t i = 0; i < gd->cdb.count; i++) {
+            fprintf(cdb_dat, "----\n");
+            db_write_txt(&gd->cdb.at[i], cdb_dat);
+        }
+        fclose(cdb_dat);
     }
 
     {

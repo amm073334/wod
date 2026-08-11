@@ -10,6 +10,7 @@ VEC_DEF(DB);
 
 typedef struct {
     VEC_CommonEvent cevs;
+    VEC_DB udb;
     VEC_DB cdb;
     
     int32_t entry;
