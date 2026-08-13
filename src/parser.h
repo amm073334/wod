@@ -91,6 +91,8 @@ typedef struct {
     Expr base;
     Expr *left;
     Token name;
+
+    Symbol *sym;
 } ExprAccess;
 
 typedef struct {

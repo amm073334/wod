@@ -40,7 +40,7 @@ Symbol *env_insert(Environment *env, StringView name, WodType type, Arena *arena
     sym.env = env;
     sym.name = name;
     sym.type = type;
-    sym.offset = 0;
+    sym.local_offset = 0;
     sym.top_level_path = SV_NULL;
 
     VEC_PUSH(env->symbols, sym, arena);

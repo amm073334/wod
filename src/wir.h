@@ -25,9 +25,9 @@ struct WIROperand {
 
         // Uses the `offset` member.
         //
-        // For locals, the offset is relative to the function base
-        // (in other words, CSelf0). This mimics the behavior of
-        // locals on the stack of a typical programming language.
+        // For locals, the offset is relative to 0.
+        // This mimics the behavior of locals on the stack of a
+        // typical programming language.
         //
         // For temporaries, the offset is like a virtual register,
         // and is never meant to decrease over the course of a
@@ -43,8 +43,30 @@ struct WIROperand {
         OPKIND_GLOBAL_INT,
         OPKIND_GLOBAL_STR,
         OPKIND_GLOBAL_CEV,
-        OPKIND_GLOBAL_UDB,
-        OPKIND_GLOBAL_CDB,
+        OPKIND_GLOBAL_UDBTYPE,
+        OPKIND_GLOBAL_CDBTYPE,
+        
+        ////////////////////////////////////////////////////////////
+        // The following two kinds of operand are kind of a hack.
+        //
+        // Basically the problem is that in the AST2WIR phase the
+        // expression visitor returns a WIROperand type as a way to
+        // tell the caller where the result of an expression is
+        // located; but when traversing DB access, we need more than
+        // one operand of information to emit a load or store (we
+        // need the type ID, the data ID, and the field ID).
+        //
+        // So we just extend operands to be able to hold that
+        // information, but it's a bug to actually use these operand
+        // kinds in the WIR compilation phase itself.
+
+        // Uses the `dbdata` field, which has a DB type ID
+        // and a data index.
+        OPKIND_DBDATA,
+
+        // Uses the `dbfield` field, which has a DB type ID,
+        // a data index, and a field index.
+        OPKIND_DBFIELD,
     } kind;
 
     union {
@@ -59,6 +81,17 @@ struct WIROperand {
             StringView path;
             StringView name;
         } global;
+        
+        struct {
+            WIROperand *type_id;
+            WIROperand *data_id;
+        } dbdata;
+
+        struct {
+            WIROperand *type_id;
+            WIROperand *data_id;
+            WIROperand *field_id;
+        } dbfield;
     } as;
 };
 
@@ -109,6 +142,15 @@ typedef struct {
     size_t n;
 } WIRInst_PopStrN;
 
+typedef enum {
+    WIR_ASSIGN_EQ,
+    WIR_ASSIGN_ADD,
+    WIR_ASSIGN_SUB,
+    WIR_ASSIGN_MUL,
+    WIR_ASSIGN_DIV,
+    WIR_ASSIGN_MOD,
+} WIRAssign;
+
 typedef struct {
     WIRInst base;
     enum {
@@ -116,14 +158,7 @@ typedef struct {
         WIR_BINOP_MUL, WIR_BINOP_DIV, WIR_BINOP_MOD,
         WIR_BINOP_AND, WIR_BINOP_OR, WIR_BINOP_XOR, WIR_BINOP_LSH,
     } op;
-    enum {
-        WIR_ASSIGN_EQ,
-        WIR_ASSIGN_ADD,
-        WIR_ASSIGN_SUB,
-        WIR_ASSIGN_MUL,
-        WIR_ASSIGN_DIV,
-        WIR_ASSIGN_MOD,
-    } assign;
+    WIRAssign assign;
     WIROperand dest;
     WIROperand a;
     WIROperand b;
@@ -218,7 +253,9 @@ typedef struct {
 
 typedef struct {
     WIRInst base;
-    WIROperand src;
+    DBKind db_kind;
+    WIROperand dst;
+    WIRAssign assign;
     WIROperand db_type;
     WIROperand db_data;
     WIROperand db_field;
@@ -226,7 +263,9 @@ typedef struct {
 
 typedef struct {
     WIRInst base;
-    WIROperand dst;
+    DBKind db_kind;
+    WIROperand src;
+    WIRAssign assign;
     WIROperand db_type;
     WIROperand db_data;
     WIROperand db_field;

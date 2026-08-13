@@ -1,8 +1,8 @@
 // EXPECT: 125
 
-apply "../bin"
+apply "../bin";
 
-import "../_test.wod"
+import "../_test.wod";
 
 cdb TestCDB {
     int a;

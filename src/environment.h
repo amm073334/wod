@@ -67,15 +67,15 @@ struct WodType {
 
         // If TYPE_DBTYPE:
         struct {
-            enum { DB_UDB, DB_CDB } db_kind;
+            DBKind db_kind;
             Environment *db_env;
         };
 
+        // If TYPE_DBDATA:
+        WodType *db_type;
+
         // If TYPE_MODULE:
         Environment *module_env;
-
-        // If TYPE_DBDATA:
-        StringView db_name;
     };
 };
 
@@ -94,9 +94,16 @@ struct Symbol {
     StringView top_level_path;
 
     union {
-        // Populated in the AST2WIR phase.
-        // Acts as a function-local identifier.
-        size_t offset;
+        // Keeps track of offsets for locals and DB fields.
+        //
+        // For locals, these are populated in the AST2WIR phase
+        // because the tree traversal needs to simulate a compile-time stack
+        // and emit push/pop instructions for the WIR phase.
+        //
+        // For DB fields, these are populated in the typechecking phase, because
+        // DBs only have one scope and there is no need to worry about pushing
+        // or popping.
+        size_t local_offset;
 
         // Used to store compile-time values.
         int32_t const_i;

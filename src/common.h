@@ -16,4 +16,9 @@
 VEC_DEF(int32_t);
 VEC_DEF(StringView);
 
+typedef enum {
+    DB_UDB,
+    DB_CDB
+} DBKind;
+
 #endif // WOD_COMMON_H_

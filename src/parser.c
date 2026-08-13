@@ -489,7 +489,7 @@ static StmtVarDecl *var_decl(Parser *parser, bool parse_const, bool parse_initia
     }
 
     consume(parser, TOK_IDENTIFIER, SV("Expected variable name."));
-    StringView param_name = parser->previous.text;
+    Token param_name = parser->previous;
 
     Expr *initializer = NULL;
     if (parse_initializer) {
@@ -499,8 +499,8 @@ static StmtVarDecl *var_decl(Parser *parser, bool parse_const, bool parse_initia
     }
 
     StmtVarDecl *stmt;
-    ALLOC_NODE(stmt, parser->previous, StmtVarDecl, 
-        (StmtVarDecl){ .type = var_type, .name = param_name,
+    ALLOC_NODE(stmt, param_name, StmtVarDecl, 
+        (StmtVarDecl){ .type = var_type, .name = param_name.text,
             .array_length = array_length, .initializer = initializer,
             .is_const = is_const });
 
@@ -814,7 +814,7 @@ static Stmt *db_decl(Parser *parser) {
     VEC_PTR_StmtVarDecl fields;
     VEC_INIT(fields);
     while (check_vartype(parser)) {
-        StmtVarDecl *stmt = var_decl(parser, false, false);
+        StmtVarDecl *stmt = var_decl(parser, false, true);
         consume(parser, TOK_SEMICOLON, SV("Expected ';' after declaration."));
         VEC_PUSH(fields, stmt, parser->arena);
     }

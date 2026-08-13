@@ -35,6 +35,8 @@ typedef struct Ast2Wir {
     WIR *wir;
 
     VEC_Frame local_frames;
+
+    bool is_visiting_assign_left;
 } Ast2Wir;
 
 static Frame *get_current_frame(Ast2Wir *aw) {
@@ -239,6 +241,12 @@ static void visit_db_field_decl(Ast2Wir *aw, Stmt *stmt, WIRDB *db) {
     VEC_PUSH(db->fields, wdbf, aw->arena);
 }
 
+static WIROperand *heapalloc(Arena *arena, WIROperand wop) {
+    WIROperand *out = arena_alloc_assert(arena, sizeof(WIROperand));
+    *out = wop;
+    return out;
+}
+
 static WIROperand visit_Expr(Ast2Wir *aw, Expr *expr) {
     switch (expr->kind) {
     case NODE_ExprVar: {
@@ -260,22 +268,21 @@ static WIROperand visit_Expr(Ast2Wir *aw, Expr *expr) {
             return (WIROperand){
                 .kind = e->sym->type.basetype == TYPE_STR ?
                     OPKIND_LOCAL_STR : OPKIND_LOCAL_INT,
-                .as.offset = e->sym->offset 
+                .as.offset = e->sym->local_offset 
             };
         } else {
-            int kind = OPKIND_GLOBAL_INT;
+            int kind = 0;
             switch (e->sym->type.basetype) {
             case TYPE_NONE:
             case TYPE_ERROR:
             case TYPE_VOID:
             case TYPE_MODULE:
+            case TYPE_CEVTYPE:
                 UNREACHABLE;
             case TYPE_INT:
             case TYPE_BOOL:
             case TYPE_PTR:
             case TYPE_DBDATA:
-            case TYPE_DBTYPE:
-            case TYPE_CEVTYPE:
                 kind = OPKIND_GLOBAL_INT;
                 break;
             case TYPE_STR:
@@ -283,6 +290,9 @@ static WIROperand visit_Expr(Ast2Wir *aw, Expr *expr) {
                 break;
             case TYPE_FUNC:
                 kind = OPKIND_GLOBAL_CEV;
+                break;
+            case TYPE_DBTYPE:
+                kind = OPKIND_GLOBAL_CDBTYPE;
                 break;
             case TYPE_ARRAY:
                 UNIMPLEMENTED;
@@ -299,20 +309,61 @@ static WIROperand visit_Expr(Ast2Wir *aw, Expr *expr) {
     case NODE_ExprArray: {
         ExprArray *e = (ExprArray *)expr;
         WIROperand index = visit_Expr(aw, e->index);
-        visit_Expr(aw, e->left);
-        if (e->left->type.basetype == TYPE_DBTYPE)  {
-            
-        }
+        WIROperand left = visit_Expr(aw, e->left);
+        if (e->left->type.basetype == TYPE_ARRAY)  {
+            UNIMPLEMENTED;
+        } else if (e->left->type.basetype == TYPE_DBTYPE)  {
+            return (WIROperand){
+                .kind = OPKIND_DBDATA,
+                .as.dbdata = {
+                    .type_id = heapalloc(aw->arena, left),
+                    .data_id = heapalloc(aw->arena, index)
+                }
+            };
+        } else UNREACHABLE;
 
-        (void) index;
-
-        // TODO: do stuff
         return (WIROperand){0};
     }
     case NODE_ExprAccess: {
         ExprAccess *e = (ExprAccess *)expr;
-        (void) e;
-        // TODO: do stuff
+        WIROperand left = visit_Expr(aw, e->left);
+        if (left.kind == OPKIND_DBDATA) {
+            if (aw->is_visiting_assign_left) {
+                // If we are visiting the left-hand-side of an assignment,
+                // we should not emit any instructions. A store will be
+                // emitted when we recurse back to the parent assign node.
+                return (WIROperand){
+                    .kind = OPKIND_DBFIELD,
+                    .as.dbfield = {
+                        .type_id = left.as.dbdata.type_id,
+                        .data_id = left.as.dbdata.data_id,
+                        .field_id = heapalloc(aw->arena, 
+                            WIR_IMM_I(e->sym->local_offset))
+                    }
+                };
+            } else {
+                WIROperand dest;
+
+                if (e->sym->type.basetype == TYPE_STR)
+                    dest = tmp_str(aw);
+                else
+                    dest = tmp_int(aw);
+                e->sym->type.db_type->db_kind;
+                e->sym->local_offset;
+                WIRInst_DBLoad *inst;
+                ALLOC_WIR(inst, WIRInst_DBLoad, (WIRInst_DBLoad){
+                    .db_kind = e->left->type.db_type->db_kind,
+                    .dst = dest,
+                    .assign = WIR_ASSIGN_EQ,
+                    .db_type = *left.as.dbdata.type_id,
+                    .db_data = *left.as.dbdata.data_id,
+                    .db_field = WIR_IMM_I(e->sym->local_offset)
+                });
+                emit_to_current_cev(aw, (WIRInst *)inst);
+                return dest;
+            }
+        }
+        UNIMPLEMENTED;
         return (WIROperand){0};
     }
     case NODE_ExprBinary: {
@@ -500,43 +551,76 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
     switch (stmt->kind) {
     case NODE_StmtAssign: {
         StmtAssign *s = (StmtAssign *)stmt;
-        WIROperand left = visit_Expr(aw, s->left);
         WIROperand right = visit_Expr(aw, s->right);
+
+        aw->is_visiting_assign_left = true;
+        WIROperand left = visit_Expr(aw, s->left);
+        aw->is_visiting_assign_left = false;
+
+        WIRAssign assign = 0;
+        switch (s->assign_type.type) {
+            case TOK_EQUAL:         assign = WIR_ASSIGN_EQ; break;
+            case TOK_PLUS_EQUAL:    assign = WIR_ASSIGN_ADD; break;
+            case TOK_MINUS_EQUAL:   assign = WIR_ASSIGN_SUB; break;
+            case TOK_STAR_EQUAL:    assign = WIR_ASSIGN_MUL; break;
+            case TOK_SLASH_EQUAL:   assign = WIR_ASSIGN_DIV; break;
+            case TOK_PERCENT_EQUAL: assign = WIR_ASSIGN_MOD; break;
+            case TOK_AMP_EQUAL:     
+            case TOK_PIPE_EQUAL:
+                break;
+            default: UNREACHABLE;
+        }
+
+        if (left.kind == OPKIND_DBFIELD) {
+            // In the case of binary operations, they aren't natively
+            // supported, so a temporary needs to be generated.
+            //
+            // Normally for DB operations we need to consider the possibility
+            // of either an integer or string, but the typechecker should
+            // have guaranteed by this point that we aren't somehow using
+            // binary operations on strings, so just temporary integers is
+            // good enough.
+            if (s->assign_type.type == TOK_AMP_EQUAL) {
+                WIROperand temp = tmp_int(aw);
+                emit_binop(aw, temp, WIR_ASSIGN_EQ, left, right, WIR_BINOP_AND);
+                right = temp;
+            } else if (s->assign_type.type == TOK_PIPE_EQUAL) {
+                WIROperand temp = tmp_int(aw);
+                emit_binop(aw, left, WIR_ASSIGN_EQ, left, right, WIR_BINOP_OR);
+                right = temp;
+            }
+
+            WIRInst_DBStore *inst;
+            DBKind kind;
+            if (left.as.dbfield.type_id->kind == OPKIND_GLOBAL_UDBTYPE)
+                kind = DB_UDB;
+            else kind = DB_CDB;
+            ALLOC_WIR(inst, WIRInst_DBStore, (WIRInst_DBStore){
+                .src = right,
+                .assign = assign,
+                .db_kind = kind, 
+                .db_type = *left.as.dbfield.type_id,
+                .db_data = *left.as.dbfield.data_id,
+                .db_field = *left.as.dbfield.field_id,
+            });
+            emit_to_current_cev(aw, (WIRInst *)inst);
+            return;
+        }
 
         if (op_is_string(right)) {
             assert(op_is_string(left));
             emit_str(aw, left, right);
-        } else {
-            switch (s->assign_type.type) {
-            case TOK_EQUAL:
-                emit_binop(aw, left, WIR_ASSIGN_EQ, right, WIR_IMM_I(0), WIR_BINOP_ADD);
-                break;
-            case TOK_PLUS_EQUAL:
-                emit_binop(aw, left, WIR_ASSIGN_ADD, right, WIR_IMM_I(0), WIR_BINOP_ADD);
-                break;
-            case TOK_MINUS_EQUAL:
-                emit_binop(aw, left, WIR_ASSIGN_SUB, right, WIR_IMM_I(0), WIR_BINOP_ADD);
-                break;
-            case TOK_STAR_EQUAL:
-                emit_binop(aw, left, WIR_ASSIGN_MUL, right, WIR_IMM_I(0), WIR_BINOP_ADD);
-                break;
-            case TOK_SLASH_EQUAL:
-                emit_binop(aw, left, WIR_ASSIGN_DIV, right, WIR_IMM_I(0), WIR_BINOP_ADD);
-                break;
-            case TOK_PERCENT_EQUAL:
-                emit_binop(aw, left, WIR_ASSIGN_MOD, right, WIR_IMM_I(0), WIR_BINOP_ADD);
-                break;
-            case TOK_AMP_EQUAL: {
-                emit_binop(aw, left, WIR_ASSIGN_EQ, left, right, WIR_BINOP_AND);
-                break;
-            }
-            case TOK_PIPE_EQUAL: {
-                emit_binop(aw, left, WIR_ASSIGN_EQ, left, right, WIR_BINOP_OR);
-                break;
-            }
-            default: UNREACHABLE;
-            }
+            return;
         }
+
+        if (s->assign_type.type == TOK_AMP_EQUAL) {
+            emit_binop(aw, left, WIR_ASSIGN_EQ, left, right, WIR_BINOP_AND);
+        } else if (s->assign_type.type == TOK_PIPE_EQUAL) {
+            emit_binop(aw, left, WIR_ASSIGN_EQ, left, right, WIR_BINOP_OR);
+        } else {
+            emit_binop(aw, left, assign, right, WIR_IMM_I(0), WIR_BINOP_ADD);
+        }
+
         return;
     }
     case NODE_StmtVarDecl: {
@@ -548,7 +632,7 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
 
         switch (s->sym->type.basetype) {
         case TYPE_STR: {
-            s->sym->offset = new_local_str(aw);
+            s->sym->local_offset = new_local_str(aw);
 
             WIROperand init = { 0 };
             if (s->initializer) {
@@ -556,7 +640,7 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
                 emit_str(aw,
                     (WIROperand){
                         .kind = OPKIND_LOCAL_STR,
-                        .as.offset = s->sym->offset
+                        .as.offset = s->sym->local_offset
                     },
                     init);
             }
@@ -575,7 +659,7 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
             break;
         }
         default: {
-            s->sym->offset = new_local_int(aw);
+            s->sym->local_offset = new_local_int(aw);
 
             WIROperand init = { 0 };
             if (s->initializer) {
@@ -583,7 +667,7 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
                 emit_binop(aw,
                     (WIROperand){
                         .kind = OPKIND_LOCAL_INT,
-                        .as.offset = s->sym->offset
+                        .as.offset = s->sym->local_offset
                     },
                     WIR_ASSIGN_EQ, init, WIR_IMM_I(0), WIR_BINOP_ADD);
             }
@@ -606,7 +690,7 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
     case NODE_StmtFuncDecl: {
         StmtFuncDecl *s = (StmtFuncDecl *)stmt;
         
-        s->sym->offset = aw->wir->g_cevs.count;
+        s->sym->local_offset = aw->wir->g_cevs.count;
         VEC_PUSH(aw->wir->g_cevs,
             ((WIRCev){
                 .name = s->name,
@@ -830,6 +914,7 @@ void ast2wir_pass(VEC_Module *modules, Arena *arena) {
             .arena = arena,
             .wir = arena_alloc_assert(arena, sizeof(WIR)),
             .local_frames = VEC_EMPTY,
+            .is_visiting_assign_left = false
         };
         wir_init(aw.wir);
 

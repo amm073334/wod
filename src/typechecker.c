@@ -137,7 +137,8 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
                 expr->type = (WodType){
                     .basetype = TYPE_DBDATA,
                     .is_assignable = false,
-                    .is_compile_time = false
+                    .is_compile_time = false,
+                    .db_type = &e->left->type
                 };
             } else {
                 expr->type = *e->left->type.array_of;
@@ -150,22 +151,15 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
     }
     case NODE_ExprAccess: {
         ExprAccess *e = (ExprAccess *)expr;
-        
+        visit_Expr(tc, e->left);
+
         Symbol *search = NULL;
 
         switch (e->left->type.basetype) {
         case TYPE_DBDATA: {
-            Symbol *sym = find_including_imports(tc, tc->current_env, e->left->type.db_name);
-
-            // If we have successfully resolved an expression to be of type
-            // TYPE_DBDATA, then a check that the DB name was valid should have
-            // already been done.
-            assert(sym && sym->type.basetype == TYPE_DBTYPE);
-            
-            search = env_find(sym->type.db_env, e->name.text);
+            search = env_find(e->left->type.db_type->db_env, e->name.text);
             break;
         }
-
         case TYPE_MODULE:
             assert(e->left->type.module_env);
             search = env_find(e->left->type.module_env, e->name.text);
@@ -181,6 +175,8 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
                 SV("Tried to access member of type that has no members."));
             break;
         }
+
+        e->sym = search;
 
         if (search)
             expr->type = search->type;
@@ -833,15 +829,20 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
             for (size_t j = 0; j < s->fields.count; j++) {
                 StmtVarDecl *field = s->fields.at[j];
                 assert(!field->is_const);
-                try_insert_vardecl(tc, field);
-                if (field->initializer) {
-                    if (!field->initializer->type.is_compile_time)
-                        tc_error(tc, &field->initializer->tok,
-                            SV("DB field initializer must be constant expression."));
-                            
-                    if (field->initializer->type.basetype == TYPE_STR)
-                        tc_error(tc, &field->initializer->tok,
-                            SV("DB field initializer cannot be a string."));
+
+                Symbol *field_sym = try_insert_vardecl(tc, field);
+                if (field_sym) {
+                    field_sym->local_offset = j;
+                
+                    if (field->initializer) {
+                        if (!field->initializer->type.is_compile_time)
+                            tc_error(tc, &field->initializer->tok,
+                                SV("DB field initializer must be constant expression."));
+                                
+                        if (field->initializer->type.basetype == TYPE_STR)
+                            tc_error(tc, &field->initializer->tok,
+                                SV("DB field initializer cannot be a string."));
+                    }
                 }
             }
             tc->current_env = tc->top_level_env;

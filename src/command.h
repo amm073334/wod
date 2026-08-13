@@ -78,7 +78,32 @@ typedef enum {
 typedef enum {
     CALL_EVAL_NAME      =     0x100,
     CALL_STORES_RETURN  = 0x1000000,
-} CallFlag;
+} CommandCallFlag;
+
+typedef enum {
+    DB_SRCDST_DEREF  = 0x1,
+    DB_SRCDST_STRLIT = 0x2,
+
+    DB_STORE = 0x0000,
+    DB_LOAD  = 0x1000,
+
+    DB_KIND_CDB = 0x000,
+    DB_KIND_SDB = 0x100,
+    DB_KIND_UDB = 0x200,
+
+    DB_ASSIGN_EQ         = 0x00,
+    DB_ASSIGN_PLUS_EQ    = 0x10,
+    DB_ASSIGN_MINUS_EQ   = 0x20,
+    DB_ASSIGN_TIMES_EQ   = 0x30,
+    DB_ASSIGN_DIV_EQ     = 0x40,
+    DB_ASSIGN_MOD_EQ     = 0x50,
+    DB_ASSIGN_LOW_BOUND  = 0x60,
+    DB_ASSIGN_HIGH_BOUND = 0x70,
+
+    DB_TYPE_STRING  = 0x10000,
+    DB_DATA_STRING  = 0x20000,
+    DB_FIELD_STRING = 0x40000,
+} CommandDBFlag;
 
 typedef struct {
     CommandOp id;

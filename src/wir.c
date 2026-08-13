@@ -52,8 +52,12 @@ bool op_is_string(WIROperand wop) {
         case OPKIND_LOCAL_INT:
         case OPKIND_GLOBAL_INT:
         case OPKIND_GLOBAL_CEV:
-        case OPKIND_GLOBAL_UDB:
-        case OPKIND_GLOBAL_CDB:
+        case OPKIND_GLOBAL_UDBTYPE:
+        case OPKIND_GLOBAL_CDBTYPE:
+            return false;
+        case OPKIND_DBDATA:
+        case OPKIND_DBFIELD:
+            UNREACHABLE;
             return false;
     }
 
@@ -240,11 +244,13 @@ static int32_t resolve(WIRCompiler *wc, WIROperand wop) {
     case OPKIND_GLOBAL_INT: g_vec = &wc->g_ints; offset = NORMAL_VAR_BASE; break;
     case OPKIND_GLOBAL_STR: g_vec = &wc->g_strs; offset = STRING_VAR_BASE; break;
     case OPKIND_GLOBAL_CEV: g_vec = &wc->g_cevs; offset = CEV_BASE; break;
-    case OPKIND_GLOBAL_UDB: g_vec = &wc->g_udbs; offset = UDB_BASE; break;
-    case OPKIND_GLOBAL_CDB: g_vec = &wc->g_cdbs; offset = CDB_BASE; break;
+    case OPKIND_GLOBAL_UDBTYPE: g_vec = &wc->g_udbs; offset = UDB_BASE; break;
+    case OPKIND_GLOBAL_CDBTYPE: g_vec = &wc->g_cdbs; offset = CDB_BASE; break;
     
     case OPKIND_IMM_STR:
     case OPKIND_INTERP:
+    case OPKIND_DBDATA:
+    case OPKIND_DBFIELD:
         UNREACHABLE;
     }
 
@@ -335,9 +341,13 @@ static StringView interpolate(WIRCompiler *wc, WIROperand wop) {
             break;
         }
         case OPKIND_GLOBAL_CEV:
-        case OPKIND_GLOBAL_UDB:
-        case OPKIND_GLOBAL_CDB:
+        case OPKIND_GLOBAL_UDBTYPE:
+        case OPKIND_GLOBAL_CDBTYPE:
             next = frag.as.global.name;
+            break;
+        case OPKIND_DBDATA:
+        case OPKIND_DBFIELD:
+            UNREACHABLE;
             break;
         }
 
@@ -963,78 +973,12 @@ static void compile_inst(WIRCompiler *wc, WIRCev *wcev, size_t index) {
         cev_push_simple_cmd(wc->cev, CMD_LOOP_END, wc->indent);
         break;
     }
-    case _WIRInst_ReturnVal: {
-        WIRInst_ReturnVal *inst = (WIRInst_ReturnVal *)wi;
-
-        // TODO: Optimize by not moving values if they are already in
-        //       the correct index to return.
-        //
-        //       This is a little awkward because of all the possible cases:
-        //       If a value is already stored in the right CSelf, then
-        //       don't move; but if a value is stored in a global (because
-        //       for example it overflowed the CSelf space), then move.
-        //       If a value is an immediate, it has to be stored first.
-        //       Temporaries use a map instead of the offset field, so they
-        //       have to be handled separately. And so on.
-
-        int32_t *target = &wc->cev->RETURN_VAL_TARGET;
-
-        switch (inst->val.kind) {
-        case OPKIND_IMM_INT:
-        case OPKIND_LOCAL_INT:
-        case OPKIND_TEMP_INT:
-        case OPKIND_GLOBAL_INT:
-        case OPKIND_GLOBAL_CEV:
-            *target = 99;
-            push_binop_command(wc, *target + CSELF_BASE,
-                VAR_ASSIGN_EQ, resolve(wc, inst->val), 0, VAR_OP_PLUS);
-            break;
-        case OPKIND_IMM_STR:
-        case OPKIND_INTERP:
-        case OPKIND_LOCAL_STR:
-        case OPKIND_TEMP_STR:
-        case OPKIND_GLOBAL_STR:
-            *target = 9;
-            push_str_command(wc, 
-                *target + CSELF_BASE, inst->val);
-            break;
-        case OPKIND_GLOBAL_UDB:
-        case OPKIND_GLOBAL_CDB:
-            UNREACHABLE;
-        }
-
-        cev_push_simple_cmd(wc->cev, CMD_RETURN, wc->indent);
+    case _WIRInst_Continue: {
+        cev_push_simple_cmd(wc->cev, CMD_CONTINUE, wc->indent);
         break;
     }
-    case _WIRInst_Cmd: {
-        WIRInst_Cmd *inst = (WIRInst_Cmd *)wi;
-        assert(inst->open_close >= -1
-                && inst->open_close <= 1);
-
-        VEC_int32_t int_fields = VEC_EMPTY;
-        for (size_t i = 0; i < inst->iargs.count; i++) {
-            VEC_PUSH(int_fields, resolve(wc, inst->iargs.at[i]), wc->arena);
-        }
-
-        VEC_StringView str_fields = VEC_EMPTY;
-        for (size_t i = 0; i < inst->sargs.count; i++) {
-            WIROperand wop = inst->sargs.at[i];
-            if (op_is_strlit(wop))
-                VEC_PUSH(str_fields, interpolate(wc, wop), wc->arena);
-            else UNREACHABLE;
-        }
-
-        if (inst->open_close == -1)
-            wc->indent--;
-
-        cev_push_cmd(wc->cev,
-            inst->op,
-            wc->indent,
-            int_fields, str_fields);
-
-        if (inst->open_close == 1)
-            wc->indent++;
-        
+    case _WIRInst_Break: {
+        cev_push_simple_cmd(wc->cev, CMD_BREAK, wc->indent);
         break;
     }
     case _WIRInst_Call: {
@@ -1103,12 +1047,147 @@ static void compile_inst(WIRCompiler *wc, WIRCev *wcev, size_t index) {
         );
         break;
     }
-    case _WIRInst_Continue: {
-        cev_push_simple_cmd(wc->cev, CMD_CONTINUE, wc->indent);
+    case _WIRInst_DBLoad: {
+        WIRInst_DBLoad *inst = (WIRInst_DBLoad *)wi;
+        VEC_int32_t int_fields = VEC_EMPTY;
+        VEC_PUSH(int_fields, resolve(wc, inst->db_type), wc->arena);
+        VEC_PUSH(int_fields, resolve(wc, inst->db_data), wc->arena);
+        VEC_PUSH(int_fields, resolve(wc, inst->db_field), wc->arena);
+
+        int32_t flags = DB_LOAD;
+        switch (inst->assign) {
+            case WIR_ASSIGN_EQ:  flags |= DB_ASSIGN_EQ; break;
+            case WIR_ASSIGN_ADD: flags |= DB_ASSIGN_PLUS_EQ; break;
+            case WIR_ASSIGN_SUB: flags |= DB_ASSIGN_MINUS_EQ; break;
+            case WIR_ASSIGN_MUL: flags |= DB_ASSIGN_TIMES_EQ; break;
+            case WIR_ASSIGN_DIV: flags |= DB_ASSIGN_DIV_EQ; break;
+            case WIR_ASSIGN_MOD: flags |= DB_ASSIGN_MOD_EQ; break;
+        }
+        switch (inst->db_kind) {
+            case DB_UDB: flags |= DB_KIND_UDB; break;
+            case DB_CDB: flags |= DB_KIND_CDB; break;
+        }
+        VEC_PUSH(int_fields, flags, wc->arena);
+        VEC_PUSH(int_fields, resolve(wc, inst->dst), wc->arena);
+
+        VEC_StringView str_fields = VEC_EMPTY;
+        VEC_PUSH(str_fields, SV(""), wc->arena);
+        VEC_PUSH(str_fields, SV(""), wc->arena);
+        VEC_PUSH(str_fields, SV(""), wc->arena);
+        VEC_PUSH(str_fields, SV(""), wc->arena);
+
+        cev_push_cmd(wc->cev, CMD_DB, wc->indent, int_fields, str_fields);
         break;
     }
-    case _WIRInst_Break: {
-        cev_push_simple_cmd(wc->cev, CMD_BREAK, wc->indent);
+    case _WIRInst_DBStore: {
+        WIRInst_DBStore *inst = (WIRInst_DBStore *)wi;
+        VEC_int32_t int_fields = VEC_EMPTY;
+        VEC_PUSH(int_fields, resolve(wc, inst->db_type), wc->arena);
+        VEC_PUSH(int_fields, resolve(wc, inst->db_data), wc->arena);
+        VEC_PUSH(int_fields, resolve(wc, inst->db_field), wc->arena);
+
+        int32_t flags = DB_STORE;
+        if (op_is_strlit(inst->src)) flags |= DB_SRCDST_STRLIT;
+        switch (inst->assign) {
+            case WIR_ASSIGN_EQ:  flags |= DB_ASSIGN_EQ; break;
+            case WIR_ASSIGN_ADD: flags |= DB_ASSIGN_PLUS_EQ; break;
+            case WIR_ASSIGN_SUB: flags |= DB_ASSIGN_MINUS_EQ; break;
+            case WIR_ASSIGN_MUL: flags |= DB_ASSIGN_TIMES_EQ; break;
+            case WIR_ASSIGN_DIV: flags |= DB_ASSIGN_DIV_EQ; break;
+            case WIR_ASSIGN_MOD: flags |= DB_ASSIGN_MOD_EQ; break;
+        }
+        switch (inst->db_kind) {
+            case DB_UDB: flags |= DB_KIND_UDB; break;
+            case DB_CDB: flags |= DB_KIND_CDB; break;
+        }
+        VEC_PUSH(int_fields, flags, wc->arena);
+        if (!(flags & DB_SRCDST_STRLIT))
+            VEC_PUSH(int_fields, resolve(wc, inst->src), wc->arena);
+
+        VEC_StringView str_fields = VEC_EMPTY;
+        VEC_PUSH(str_fields, flags & DB_SRCDST_STRLIT ?
+            interpolate(wc, inst->src) : SV(""), wc->arena);
+        VEC_PUSH(str_fields, SV(""), wc->arena);
+        VEC_PUSH(str_fields, SV(""), wc->arena);
+        VEC_PUSH(str_fields, SV(""), wc->arena);
+
+        cev_push_cmd(wc->cev, CMD_DB, wc->indent, int_fields, str_fields);
+        break;
+    }
+    case _WIRInst_Cmd: {
+        WIRInst_Cmd *inst = (WIRInst_Cmd *)wi;
+        assert(inst->open_close >= -1
+                && inst->open_close <= 1);
+
+        VEC_int32_t int_fields = VEC_EMPTY;
+        for (size_t i = 0; i < inst->iargs.count; i++) {
+            VEC_PUSH(int_fields, resolve(wc, inst->iargs.at[i]), wc->arena);
+        }
+
+        VEC_StringView str_fields = VEC_EMPTY;
+        for (size_t i = 0; i < inst->sargs.count; i++) {
+            WIROperand wop = inst->sargs.at[i];
+            if (op_is_strlit(wop))
+                VEC_PUSH(str_fields, interpolate(wc, wop), wc->arena);
+            else UNREACHABLE;
+        }
+
+        if (inst->open_close == -1)
+            wc->indent--;
+
+        cev_push_cmd(wc->cev,
+            inst->op,
+            wc->indent,
+            int_fields, str_fields);
+
+        if (inst->open_close == 1)
+            wc->indent++;
+        
+        break;
+    }
+    case _WIRInst_ReturnVal: {
+        WIRInst_ReturnVal *inst = (WIRInst_ReturnVal *)wi;
+
+        // TODO: Optimize by not moving values if they are already in
+        //       the correct index to return.
+        //
+        //       This is a little awkward because of all the possible cases:
+        //       If a value is already stored in the right CSelf, then
+        //       don't move; but if a value is stored in a global (because
+        //       for example it overflowed the CSelf space), then move.
+        //       If a value is an immediate, it has to be stored first.
+        //       Temporaries use a map instead of the offset field, so they
+        //       have to be handled separately. And so on.
+
+        int32_t *target = &wc->cev->RETURN_VAL_TARGET;
+
+        switch (inst->val.kind) {
+        case OPKIND_IMM_INT:
+        case OPKIND_LOCAL_INT:
+        case OPKIND_TEMP_INT:
+        case OPKIND_GLOBAL_INT:
+        case OPKIND_GLOBAL_CEV:
+            *target = 99;
+            push_binop_command(wc, *target + CSELF_BASE,
+                VAR_ASSIGN_EQ, resolve(wc, inst->val), 0, VAR_OP_PLUS);
+            break;
+        case OPKIND_IMM_STR:
+        case OPKIND_INTERP:
+        case OPKIND_LOCAL_STR:
+        case OPKIND_TEMP_STR:
+        case OPKIND_GLOBAL_STR:
+            *target = 9;
+            push_str_command(wc, 
+                *target + CSELF_BASE, inst->val);
+            break;
+        case OPKIND_GLOBAL_UDBTYPE:
+        case OPKIND_GLOBAL_CDBTYPE:
+        case OPKIND_DBDATA:
+        case OPKIND_DBFIELD:
+            UNREACHABLE;
+        }
+
+        cev_push_simple_cmd(wc->cev, CMD_RETURN, wc->indent);
         break;
     }
     case _WIRInst_ReturnVoid: {
@@ -1118,9 +1197,8 @@ static void compile_inst(WIRCompiler *wc, WIRCev *wcev, size_t index) {
     }
 }
 
-// For the current WIRCev, if the temporary result of a calculation
-// is moved directly into a variable, rewrite to store the result
-// directly into the variable.
+// If the temporary result of a calculation is moved directly
+// into a variable, rewrite to store the result directly into the variable.
 static void temp_copy_propagation_pass(WIRCev *wcev) {
     // Start from index 1, since this can't happen if there is no
     // preceding instruction.
@@ -1162,6 +1240,14 @@ static void temp_copy_propagation_pass(WIRCev *wcev) {
                 && p->dest.as.offset == inst->a.as.offset) {
 
                 p->dest = inst->dest;
+                inst->base.kind = _WIRInst_NOP;
+            }
+        } else if (prev->kind == _WIRInst_DBLoad) {
+            WIRInst_DBLoad *p = (WIRInst_DBLoad *)prev;
+            if (p->dst.kind == OPKIND_TEMP_INT
+                && p->dst.as.offset == inst->a.as.offset) {
+
+                p->dst = inst->dest;
                 inst->base.kind = _WIRInst_NOP;
             }
         }
@@ -1316,9 +1402,10 @@ static void compile_wir(WIRCompiler *wc, Module *mod) {
         
         DB db;
         db_init(&db);
+        db.TYPENAME = wdb->name;
 
         for (size_t j = 0; j < wdb->fields.count; j++) {
-            WIRVar *field = &wdb->fields.at[i];
+            WIRVar *field = &wdb->fields.at[j];
             VEC_PUSH(db.fields, ((DBField){
                 .type = field->type == WIRVAR_INT ?
                     DBFIELD_INT : DBFIELD_STR,
@@ -1468,13 +1555,17 @@ static void print_wop(WIROperand wop) {
             printf(" $GCEV[" SV_FMT ":" SV_FMT "]",
                 SV_FMT_VAL(wop.as.global.path), SV_FMT_VAL(wop.as.global.name));
             return;
-        case OPKIND_GLOBAL_UDB:
+        case OPKIND_GLOBAL_UDBTYPE:
             printf(" $GUDB[" SV_FMT ":" SV_FMT "]",
                 SV_FMT_VAL(wop.as.global.path), SV_FMT_VAL(wop.as.global.name));
             return;
-        case OPKIND_GLOBAL_CDB:
+        case OPKIND_GLOBAL_CDBTYPE:
             printf(" $GCDB[" SV_FMT ":" SV_FMT "]",
                 SV_FMT_VAL(wop.as.global.path), SV_FMT_VAL(wop.as.global.name));
+            return;
+        case OPKIND_DBDATA:
+        case OPKIND_DBFIELD:
+            UNREACHABLE;
             return;
     }
 }
@@ -1567,6 +1658,26 @@ void print_wir(WIR *wir) {
                     print_wop(in->sargs.at[arg]);
                 break;
             }
+            case _WIRInst_DBLoad: {
+                WIRInst_DBLoad *in = (WIRInst_DBLoad *)inst;
+                printf("load %d", in->db_kind);
+                print_wop(in->dst);
+                printf(" %d", in->assign);
+                print_wop(in->db_type);
+                print_wop(in->db_data);
+                print_wop(in->db_field);
+                break;
+            }
+            case _WIRInst_DBStore: {
+                WIRInst_DBStore *in = (WIRInst_DBStore *)inst;
+                printf("store %d", in->db_kind);
+                print_wop(in->db_type);
+                print_wop(in->db_data);
+                print_wop(in->db_field);
+                printf(" %d", in->assign);
+                print_wop(in->src);
+                break;
+            }
             case _WIRInst_LoopBegin: {
                 printf("loop");
                 break;
@@ -1646,12 +1757,16 @@ bool op_is_local(WIROperand wop) {
         case OPKIND_GLOBAL_INT:
         case OPKIND_GLOBAL_STR:
         case OPKIND_GLOBAL_CEV:
-        case OPKIND_GLOBAL_UDB:
-        case OPKIND_GLOBAL_CDB:
+        case OPKIND_GLOBAL_UDBTYPE:
+        case OPKIND_GLOBAL_CDBTYPE:
             return false;
         case OPKIND_LOCAL_INT:
         case OPKIND_LOCAL_STR:
             return true;
+        case OPKIND_DBDATA:
+        case OPKIND_DBFIELD:
+            UNREACHABLE;
+            return false;
     }
     UNREACHABLE;
     return false;
@@ -1670,9 +1785,13 @@ bool op_is_global(WIROperand wop) {
         case OPKIND_GLOBAL_INT:
         case OPKIND_GLOBAL_STR:
         case OPKIND_GLOBAL_CEV:
-        case OPKIND_GLOBAL_UDB:
-        case OPKIND_GLOBAL_CDB:
+        case OPKIND_GLOBAL_UDBTYPE:
+        case OPKIND_GLOBAL_CDBTYPE:
             return true;
+        case OPKIND_DBDATA:
+        case OPKIND_DBFIELD:
+            UNREACHABLE;
+            return false;
     }
     UNREACHABLE;
     return false;
