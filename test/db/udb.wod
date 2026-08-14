@@ -4,7 +4,7 @@ apply "../bin";
 
 import "../_test.wod";
 
-cdb A {
+udb A {
     int a;
     int b = 2;
     int c = 123;

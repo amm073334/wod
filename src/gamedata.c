@@ -175,19 +175,19 @@ void gd_write_dir(GameData *gd, StringView out) {
         if (!path.data)
             goto alloc_error;
 
-        FILE *cdb_dat = fopen(path.data, "wb");
-        if (!cdb_dat) {
+        FILE *udb_dat = fopen(path.data, "wb");
+        if (!udb_dat) {
             fprintf(stderr, "Failed to open DataBase.Auto.txt.");
             goto cleanup;
         }
 
-        fprintf(cdb_dat, "[DATABASE_TEXT_OUTPUT]\n");
-        fprintf(cdb_dat, "TYPE_NUM=%zu\n", gd->cdb.count);
-        for (size_t i = 0; i < gd->cdb.count; i++) {
-            fprintf(cdb_dat, "----\n");
-            db_write_txt(&gd->cdb.at[i], cdb_dat);
+        fprintf(udb_dat, "[DATABASE_TEXT_OUTPUT]\n");
+        fprintf(udb_dat, "TYPE_NUM=%zu\n", gd->udb.count);
+        for (size_t i = 0; i < gd->udb.count; i++) {
+            fprintf(udb_dat, "----\n");
+            db_write_txt(&gd->udb.at[i], udb_dat);
         }
-        fclose(cdb_dat);
+        fclose(udb_dat);
     }
 
     {

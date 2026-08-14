@@ -292,7 +292,10 @@ static WIROperand visit_Expr(Ast2Wir *aw, Expr *expr) {
                 kind = OPKIND_GLOBAL_CEV;
                 break;
             case TYPE_DBTYPE:
-                kind = OPKIND_GLOBAL_CDBTYPE;
+                if (e->sym->type.db_kind == DB_UDB)
+                    kind = OPKIND_GLOBAL_UDBTYPE;
+                else 
+                    kind = OPKIND_GLOBAL_CDBTYPE;
                 break;
             case TYPE_ARRAY:
                 UNIMPLEMENTED;
@@ -894,14 +897,17 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
     }
     case NODE_StmtDBDecl: {
         StmtDBDecl *s = (StmtDBDecl *)stmt;
-        VEC_PUSH(aw->wir->g_cdbs,
+        VEC_WIRDB *g = s->db.type == TOK_UDB ?
+            &aw->wir->g_udbs : &aw->wir->g_cdbs;
+
+        VEC_PUSH(*g,
             ((WIRDB){
                 .name = s->name,
                 .fields = VEC_EMPTY
             }), aw->arena);
         for (size_t i = 0; i < s->fields.count; i++)
             visit_db_field_decl(aw, (Stmt *)s->fields.at[i],
-                &aw->wir->g_cdbs.at[aw->wir->g_cdbs.count-1]);
+                &g->at[g->count-1]);
         return;
     }
     case NODE_StmtInc: {

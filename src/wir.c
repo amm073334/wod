@@ -1386,6 +1386,31 @@ static void comp_if_pass(WIRCev *wcev, Arena *arena) {
     }
 }
 
+static void compile_dbs(WIRCompiler *wc, VEC_WIRDB *g, VEC_DB *dbs) {
+    for (size_t i = 0; i < g->count; i++) {
+        WIRDB *wdb = &g->at[i];
+        
+        DB db;
+        db_init(&db);
+        db.TYPENAME = wdb->name;
+
+        for (size_t j = 0; j < wdb->fields.count; j++) {
+            WIRVar *field = &wdb->fields.at[j];
+            VEC_PUSH(db.fields, ((DBField){
+                .type = field->type == WIRVAR_INT ?
+                    DBFIELD_INT : DBFIELD_STR,
+                .ITEMNAME = field->name,
+                .VMEMO = SV(""),
+                .CHOICE_NAME = SV(""),
+                .CHOICE_VAL = 0,
+                .DEFAULT_VAL = field->has_initializer ?
+                    resolve(wc, field->initializer) : 0 
+            }), wc->arena);
+        }
+
+        VEC_PUSH(*dbs, db, wc->arena);
+    }
+}
 
 static void compile_wir(WIRCompiler *wc, Module *mod) {
     WIR *wir = mod->wir;
@@ -1410,30 +1435,9 @@ static void compile_wir(WIRCompiler *wc, Module *mod) {
         #undef LOAD_SYMBOLS
     }
 
-    // Process every CDB.
-    for (size_t i = 0; i < wir->g_cdbs.count; i++) {
-        WIRDB *wdb = &wir->g_cdbs.at[i];
-        
-        DB db;
-        db_init(&db);
-        db.TYPENAME = wdb->name;
-
-        for (size_t j = 0; j < wdb->fields.count; j++) {
-            WIRVar *field = &wdb->fields.at[j];
-            VEC_PUSH(db.fields, ((DBField){
-                .type = field->type == WIRVAR_INT ?
-                    DBFIELD_INT : DBFIELD_STR,
-                .ITEMNAME = field->name,
-                .VMEMO = SV(""),
-                .CHOICE_NAME = SV(""),
-                .CHOICE_VAL = 0,
-                .DEFAULT_VAL = field->has_initializer ?
-                    resolve(wc, field->initializer) : 0 
-            }), wc->arena);
-        }
-
-        VEC_PUSH(wc->gd.cdb, db, wc->arena);
-    }
+    // Process every DB.
+    compile_dbs(wc, &wir->g_udbs, &wc->gd.udb);
+    compile_dbs(wc, &wir->g_cdbs, &wc->gd.cdb);
     
     // Process every `WIRCev`.
     for (size_t i = 0; i < wir->g_cevs.count; i++) {
