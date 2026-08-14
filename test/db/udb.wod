@@ -1,0 +1,27 @@
+// EXPECT: 123 2 123
+
+apply "../bin";
+
+import "../_test.wod";
+
+cdb A {
+    int a;
+    int b = 2;
+    int c = 123;
+}
+
+void main() {
+    // Unlike with CDB types, reading from a nonexistent data element for a
+    // UDB type will issue an error.
+    //
+    // For some reason, writing to a nonexistent data element will not issue
+    // an error, but the change also won't be reflected.
+    //
+    // If the data element does exist, though, the write will succeed, even
+    // though the base editor would not allow you to insert such a command.
+ 
+    A[0].a = 123;
+
+    output("${A[0].a} ${A[0].b} ${A[0].c}");
+    exit();
+}

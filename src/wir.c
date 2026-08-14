@@ -387,6 +387,12 @@ static int cb_interval_end_desc(const void *a, const void *b) {
 }
 
 static void update_interval(VEC_Interval *i_its, VEC_Interval *s_its, size_t inst, WIROperand wop) {
+    if (wop.kind == OPKIND_INTERP) {
+        for (size_t i = 0; i < wop.as.interp.count; i++)
+            update_interval(i_its, s_its, inst, wop.as.interp.at[i]);
+        return;
+    }
+
     if (wop.kind != OPKIND_TEMP_INT && wop.kind != OPKIND_TEMP_STR) return;
 
     Interval *it;
@@ -559,6 +565,7 @@ static void temp_alloc_pass(Arena *arena, WIRCev *wcev, VEC_int32_t *i_map, VEC_
         }
         case _WIRInst_DBLoad: {
             WIRInst_DBLoad *inst = (WIRInst_DBLoad *)wirinst;
+            update_interval(&i_its, &s_its, i, inst->dst);
             update_interval(&i_its, &s_its, i, inst->db_type);
             update_interval(&i_its, &s_its, i, inst->db_data);
             update_interval(&i_its, &s_its, i, inst->db_field);
@@ -566,6 +573,7 @@ static void temp_alloc_pass(Arena *arena, WIRCev *wcev, VEC_int32_t *i_map, VEC_
         }
         case _WIRInst_DBStore: {
             WIRInst_DBStore *inst = (WIRInst_DBStore *)wirinst;
+            update_interval(&i_its, &s_its, i, inst->src);
             update_interval(&i_its, &s_its, i, inst->db_type);
             update_interval(&i_its, &s_its, i, inst->db_data);
             update_interval(&i_its, &s_its, i, inst->db_field);
