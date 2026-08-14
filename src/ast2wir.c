@@ -326,7 +326,18 @@ static WIROperand visit_Expr(Ast2Wir *aw, Expr *expr) {
     }
     case NODE_ExprAccess: {
         ExprAccess *e = (ExprAccess *)expr;
-        WIROperand left = visit_Expr(aw, e->left);
+
+        // Bit of a hack to handle the fact that we should actually
+        // evaluate expressions on the left-hand-side of an assignment
+        // provided that they aren't the field at the end.
+        WIROperand left;
+        {
+            bool assign_state = aw->is_visiting_assign_left;
+            aw->is_visiting_assign_left = false;
+            left = visit_Expr(aw, e->left);
+            aw->is_visiting_assign_left = assign_state;
+        }
+
         if (left.kind == OPKIND_DBDATA) {
             if (aw->is_visiting_assign_left) {
                 // If we are visiting the left-hand-side of an assignment,

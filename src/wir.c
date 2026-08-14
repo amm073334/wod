@@ -207,6 +207,10 @@ static void disable_rc_pass(Arena *arena, WIRCev *wcev) {
 }
 
 // Resolves a non-string `WIROperand` into a concrete integer value.
+// For "variables" and common events, this is their reference value.
+// For database types, this is just the type ID, since it is relatively
+// rare that the reference value of a database is used in a command.
+//
 // Assumes reference conversion has already been disabled.
 static int32_t resolve(WIRCompiler *wc, WIROperand wop) {
     assert(wop.kind != OPKIND_IMM_STR && wop.kind != OPKIND_INTERP);
@@ -244,8 +248,8 @@ static int32_t resolve(WIRCompiler *wc, WIROperand wop) {
     case OPKIND_GLOBAL_INT: g_vec = &wc->g_ints; offset = NORMAL_VAR_BASE; break;
     case OPKIND_GLOBAL_STR: g_vec = &wc->g_strs; offset = STRING_VAR_BASE; break;
     case OPKIND_GLOBAL_CEV: g_vec = &wc->g_cevs; offset = CEV_BASE; break;
-    case OPKIND_GLOBAL_UDBTYPE: g_vec = &wc->g_udbs; offset = UDB_BASE; break;
-    case OPKIND_GLOBAL_CDBTYPE: g_vec = &wc->g_cdbs; offset = CDB_BASE; break;
+    case OPKIND_GLOBAL_UDBTYPE: g_vec = &wc->g_udbs; offset = 0; break;
+    case OPKIND_GLOBAL_CDBTYPE: g_vec = &wc->g_cdbs; offset = 0; break;
     
     case OPKIND_IMM_STR:
     case OPKIND_INTERP:
@@ -658,6 +662,7 @@ static void temp_alloc_pass(Arena *arena, WIRCev *wcev, VEC_int32_t *i_map, VEC_
         }
         case _WIRInst_DBLoad: {
             WIRInst_DBLoad *inst = (WIRInst_DBLoad *)wirinst;
+            update_map(i_map, i_top, s_map, s_top, inst->dst);
             update_map(i_map, i_top, s_map, s_top, inst->db_type);
             update_map(i_map, i_top, s_map, s_top, inst->db_data);
             update_map(i_map, i_top, s_map, s_top, inst->db_field);
@@ -665,6 +670,7 @@ static void temp_alloc_pass(Arena *arena, WIRCev *wcev, VEC_int32_t *i_map, VEC_
         }
         case _WIRInst_DBStore: {
             WIRInst_DBStore *inst = (WIRInst_DBStore *)wirinst;
+            update_map(i_map, i_top, s_map, s_top, inst->src);
             update_map(i_map, i_top, s_map, s_top, inst->db_type);
             update_map(i_map, i_top, s_map, s_top, inst->db_data);
             update_map(i_map, i_top, s_map, s_top, inst->db_field);

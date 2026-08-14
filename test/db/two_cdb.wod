@@ -1,0 +1,28 @@
+// EXPECT: hmm 544
+
+apply "../bin";
+
+import "../_test.wod";
+
+cdb A {
+    int a;
+    int b = 2;
+    int c = 123;
+}
+
+cdb B {
+    int a;
+    int b = 21;
+    int c;
+    str asdf;
+}
+
+void main() {
+    B[23].asdf = "hmm";
+    A[5].b = 23;
+    A[20].c = 9;
+    B[B[123].b / 3 + 2].c = 400;
+
+    output("${B[A[5].b].asdf} ${B[299].b + A[99].c + B[A[B[2].b - 1].c].c}");
+    exit();
+}

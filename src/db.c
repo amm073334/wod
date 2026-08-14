@@ -31,8 +31,7 @@ void db_write_txt(DB *db, FILE *stream) {
     fprintf(stream, "NUMDATA_TYPE_NUM=%zu\n", n_int_prop);
     fprintf(stream, "STRDATA_TYPE_NUM=%zu\n", n_str_prop);
 
-    // TODO: Currently, DBs are always generated with 0 data elements.
-    fprintf(stream, "DATA_NUM=0\n");
+    fprintf(stream, "DATA_NUM=1\n");
     
     fprintf(stream, "TYPENAME=" SV_FMT "\n", SV_FMT_VAL(db->TYPENAME));
     fprintf(stream, "ITEMNAME_NUM=%zu\n", db->fields.count);
@@ -73,7 +72,24 @@ void db_write_txt(DB *db, FILE *stream) {
     }
     fprintf(stream, "\n");
 
-    // TODO: Can't generate data elements.
+    // When loading a DB from file, it always gets at least one element
+    // even if the loaded text file states there are 0 elements.
+    //
+    // In particular, if the text file lists no elements, the
+    // element that is automatically generated will have 0 in all
+    // its integer fields, which is slightly odd if default values
+    // have been set.
+    //
+    // So if there will be one element anyway, just emit that element
+    // here and with the expected default values.
+    for (size_t i = 0; i < db->fields.count; i++) {
+        if (db->fields.at[i].type == DBFIELD_INT)
+            fprintf(stream, "%d,", db->fields.at[i].DEFAULT_VAL);
+        else
+            fprintf(stream, "\"\",");
+    }
+    fprintf(stream, "<<!--DATANAME--!>>,\n");
+
     fprintf(stream, "\n");
     fprintf(stream, "<<--CSV_END-->>\n");
 }

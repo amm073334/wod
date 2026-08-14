@@ -1,0 +1,22 @@
+// EXPECT: 1124
+// For a DB text output that has no data elements, the engine actually
+// inserts one element automatically. This element defies any set
+// default integer values, and actually sets them to 0 universally.
+//
+// This test makes sure that the zeroth data element's defaults are
+// set up properly.
+
+apply "../bin";
+
+import "../_test.wod";
+
+cdb TestCDB {
+    int a = 999;
+    int b = 2;
+    int c = 123;
+}
+
+void main() {
+    output("${TestCDB[0].a + TestCDB[1].b + TestCDB[3].c}");
+    exit();
+}
