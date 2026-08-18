@@ -766,6 +766,16 @@ static Stmt *function_decl(Parser *parser) {
         is_inline = true;
         advance(parser);
     }
+    
+    bool is_exaddr = false;
+    if (parser->previous.type == TOK_EXADDR) {
+        is_exaddr = true;
+        advance(parser);
+    }
+
+    if (is_inline && is_exaddr) {
+        error_previous(parser, SV("Common event cannot both be inline and exaddr."));
+    }
 
     switch (parser->previous.type) {
         case TOK_VOID:
@@ -798,7 +808,7 @@ static Stmt *function_decl(Parser *parser) {
     StmtFuncDecl *stmt;
     ALLOC_NODE(stmt, loc, StmtFuncDecl,
         (StmtFuncDecl){ .ret = ret, .name = loc.text, .params = params,
-            .body = body, .is_inline = is_inline });
+            .body = body, .is_inline = is_inline, .is_exaddr = is_exaddr });
 
     return (Stmt *)stmt;
 }

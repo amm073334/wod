@@ -185,7 +185,10 @@ void gd_write_dir(GameData *gd, StringView out) {
         fprintf(udb_dat, "TYPE_NUM=%zu\n", gd->udb.count);
         for (size_t i = 0; i < gd->udb.count; i++) {
             fprintf(udb_dat, "----\n");
-            db_write_txt(&gd->udb.at[i], udb_dat);
+            if (!db_write_txt(&gd->udb.at[i], udb_dat)) {
+                fprintf(stderr, "Invalid UDB.");
+                goto cleanup;
+            }
         }
         fclose(udb_dat);
     }
@@ -206,7 +209,10 @@ void gd_write_dir(GameData *gd, StringView out) {
         fprintf(cdb_dat, "TYPE_NUM=%zu\n", gd->cdb.count);
         for (size_t i = 0; i < gd->cdb.count; i++) {
             fprintf(cdb_dat, "----\n");
-            db_write_txt(&gd->cdb.at[i], cdb_dat);
+            if (!db_write_txt(&gd->cdb.at[i], cdb_dat)) {
+                fprintf(stderr, "Invalid CDB.");
+                goto cleanup;
+            }
         }
         fclose(cdb_dat);
     }

@@ -6,12 +6,11 @@
 #include "db.h"
 
 VEC_DEF(CommonEvent);
-VEC_DEF(DB);
 
 typedef struct {
     VEC_CommonEvent cevs;
-    VEC_DB udb;
-    VEC_DB cdb;
+    VEC_DBType udb;
+    VEC_DBType cdb;
     
     int32_t entry;
 } GameData;

@@ -102,8 +102,13 @@ typedef struct {
 
         // Used to manipulate the compile-time stack.
         // Does not actually correspond to a real command.
-        _WIRInst_PushInt,
-        _WIRInst_PushStr,
+        //
+        // Locals that are pushed onto the compile-time stack
+        // in a single instruction are guaranteed to be contiguous,
+        // but that is not guaranteed otherwise.
+        // (This is needed for arrays or structs.)
+        _WIRInst_PushIntN,
+        _WIRInst_PushStrN,
         _WIRInst_PopIntN,
         _WIRInst_PopStrN,
 
@@ -131,6 +136,16 @@ typedef struct {
     } kind;
 } WIRInst;
 VEC_PTR_DEF(WIRInst);
+
+typedef struct {
+    WIRInst base;
+    size_t n;
+} WIRInst_PushIntN;
+
+typedef struct {
+    WIRInst base;
+    size_t n;
+} WIRInst_PushStrN;
 
 typedef struct {
     WIRInst base;
@@ -298,6 +313,10 @@ typedef struct WIRCev {
     // virtual temporary.
     size_t n_temp_ints;
     size_t n_temp_strs;
+
+    // If true, allocate globals for the common event's address
+    // space instead of using CSelfs.
+    bool is_exaddr;
 } WIRCev;
 VEC_DEF(WIRCev);
 

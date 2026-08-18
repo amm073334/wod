@@ -1,7 +1,6 @@
 #include "wir.h"
 
 #define CSELF_BASE 1600000
-#define CSELF_INT_BASE 1600010
 #define CSELF_INT_MAX  1600099
 #define CSELF_STR_BASE 1600005
 #define CSELF_STR_MAX  1600009
@@ -27,17 +26,27 @@ typedef struct WIRCompiler {
     VEC_GlobalEntry g_ints;
     VEC_GlobalEntry g_strs;
 
-    // Maps temporaries to concrete references.
-    VEC_int32_t int_map;
-    VEC_int32_t str_map;
+    // Maps offsets to concrete references.
+    VEC_int32_t local_int_map;
+    VEC_int32_t local_str_map;
+    VEC_int32_t temp_int_map;
+    VEC_int32_t temp_str_map;
+    size_t int_exaddr;
 
     // Information about the current common event.
     CommonEvent *cev;
     uint8_t indent;
+    bool use_exaddr;
 
     GameData gd;
     Arena *arena;
+    bool had_error;
 } WIRCompiler;
+
+static void wc_error(WIRCompiler *wc, StringView msg) {
+    wc->had_error = true;
+    (void) msg;
+}
 
 bool op_is_string(WIROperand wop) {
     switch (wop.kind) {
@@ -130,8 +139,8 @@ static void disable_rc_pass(Arena *arena, WIRCev *wcev) {
         WIRInst *wirinst = wcev->insts.at[i];
         switch (wirinst->kind) {
         case _WIRInst_NOP:
-        case _WIRInst_PushInt:
-        case _WIRInst_PushStr:
+        case _WIRInst_PushIntN:
+        case _WIRInst_PushStrN:
         case _WIRInst_PopIntN:
         case _WIRInst_PopStrN:
         case _WIRInst_StrAssign:
@@ -222,7 +231,6 @@ static int32_t resolve(WIRCompiler *wc, WIROperand wop) {
     case OPKIND_IMM_INT: {
         return wop.as.imm_int;
     }
-    // For the time being, don't allow addresses to escape the CSelf space.
     case OPKIND_LOCAL_INT: {
         int32_t ref = wop.as.offset + CSELF_INT_BASE;
         assert(ref <= CSELF_INT_MAX);
@@ -234,13 +242,13 @@ static int32_t resolve(WIRCompiler *wc, WIROperand wop) {
         return ref;
     }
     case OPKIND_TEMP_INT: {
-        int32_t ref = wc->int_map.at[wop.as.offset];
+        int32_t ref = wc->temp_int_map.at[wop.as.offset];
         assert(ref >= RC_THRESHOLD);
         assert(ref <= CSELF_INT_MAX);
         return ref;
     }
     case OPKIND_TEMP_STR: {
-        int32_t ref = wc->str_map.at[wop.as.offset];
+        int32_t ref = wc->temp_str_map.at[wop.as.offset];
         assert(ref >= RC_THRESHOLD);
         assert(ref <= CSELF_STR_MAX);
         return ref;
@@ -309,14 +317,14 @@ static StringView interpolate(WIRCompiler *wc, WIROperand wop) {
             break;
         }
         case OPKIND_TEMP_INT: {
-            assert(wc->int_map.at[frag.as.offset] < CSELF_INT_MAX);
-            snprintf(buf, sizeof(buf), "\\cself[%zu]", wc->int_map.at[frag.as.offset] - CSELF_BASE);
+            assert(wc->temp_int_map.at[frag.as.offset] < CSELF_INT_MAX);
+            snprintf(buf, sizeof(buf), "\\cself[%zu]", wc->temp_int_map.at[frag.as.offset] - CSELF_BASE);
             next = to_sv(buf);
             break;
         }
         case OPKIND_TEMP_STR: {
-            assert(wc->str_map.at[frag.as.offset] < CSELF_STR_MAX);
-            snprintf(buf, sizeof(buf), "\\cself[%zu]", wc->str_map.at[frag.as.offset] - CSELF_BASE);
+            assert(wc->temp_str_map.at[frag.as.offset] < CSELF_STR_MAX);
+            snprintf(buf, sizeof(buf), "\\cself[%zu]", wc->temp_str_map.at[frag.as.offset] - CSELF_BASE);
             next = to_sv(buf);
             break;
         }
@@ -408,21 +416,23 @@ static void update_interval(VEC_Interval *i_its, VEC_Interval *s_its, size_t ins
     it->end = inst;
 }
 
-static void update_map(VEC_int32_t *i_map, size_t i_top, VEC_int32_t *s_map, size_t s_top, WIROperand wop) {
+static void update_temp_map(WIRCompiler *wc, int32_t i_top, int32_t s_top, WIROperand wop) {
     if (wop.kind == OPKIND_TEMP_INT) {
-        // If temporary has already been given a concrete address, skip.
-        if (i_map->at[wop.as.offset] >= RC_THRESHOLD) return;
+        int32_t *v = &wc->temp_int_map.at[wop.as.offset];
 
-        i_map->at[wop.as.offset] += CSELF_INT_BASE + i_top;
+        // If temporary has already been given a concrete address, skip.
+        if (*v >= RC_THRESHOLD) return;
+
+        *v += CSELF_BASE + i_top;
 
         // Crash when overflowing the CSelf space for now.
-        assert(i_map->at[wop.as.offset] <= CSELF_INT_MAX);
+        assert(wc->temp_int_map.at[wop.as.offset] <= CSELF_INT_MAX);
     } else if (wop.kind == OPKIND_TEMP_STR) {
-        if (s_map->at[wop.as.offset] >= RC_THRESHOLD) return;
+        if (wc->temp_str_map.at[wop.as.offset] >= RC_THRESHOLD) return;
 
-        s_map->at[wop.as.offset] += CSELF_STR_BASE + s_top;
+        wc->temp_str_map.at[wop.as.offset] += CSELF_STR_BASE + s_top;
 
-        assert(s_map->at[wop.as.offset] <= CSELF_STR_MAX);
+        assert(wc->temp_str_map.at[wop.as.offset] <= CSELF_STR_MAX);
     }
 }
 
@@ -472,8 +482,8 @@ static VEC_int32_t reg_alloc(Arena *arena, VEC_Interval *its, size_t n_temps) {
     return map;
 }
 
-// Assigns concrete addresses to temporaries.
-static void temp_alloc_pass(Arena *arena, WIRCev *wcev, VEC_int32_t *i_map, VEC_int32_t *s_map) {
+// Assigns concrete addresses to locals and temporaries.
+static void addr_alloc_pass(WIRCompiler *wc, WIRCev *wcev) {
     // Compute liveness intervals of all temporaries.
     size_t n_i_temps = wcev->n_temp_ints;
     size_t n_s_temps = wcev->n_temp_strs;
@@ -481,19 +491,19 @@ static void temp_alloc_pass(Arena *arena, WIRCev *wcev, VEC_int32_t *i_map, VEC_
     VEC_Interval i_its = VEC_EMPTY;
     for (size_t i = 0; i < n_i_temps; i++)
         VEC_PUSH(i_its, ((Interval){ .id = i,
-            .start = (size_t)-1, .end = (size_t)-1 }), arena);
+            .start = (size_t)-1, .end = (size_t)-1 }), wc->arena);
     
     VEC_Interval s_its = VEC_EMPTY;
     for (size_t i = 0; i < n_s_temps; i++)
         VEC_PUSH(s_its, ((Interval){ .id = i,
-            .start = (size_t)-1, .end = (size_t)-1 }), arena);
+            .start = (size_t)-1, .end = (size_t)-1 }), wc->arena);
 
     for (size_t i = 0; i < wcev->insts.count; i++) {
         WIRInst *wirinst = wcev->insts.at[i];
         switch (wirinst->kind) {
         case _WIRInst_NOP:
-        case _WIRInst_PushInt:
-        case _WIRInst_PushStr:
+        case _WIRInst_PushIntN:
+        case _WIRInst_PushStrN:
         case _WIRInst_PopIntN:
         case _WIRInst_PopStrN:
         case _WIRInst_Cmd:
@@ -598,27 +608,76 @@ static void temp_alloc_pass(Arena *arena, WIRCev *wcev, VEC_int32_t *i_map, VEC_
         VEC_REMOVE(s_its, i);
     }
 
-    *i_map = reg_alloc(arena, &i_its, n_i_temps);
-    *s_map = reg_alloc(arena, &s_its, n_s_temps);
+    // Allocate virtual offsets to temporaries (as in, from 0).
+    wc->temp_int_map = reg_alloc(wc->arena, &i_its, n_i_temps);
+    wc->temp_str_map = reg_alloc(wc->arena, &s_its, n_s_temps);
 
     // Now do one more pass of the code, keeping track of the
-    // state of the local variable stack, to assign actual
-    // addresses to each temporary. Addresses are assigned such
-    // that they are always right above the local stack.
-    size_t i_top = 0;
-    size_t s_top = 0;
+    // state of the compile-time stack this time to assign concrete
+    // addresses to operands.
+    //
+    // For locals, addresses are assigned fairly straightforwardly,
+    // with the exception that CSelf5~9 need to be avoided when
+    // allocating integers. If a push instruction allocates a block
+    // of integers such that they would flow into that space,
+    // skip ahead to CSelf10 instead. This is a bit of a waste,
+    // but losing a few CSelfs doesn't matter that much in the long run.
+    //
+    // For temporaries, addresses are assigned such that they are
+    // always right above the local stack. Again, this needs to take
+    // into consideration the case that an integer temporary could be
+    // allocated into CSelf5~9, and skip over in that case.
+    wc->local_int_map = (VEC_int32_t)VEC_EMPTY;
+    wc->local_str_map = (VEC_int32_t)VEC_EMPTY;
+
+    VEC_int32_t int_addrs = VEC_EMPTY;
+    VEC_int32_t str_addrs = VEC_EMPTY;
+    
+    int32_t int_base = wcev->is_exaddr ? NORMAL_VAR_BASE : CSELF_BASE;
+    int32_t str_base = wcev->is_exaddr ? STRING_VAR_BASE : CSELF_STR_BASE;
     for (size_t i = 0; i < wcev->insts.count; i++) {
         WIRInst *wirinst = wcev->insts.at[i];
         switch (wirinst->kind) {
-        case _WIRInst_PushInt:
-            i_top++;
+        case _WIRInst_PushIntN: {
+            WIRInst_PushIntN *inst = (WIRInst_PushIntN *)wirinst;
+            assert(inst->n > 0);
+            
+            int32_t range_start = int_base + int_addrs.count;
+            int32_t range_end = int_base + int_addrs.count + inst->n - 1;
+            if (wcev->is_exaddr) {
+
+                wc_error(wc, SV(""));
+            } else {
+                // Check if range overlaps string space.
+                if (range_start >= CSELF_STR_BASE && range_start <= CSELF_STR_MAX
+                    || range_end >= CSELF_STR_BASE && range_end <= CSELF_STR_MAX) {
+                    range_start = CSELF_STR_MAX - CSELF_BASE + 1;
+                    range_end = range_start + inst->n - 1;
+                }
+
+                if (range_end > CSELF_INT_MAX)
+                    wc_error(wc, SV("Ran out of integer CSelfs to allocate. Try marking the common event as 'exaddr'."));
+            }
+
+            for (size_t j = 0; j < inst->n; j++) {
+                int32_t ref = range_start + j;
+                VEC_PUSH(wc->local_int_map, ref, wc->arena);
+            }
             break;
-        case _WIRInst_PushStr:
-            s_top++;
+        }
+        case _WIRInst_PushStrN: {
+            WIRInst_PushStrN *inst = (WIRInst_PushStrN *)wirinst;
+            assert(inst->n > 0);
+            VEC_PUSH(wc->local_str_map, s_top, wc->arena);
+            s_top += inst->n;
             break;
+        }
         case _WIRInst_PopIntN: {
             WIRInst_PopIntN *inst = (WIRInst_PopIntN *)wirinst;
-            i_top -= inst->n;
+            assert(int_addrs.count <= inst->n);
+            for (size_t j = 0; j < inst->n; j++) {
+                VEC_POP(int_addrs);
+            }
             break;
         }
         case _WIRInst_PopStrN: {
@@ -628,76 +687,76 @@ static void temp_alloc_pass(Arena *arena, WIRCev *wcev, VEC_int32_t *i_map, VEC_
         }
         case _WIRInst_Binop: {
             WIRInst_Binop *inst = (WIRInst_Binop *)wirinst;
-            update_map(i_map, i_top, s_map, s_top, inst->dest);
-            update_map(i_map, i_top, s_map, s_top, inst->a);
-            update_map(i_map, i_top, s_map, s_top, inst->b);
+            update_temp_map(wc, i_top, s_top, inst->dest);
+            update_temp_map(wc, i_top, s_top, inst->a);
+            update_temp_map(wc, i_top, s_top, inst->b);
             break;
         }
         case _WIRInst_Compare: {
             WIRInst_Compare *inst = (WIRInst_Compare *)wirinst;
-            update_map(i_map, i_top, s_map, s_top, inst->dest);
-            update_map(i_map, i_top, s_map, s_top, inst->a);
-            update_map(i_map, i_top, s_map, s_top, inst->b);
+            update_temp_map(wc, i_top, s_top, inst->dest);
+            update_temp_map(wc, i_top, s_top, inst->a);
+            update_temp_map(wc, i_top, s_top, inst->b);
             break;
         }
         case _WIRInst_IfBegin: {
             WIRInst_IfBegin *inst = (WIRInst_IfBegin *)wirinst;
-            update_map(i_map, i_top, s_map, s_top, inst->cond);
+            update_temp_map(wc, i_top, s_top, inst->cond);
             break;
         }
         case _WIRInst_IfBeginOp: {
             WIRInst_IfBeginOp *inst = (WIRInst_IfBeginOp *)wirinst;
-            update_map(i_map, i_top, s_map, s_top, inst->a);
-            update_map(i_map, i_top, s_map, s_top, inst->b);
+            update_temp_map(wc, i_top, s_top, inst->a);
+            update_temp_map(wc, i_top, s_top, inst->b);
             break;
         }
         case _WIRInst_LoopBeginN: {
             WIRInst_LoopBeginN *inst = (WIRInst_LoopBeginN *)wirinst;
-            update_map(i_map, i_top, s_map, s_top, inst->count);
+            update_temp_map(wc, i_top, s_top, inst->count);
             break;
         }
         case _WIRInst_Call: {
             WIRInst_Call *inst = (WIRInst_Call *)wirinst;
-            update_map(i_map, i_top, s_map, s_top, inst->dest);
+            update_temp_map(wc, i_top, s_top, inst->dest);
             for (size_t arg = 0; arg < inst->args.count; arg++)
-                update_map(i_map, i_top, s_map, s_top, inst->args.at[arg]);
+                update_temp_map(wc, i_top, s_top, inst->args.at[arg]);
             break;
         }
         case _WIRInst_ReturnVal: {
             WIRInst_ReturnVal *inst = (WIRInst_ReturnVal *)wirinst;
-            update_map(i_map, i_top, s_map, s_top, inst->val);
+            update_temp_map(wc, i_top, s_top, inst->val);
             break;
         }
         case _WIRInst_DBLoad: {
             WIRInst_DBLoad *inst = (WIRInst_DBLoad *)wirinst;
-            update_map(i_map, i_top, s_map, s_top, inst->dst);
-            update_map(i_map, i_top, s_map, s_top, inst->db_type);
-            update_map(i_map, i_top, s_map, s_top, inst->db_data);
-            update_map(i_map, i_top, s_map, s_top, inst->db_field);
+            update_temp_map(wc, i_top, s_top, inst->dst);
+            update_temp_map(wc, i_top, s_top, inst->db_type);
+            update_temp_map(wc, i_top, s_top, inst->db_data);
+            update_temp_map(wc, i_top, s_top, inst->db_field);
             break;
         }
         case _WIRInst_DBStore: {
             WIRInst_DBStore *inst = (WIRInst_DBStore *)wirinst;
-            update_map(i_map, i_top, s_map, s_top, inst->src);
-            update_map(i_map, i_top, s_map, s_top, inst->db_type);
-            update_map(i_map, i_top, s_map, s_top, inst->db_data);
-            update_map(i_map, i_top, s_map, s_top, inst->db_field);
+            update_temp_map(wc, i_top, s_top, inst->src);
+            update_temp_map(wc, i_top, s_top, inst->db_type);
+            update_temp_map(wc, i_top, s_top, inst->db_data);
+            update_temp_map(wc, i_top, s_top, inst->db_field);
             break;
         }
         case _WIRInst_StrAssign: {
             WIRInst_StrAssign *inst = (WIRInst_StrAssign *)wirinst;
-            update_map(i_map, i_top, s_map, s_top, inst->dest);
-            update_map(i_map, i_top, s_map, s_top, inst->src);
+            update_temp_map(wc, i_top, s_top, inst->dest);
+            update_temp_map(wc, i_top, s_top, inst->src);
             break;
         }
         case _WIRInst_Label: {
             WIRInst_Label *inst = (WIRInst_Label *)wirinst;
-            update_map(i_map, i_top, s_map, s_top, inst->name);
+            update_temp_map(wc, i_top, s_top, inst->name);
             break;
         }
         case _WIRInst_Goto: {
             WIRInst_Goto *inst = (WIRInst_Goto *)wirinst;
-            update_map(i_map, i_top, s_map, s_top, inst->name);
+            update_temp_map(wc, i_top, s_top, inst->name);
             break;
         }
         case _WIRInst_NOP:
@@ -830,8 +889,8 @@ static void compile_inst(WIRCompiler *wc, WIRCev *wcev, size_t index) {
     WIRInst *wi = wcev->insts.at[index];
     switch (wi->kind) {
     case _WIRInst_NOP:
-    case _WIRInst_PushInt:
-    case _WIRInst_PushStr:
+    case _WIRInst_PushIntN:
+    case _WIRInst_PushStrN:
     case _WIRInst_PopIntN:
     case _WIRInst_PopStrN:
         break;
@@ -1386,19 +1445,19 @@ static void comp_if_pass(WIRCev *wcev, Arena *arena) {
     }
 }
 
-static void compile_dbs(WIRCompiler *wc, VEC_WIRDB *g, VEC_DB *dbs) {
+static void compile_dbs(WIRCompiler *wc, VEC_WIRDB *g, VEC_DBType *dbs) {
     for (size_t i = 0; i < g->count; i++) {
         WIRDB *wdb = &g->at[i];
         
-        DB db;
+        DBType db;
         db_init(&db);
         db.TYPENAME = wdb->name;
 
         for (size_t j = 0; j < wdb->fields.count; j++) {
             WIRVar *field = &wdb->fields.at[j];
-            VEC_PUSH(db.fields, ((DBField){
+            VEC_PUSH(db.itemdef, ((DBItemDef){
                 .type = field->type == WIRVAR_INT ?
-                    DBFIELD_INT : DBFIELD_STR,
+                    DBITEM_INT : DBITEM_STR,
                 .ITEMNAME = field->name,
                 .VMEMO = SV(""),
                 .CHOICE_NAME = SV(""),
@@ -1435,6 +1494,11 @@ static void compile_wir(WIRCompiler *wc, Module *mod) {
         #undef LOAD_SYMBOLS
     }
 
+    // Process global variables.
+    for (size_t i = 0; i < wir->g_ints.count; i++) {
+        wc->gd.
+    }
+
     // Process every DB.
     compile_dbs(wc, &wir->g_udbs, &wc->gd.udb);
     compile_dbs(wc, &wir->g_cdbs, &wc->gd.cdb);
@@ -1450,7 +1514,7 @@ static void compile_wir(WIRCompiler *wc, Module *mod) {
         comp_if_pass(wcev, wc->arena);
         
         // Map concrete addresses to temporaries.
-        temp_alloc_pass(wc->arena, wcev, &wc->int_map, &wc->str_map);
+        addr_alloc_pass(wc->arena, wcev, &wc->temp_int_map, &wc->temp_str_map);
 
         // Then compile the code into commands.
         CommonEvent cev;
@@ -1497,13 +1561,13 @@ GameData wir_pass(VEC_Module *modules, Arena *arena) {
         .g_cevs = VEC_EMPTY,
         .g_udbs = VEC_EMPTY,
         .g_cdbs = VEC_EMPTY,
-        .arena = arena
+        .arena = arena,
+        .had_error = false
     };
     gd_init(&wc.gd);
     
-    for (size_t i = 0; i < modules->count; i++) {
+    for (size_t i = 0; i < modules->count; i++)
         compile_wir(&wc, &modules->at[i]);
-    }
 
     // Assign entry point.
     for (size_t i = 0; i < wc.g_cevs.count; i++) {
@@ -1515,11 +1579,11 @@ GameData wir_pass(VEC_Module *modules, Arena *arena) {
     // The editor crashes if there are no DBs of a type,
     // so if there are none then add an empty one.
     if (wc.gd.udb.count == 0) {
-        DB db; db_init(&db);
+        DBType db; db_init(&db);
         VEC_PUSH(wc.gd.udb, db, arena);
     }
     if (wc.gd.cdb.count == 0) {
-        DB db; db_init(&db);
+        DBType db; db_init(&db);
         VEC_PUSH(wc.gd.cdb, db, arena);
     }
 
@@ -1600,14 +1664,18 @@ void print_wir(WIR *wir) {
         for (size_t i = 0; i < arr.count; i++) {
             WIRInst *inst = arr.at[i];
             switch (inst->kind) {
-            case _WIRInst_PushInt:
-                printf("pushi \t\t\t; (max i: %zu)", stack_i);
-                stack_i++;
+            case _WIRInst_PushIntN: {
+                WIRInst_PushIntN *in = (WIRInst_PushIntN *)inst;
+                stack_i += in->n;
+                printf("pushi %zu \t\t\t; (max i: %zu)", in->n, stack_i-1);
                 break;
-            case _WIRInst_PushStr:
-                printf("pushs \t\t\t; (max s: %zu)", stack_s);
-                stack_i++;
+            }
+            case _WIRInst_PushStrN: {
+                WIRInst_PushStrN *in = (WIRInst_PushStrN *)inst;
+                stack_s += in->n;
+                printf("pushs %zu \t\t\t; (max s: %zu)", in->n, stack_s-1);
                 break;
+            }
             case _WIRInst_PopIntN: {
                 WIRInst_PopIntN *in = (WIRInst_PopIntN *)inst;
                 stack_i -= in->n;
@@ -1645,6 +1713,13 @@ void print_wir(WIR *wir) {
                 print_wop(in->a);
                 printf(" %d", in->op);
                 print_wop(in->b);
+                break;
+            }
+            case _WIRInst_StrAssign: {
+                WIRInst_StrAssign *in = (WIRInst_StrAssign *)inst;
+                printf("str");
+                print_wop(in->dest);
+                print_wop(in->src);
                 break;
             }
             case _WIRInst_ReturnVal: {

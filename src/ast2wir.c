@@ -187,14 +187,18 @@ static void close_frame(Ast2Wir *aw) {
 
 static size_t new_local_int(Ast2Wir *aw) {
     assert(aw->local_frames.count > 0);
-    emit_simple(aw, _WIRInst_PushInt);
+    WIRInst_PushIntN *inst;
+    ALLOC_WIR(inst, WIRInst_PushIntN, (WIRInst_PushIntN){ .n = 1 });
+    emit_to_current_cev(aw, (WIRInst *)inst);
     Frame *top = &aw->local_frames.at[aw->local_frames.count - 1];
     return top->int_top++;
 }
 
 static size_t new_local_str(Ast2Wir *aw) {
     assert(aw->local_frames.count > 0);
-    emit_simple(aw, _WIRInst_PushStr);
+    WIRInst_PushStrN *inst;
+    ALLOC_WIR(inst, WIRInst_PushStrN, (WIRInst_PushStrN){ .n = 1 });
+    emit_to_current_cev(aw, (WIRInst *)inst);
     Frame *top = &aw->local_frames.at[aw->local_frames.count - 1];
     return top->str_top++;
 }
@@ -710,6 +714,8 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
                 .name = s->name,
                 .insts = VEC_EMPTY,
                 .n_temp_ints = 0,
+                .n_temp_strs = 0,
+                .is_exaddr = s->is_exaddr,
             }), aw->arena);
 
         open_frame(aw);

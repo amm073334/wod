@@ -49,8 +49,52 @@ static Environment *env_new_assert(Environment *parent, Arena *arena) {
 }
 
 static bool wt_equal(WodType a, WodType b) {
-    // TODO: handle other types
-    return a.basetype == b.basetype;
+    if (a.basetype != b.basetype) return false;
+    
+    switch (a.basetype) {
+        case TYPE_NONE:
+        case TYPE_ERROR:
+        case TYPE_VOID:
+        case TYPE_MODULE:
+            UNREACHABLE;
+            return false;
+
+        case TYPE_INT:
+        case TYPE_STR:
+        case TYPE_BOOL:
+            return true;
+
+        case TYPE_PTR: 
+            return wt_equal(*a.ptr_to, *b.ptr_to);
+
+        case TYPE_FUNC:
+            if (wt_equal(*a.return_type, *b.return_type))
+                return false;
+
+            if (a.params.count != b.params.count)
+                return false;
+        
+            for (size_t i = 0; i < a.params.count; i++) {
+                if (!wt_equal(a.params.at[i], b.params.at[i]))
+                    return false;
+            }
+
+            return true;
+
+        case TYPE_DBDATA:
+            return wt_equal(*a.db_type, *b.db_type);
+
+        case TYPE_ARRAY:
+            return a.array_len == b.array_len 
+                && wt_equal(*a.array_of, *b.array_of);
+
+        case TYPE_DBTYPE:
+            return a.db_env == b.db_env;
+
+        case TYPE_CEVTYPE:
+            UNIMPLEMENTED;
+            return false;
+    }
 }
 
 static void tc_error(Typechecker *tc, Token *token, StringView message) {
@@ -761,7 +805,8 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
             StmtFuncDecl *s = (StmtFuncDecl *)stmt;
 
             WodType wt = { .basetype = TYPE_FUNC,
-                .is_assignable = false, .is_compile_time = s->is_inline };
+                .is_assignable = false, .is_compile_time = s->is_inline,
+                .is_exaddr = s->is_exaddr };
 
             WodType *ret = arena_alloc_assert(tc->arena, sizeof(WodType));
             wt.return_type = ret;
@@ -774,23 +819,38 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
             default: UNREACHABLE;
             }
 
+            size_t i_param_size = 0;
+            size_t s_param_size = 0;
             for (size_t param = 0; param < s->params.count; param++) {
                 // TODO: handle array params
                 switch (s->params.at[param]->type.type) {
                 case TOK_INT:
+                    i_param_size++;
                     VEC_PUSH(wt.params,
                         (WodType){ .basetype = TYPE_INT }, tc->arena);
                     break;
                 case TOK_STR:
+                    s_param_size++;
                     VEC_PUSH(wt.params,
                         (WodType){ .basetype = TYPE_STR }, tc->arena);
                     break;
                 case TOK_BOOL:
+                    i_param_size++;
                     VEC_PUSH(wt.params,
                         (WodType){ .basetype = TYPE_BOOL }, tc->arena);
                     break;
                 default: UNREACHABLE;
                 }
+
+                if (i_param_size > 5)
+                    tc_error(tc, &s->params.at[param]->base.tok,
+                        SV("Exceeded maximum number of integer-based parameters "
+                           "in non-exaddr common event."));
+                
+                if (s_param_size > 5)
+                    tc_error(tc, &s->params.at[param]->base.tok,
+                        SV("Exceeded maximum number of string-based parameters "
+                           "in non-exaddr common event."));
             }
 
             s->sym = env_insert(tc->current_env, s->name,

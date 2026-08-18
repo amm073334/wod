@@ -33,6 +33,7 @@ static const Keyword keywords[] = {
     {.name = "cdb",      .type = TOK_CDB},
     {.name = "cevtype",  .type = TOK_CEVTYPE},
     {.name = "apply",    .type = TOK_APPLY},
+    {.name = "exaddr",   .type = TOK_EXADDR},
 };
 
 void lexer_init(Lexer *lexer, Source source) {

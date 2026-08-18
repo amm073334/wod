@@ -1,0 +1,21 @@
+// EXPECT: 18, 18 7
+
+apply "../bin";
+
+import "../_test.wod";
+
+str hello(int a, str s, int b) {
+    // These variables are intentionally unused.
+    int _m = 1234;
+    str _t = "asddf";
+    int _n = 12347;
+    return "${s} ${a - b}";
+}
+
+void main() {
+    int a = 2;
+    int b = 9;
+    str s = "${a * b}";
+    output("${s}, ${hello(b, s, a)}");
+    exit();
+}

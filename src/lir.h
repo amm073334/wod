@@ -7,39 +7,50 @@ typedef struct {
     enum {
         // Integer immediates are assumed to be less than
         // the reference conversion threshold.
-        LIR_IMM_INT,
-        LIR_IMM_STR,
-        LIR_REF_INT,
-        LIR_REF_STR,
+        LIR_I_IMM,
+        LIR_I_REF_INT,
+        LIR_I_REF_STR,
     } kind;
-    union {
-        int32_t imm_int;
-        StringView imm_str;
-        size_t offset;
-    } as;
+    int32_t value;
 } LIROperand;
+VEC_DEF(LIROperand);
 
 typedef struct {
     enum {
-        _LIRInst_Binop,
-        _LIRInst_StrAssign,
-        _LIRInst_IfBegin,
-        _LIRInst_LoopBeginN,
-        _LIRInst_Call,
-        _LIRInst_ReturnVal,
-        _LIRInst_Cmd,
-        _LIRInst_DBLoad,
-        _LIRInst_DBStore,
-        _LIRInst_Label,
-        _LIRInst_Goto,
-        _LIRInst_Else,
-        _LIRInst_IfEnd,
-        _LIRInst_LoopBegin,
-        _LIRInst_LoopEnd,
-        _LIRInst_Continue,
-        _LIRInst_Break,
-        _LIRInst_ReturnVoid,
+        LIR_S_IMM,
+        LIR_S_INTERP,
     } kind;
+
+} LIRString;
+
+typedef struct {
+    enum {
+        LIR_BINOP,
+        LIR_STR,
+        LIR_IFINT,
+        LIR_BRANCH,
+        LIR_IFEND,
+        LIR_LOOP,
+        LIR_LOOPN,
+        LIR_LOOPEND,
+        LIR_CONTINUE,
+        LIR_BREAK,
+        LIR_CALL,
+        LIR_CMD,
+        LIR_DBLOAD,
+        LIR_DBSTORE,
+        LIR_LABEL,
+        LIR_GOTO,
+        LIR_RETURN,
+    } kind;
+    VEC_LIROperand i_fields;
+    VEC_StringView s_fields;
 } LIRInst;
+VEC_DEF(LIRInst);
+
+typedef struct {
+    VEC_LIRInst insts;
+    size_t ret;
+} LIR;
 
 #endif // WOD_LIR_H_

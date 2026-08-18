@@ -1,0 +1,17 @@
+// EXPECT: 1 2 3
+
+apply "../bin";
+
+import "../_test.wod";
+
+cdb A {
+    int[3] v;
+}
+
+void main() {
+    A[0].v[0] = 1;
+    A[0].v[1] = 2;
+    A[0].v[2] = 3;
+    output("${A[0].v[0]} ${A[0].v[1]} ${A[0].v[2]}");
+    exit();
+}

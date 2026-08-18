@@ -172,6 +172,7 @@ typedef struct {
     VEC_PTR_StmtVarDecl params;
     VEC_PTR_Stmt body;
     bool is_inline;
+    bool is_exaddr;
 
     Symbol *sym;
 } StmtFuncDecl;

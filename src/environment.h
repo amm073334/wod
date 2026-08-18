@@ -60,6 +60,7 @@ struct WodType {
         struct {
             WodType *return_type;
             VEC_WodType params;
+            bool is_exaddr;
         };
 
         // If TYPE_CEVTYPE:
