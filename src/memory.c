@@ -61,6 +61,7 @@ void *arena_alloc(Arena *arena, size_t size) {
 }
 
 void *arena_alloc_assert(Arena *arena, size_t size) {
+    if (size == 0) return NULL;
     void *out = arena_alloc(arena, size);
     if (!out) {
         fprintf(stderr, "Fatal error: Out of memory.\n");

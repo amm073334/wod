@@ -1,4 +1,4 @@
-#ifndef WOD_DB_H_
+﻿#ifndef WOD_DB_H_
 #define WOD_DB_H_
 
 #include <stdio.h>
@@ -106,7 +106,7 @@ typedef struct {
     StringView VMEMO;
 
     // Specifies what values can be set in the editor.
-    DBItemLoadType loadtype;
+    DBItemLoadType LOADTYPE;
 
     // List of "choices." The exact semantics depends on the item's loadtype.
     VEC_StringView CHOICE_NAME;
@@ -137,15 +137,15 @@ typedef struct {
     // the system will still function properly.
     int32_t TYPE_ID;
 
+    // Name.
+    StringView TYPENAME;
+
+    // Description.
+    StringView MEMO;
+
     // How IDs of data elements are specified.
     int32_t DATANAME_LOAD_TYPE;
     StringView DATANAME_LOAD_NAME;
-
-    // Name.
-    StringView TYPENAME;
-    
-    // Description.
-    StringView MEMO;
 
     // Definition of DB items.
     VEC_DBItemDef itemdef;
@@ -156,10 +156,9 @@ typedef struct {
 } DBType;
 VEC_DEF(DBType);
 
-void db_init(DBType *db);
-void db_init_sys_3713(VEC_DBType *db);
+void db_init(DBType *ty);
 
 // Returns `false` if the DB was invalid. 
-bool db_write_txt(DBType *db, FILE *stream);
+bool db_write_txt(DBType *ty, FILE *stream);
 
 #endif // WOD_DB_H_

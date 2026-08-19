@@ -23,11 +23,15 @@ wodc.exe: $(HEADERS) $(SOURCES)
 		$(SOURCE_DIR)/main.c $(filter-out $(MAINS),$(SOURCES)) /link /out:$@
 
 test.exe: wodc.exe
-	@ if not exist build mkdir build
+	@ if not exist $(BUILD_DIR) mkdir $(BUILD_DIR)
 	@ cl $(CFLAGS) $(WARNINGS) /Fo$(BUILD_DIR)\ $(SOURCE_DIR)/test.c $(OBJECTS) /link /out:$@
 
 test: test.exe
 	@ .\test.exe -f test
+
+dbextract.exe: $(SOURCE_DIR)/dbextract.c
+	@ if not exist $(BUILD_DIR) mkdir $(BUILD_DIR)
+	@ cl $(CFLAGS) /Zi $(WARNINGS) /Fo$(BUILD_DIR)\ $(SOURCE_DIR)/dbextract.c $(SOURCE_DIR)/source.c $(SOURCE_DIR)/memory.c $(SOURCE_DIR)/sv.c /link /out:$@
 
 clean:
 	@ if exist build rmdir /s /q build
