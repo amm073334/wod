@@ -10,13 +10,17 @@ apply "../bin";
 
 import "../_test.wod";
 
-cdb TestCDB {
+cdbtype TestCDB {
     int a = 999;
     int b = 2;
     int c = 123;
 } = { default }
 
-void main() {
+cev void main() {
     output("${TestCDB[0].a + TestCDB[1].b + TestCDB[3].c}");
     exit();
+}
+
+def cdbtype {
+    TestCDB
 }

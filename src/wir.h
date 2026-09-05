@@ -10,6 +10,15 @@
 #define WIR_IMM_I(i) (WIROperand){ .kind = OPKIND_IMM_INT, .as.imm_int = (i) }
 #define WIR_IMM_S(s) (WIROperand){ .kind = OPKIND_IMM_STR, .as.imm_str = (s) }
 
+// Global qualifier for a symbol. Two top-level symbols in the same
+// file cannot have the same name, so any top-level symbol's qualifier
+// is guaranteed to be unique across all files.
+typedef struct Qualifier {
+    StringView path;
+    StringView name;
+} Qualifier;
+VEC_DEF(Qualifier);
+
 typedef struct WIROperand WIROperand;
 VEC_DEF(WIROperand);
 struct WIROperand {
@@ -77,10 +86,7 @@ struct WIROperand {
 
         size_t offset;
 
-        struct {
-            StringView path;
-            StringView name;
-        } global;
+        Qualifier global;
         
         struct {
             WIROperand *type_id;
@@ -306,7 +312,7 @@ typedef struct {
 } WIRInst_ReturnVoid;
 
 typedef struct WIRCev {
-    StringView name;
+    Qualifier qualifier;
     VEC_PTR_WIRInst insts;
 
     // Convenience fields to keep track of the lowest unused
@@ -320,17 +326,17 @@ typedef struct WIRCev {
 } WIRCev;
 VEC_DEF(WIRCev);
 
-typedef struct WIRVar {
+typedef struct WIRField {
     StringView name;
     enum {
-        WIRVAR_INT,
-        WIRVAR_STR,
+        WIRFIELD_INT,
+        WIRFIELD_STR,
     } type;
 
     bool has_initializer;
     WIROperand initializer;
-} WIRVar;
-VEC_DEF(WIRVar);
+} WIRField;
+VEC_DEF(WIRField);
 
 typedef struct WIRData {
     VEC_WIROperand values;
@@ -338,17 +344,18 @@ typedef struct WIRData {
 VEC_DEF(WIRData);
 
 typedef struct WIRDB {
-    StringView name;
-    VEC_WIRVar fields;
+    Qualifier qualifier;
+    VEC_WIRField fields;
+    
+    // Each data element should be of the same length as the fields.
     VEC_WIRData data;
 } WIRDB;
 VEC_DEF(WIRDB);
 
 typedef struct WIR {
-    // Each of these fields is a list of global (top-level)
-    // symbols in the file, separated by kind.
-    VEC_WIRVar g_ints;
-    VEC_WIRVar g_strs;
+    // Each of these fields is a list of global (top-level) symbols.
+    VEC_Qualifier g_ints;
+    VEC_Qualifier g_strs;
     VEC_WIRCev g_cevs;
     VEC_WIRDB g_udbs;
     VEC_WIRDB g_cdbs;

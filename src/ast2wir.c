@@ -1,6 +1,5 @@
 #include "ast2wir.h"
 #include "parser.h"
-#include "wir.h"
 
 #define ALLOC_WIR(var, type_, ...) \
     do { \
@@ -33,6 +32,8 @@ VEC_DEF(Frame);
 typedef struct Ast2Wir {
     Arena *arena;
     WIR *wir;
+
+    Module *current_module;
 
     VEC_Frame local_frames;
 
@@ -203,16 +204,13 @@ static size_t new_local_str(Ast2Wir *aw) {
     return top->str_top++;
 }
 
-static void visit_db_field_decl(Ast2Wir *aw, Stmt *stmt, WIRDB *db) {
-    assert(stmt->kind == NODE_StmtVarDecl);
-
-    StmtVarDecl *s = (StmtVarDecl *)stmt;
+static void visit_db_field_decl(Ast2Wir *aw, StmtVarDecl *s, WIRDB *db) {
     assert(!s->is_const);
 
-    WIRVar wdbf = {
+    WIRField wdbf = {
         .name = s->name,
         .type = s->sym->type.basetype == TYPE_STR ?
-            WIRVAR_STR : WIRVAR_INT,
+            WIRFIELD_STR : WIRFIELD_INT,
         .has_initializer = false
     };
 
@@ -243,6 +241,57 @@ static void visit_db_field_decl(Ast2Wir *aw, Stmt *stmt, WIRDB *db) {
     }
 
     VEC_PUSH(db->fields, wdbf, aw->arena);
+}
+
+static void visit_db_data(Ast2Wir *aw, ExprDBDataElem *e, WIRDB *db, size_t data_index) {
+    if (e->no_body)
+        return;
+
+    WIRData data = { .values = VEC_EMPTY };
+    for (size_t i = 0; i < db->fields.count; i++) {
+        bool found = false;
+        for (size_t j = 0; j < e->fields.count; j++) {
+            if (!sv_equals(db->fields.at[i].name, e->fields.at[j]->name)) continue;
+
+            found = true;
+
+            Expr *value = e->fields.at[i]->value;
+            assert(value->type.is_constexpr);
+
+            WIROperand wop = { 0 };
+            switch(value->kind) {
+                case NODE_ExprIntLit:
+                    wop = (WIROperand){
+                        .kind = OPKIND_IMM_INT,
+                        .as.imm_int = ((ExprIntLit *)value)->value
+                    };
+                    break;
+                case NODE_ExprBoolLit:
+                    wop = (WIROperand){
+                        .kind = OPKIND_IMM_INT,
+                        .as.imm_int = ((ExprBoolLit *)value)->value
+                    };
+                    break;
+                case NODE_ExprStrLit:
+                    wop = (WIROperand){
+                        .kind = OPKIND_IMM_STR,
+                        .as.imm_str = ((ExprStrLit *)value)->value
+                    };
+                    break;
+                default: UNREACHABLE;
+            }
+
+            VEC_PUSH(data.values, wop, aw->arena);
+            break;
+        }
+
+        if (!found) {
+            assert(db->fields.at[i].has_initializer);
+            VEC_PUSH(data.values, db->fields.at[i].initializer, aw->arena);
+        }
+    }
+
+    db->data.at[data_index] = data;
 }
 
 static WIROperand *heapalloc(Arena *arena, WIROperand wop) {
@@ -649,11 +698,18 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
 
         switch (s->sym->type.basetype) {
         case TYPE_STR: {
-            s->sym->local_offset = new_local_str(aw);
+            if (!s->sym->env->parent) {
+                assert(!s->initializer);
+                VEC_PUSH(aw->wir->g_strs, ((Qualifier){
+                    .path = aw->current_module->source->path,
+                    .name = s->name
+                }), aw->arena);
+                break;
+            }
 
-            WIROperand init = { 0 };
+            s->sym->local_offset = new_local_str(aw);
             if (s->initializer) {
-                init = visit_Expr(aw, s->initializer);
+                WIROperand init = visit_Expr(aw, s->initializer);
                 emit_str(aw,
                     (WIROperand){
                         .kind = OPKIND_LOCAL_STR,
@@ -661,43 +717,27 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
                     },
                     init);
             }
-
-            if (!s->sym->env->parent) {
-                assert(!s->initializer);
-                WIRVar wv = {
-                    .name = s->sym->name,
-                    .type = WIRVAR_STR,
-                    .has_initializer = s->initializer != NULL,
-                    .initializer = init
-                };
-                VEC_PUSH(aw->wir->g_strs, wv, aw->arena);
-            }
-
             break;
         }
         default: {
-            s->sym->local_offset = new_local_int(aw);
+            if (!s->sym->env->parent) {
+                assert(!s->initializer);
+                VEC_PUSH(aw->wir->g_ints, ((Qualifier){
+                    .path = aw->current_module->source->path,
+                    .name = s->name
+                }), aw->arena);
+                break;
+            }
 
-            WIROperand init = { 0 };
+            s->sym->local_offset = new_local_int(aw);
             if (s->initializer) {
-                init = visit_Expr(aw, s->initializer);
+                WIROperand init = visit_Expr(aw, s->initializer);
                 emit_binop(aw,
                     (WIROperand){
                         .kind = OPKIND_LOCAL_INT,
                         .as.offset = s->sym->local_offset
                     },
                     WIR_ASSIGN_EQ, init, WIR_IMM_I(0), WIR_BINOP_ADD);
-            }
-
-            if (!s->sym->env->parent) {
-                assert(!s->initializer);
-                WIRVar wv = {
-                    .name = s->sym->name,
-                    .type = WIRVAR_INT,
-                    .has_initializer = s->initializer != NULL,
-                    .initializer = init
-                };
-                VEC_PUSH(aw->wir->g_ints, wv, aw->arena);
             }
             break;
         }
@@ -709,7 +749,10 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
         
         VEC_PUSH(aw->wir->g_cevs,
             ((WIRCev){
-                .name = s->name,
+                .qualifier = {
+                    .path = aw->current_module->source->path,
+                    .name = s->name
+                },
                 .insts = VEC_EMPTY,
                 .n_temp_ints = 0,
                 .n_temp_strs = 0,
@@ -901,21 +944,6 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
 
         return;
     }
-    case NODE_StmtDBTypeDecl: {
-        StmtDBTypeDecl *s = (StmtDBTypeDecl *)stmt;
-        VEC_WIRDB *g = s->db.type == TOK_UDBTYPE ?
-            &aw->wir->g_udbs : &aw->wir->g_cdbs;
-
-        VEC_PUSH(*g,
-            ((WIRDB){
-                .name = s->name,
-                .fields = VEC_EMPTY
-            }), aw->arena);
-        for (size_t i = 0; i < s->fields.count; i++)
-            visit_db_field_decl(aw, (Stmt *)s->fields.at[i],
-                &g->at[g->count-1]);
-        return;
-    }
     case NODE_StmtInc: {
         StmtInc *s = (StmtInc *)stmt;
         WIROperand left = visit_Expr(aw, s->expr);
@@ -928,25 +956,118 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
         emit_binop(aw, left, WIR_ASSIGN_SUB, WIR_IMM_I(1), WIR_IMM_I(0), WIR_BINOP_ADD);
         return;
     }
+    case NODE_StmtDBDataDecl: {
+        StmtDBDataDecl *s = (StmtDBDataDecl *)stmt;
+
+        for (size_t i = 0; i < aw->wir->g_udbs.count; i++) {
+            WIRDB *udb = &aw->wir->g_udbs.at[i];
+            if (sv_equals(udb->qualifier.path, s->dbtype_sym->top_level_path)
+                && sv_equals(udb->qualifier.name, s->db_type.text)) {
+                visit_db_data(aw, s->data, udb, s->data_sym->local_offset);
+                return;
+            }
+        }
+
+        UNREACHABLE;
+        return;
+    }
+    case NODE_StmtDefDB:
+    case NODE_StmtDBTypeDecl:
+        // Already handled in first pass.
+        break;
     }
 }
 
-void ast2wir_pass(VEC_Module *modules, Arena *arena) {
-    for (size_t i = 0; i < modules->count; i++) {
-        Ast2Wir aw = (Ast2Wir){
-            .arena = arena,
-            .wir = arena_alloc_assert(arena, sizeof(WIR)),
-            .local_frames = VEC_EMPTY,
-            .is_visiting_assign_left = false
-        };
-        wir_init(aw.wir);
+static void rearrange_db_types(Arena *arena, VEC_WIRDB *vec, StmtDefDB *def) {
+    // Currently, it's not actually possible to have two DB types under the same DB
+    // with the same name, since there's no module namespacing.
+    // Therefore, things can just be resolved by name.
 
-        Module *mod = &modules->at[i];
-        for (size_t j = 0; j < mod->ast->stmts.count; j++) {
-            visit_Stmt(&aw, mod->ast->stmts.at[j]);
+    VEC_WIRDB out = VEC_EMPTY;
+    for (size_t i = 0; i < def->db_types.count; i++) {
+        bool found = false;
+        for (size_t j = 0; j < vec->count; j++) {
+            if (!sv_equals(def->db_types.at[i].text, vec->at[j].qualifier.name))
+                continue; 
+
+            found = true;
+            VEC_PUSH(out, vec->at[j], arena);
+            break;
+        }
+        assert(found);
+    }
+
+    *vec = out;
+}
+
+WIR ast2wir_pass(VEC_Module *modules, Arena *arena) {
+    Ast2Wir aw = (Ast2Wir){
+        .arena = arena,
+        .wir = arena_alloc_assert(arena, sizeof(WIR)),
+        .local_frames = VEC_EMPTY,
+        .is_visiting_assign_left = false,
+    };
+    wir_init(aw.wir);
+
+    StmtDefDB *udb_def;
+    StmtDefDB *cdb_def;
+
+    // Do a pass to find all DB types and defs.
+    for (size_t i = 0; i < modules->count; i++) {
+        aw.current_module = &modules->at[i];
+        for (size_t j = 0; j < aw.current_module->ast->stmts.count; j++) {
+            Stmt *stmt = aw.current_module->ast->stmts.at[j];
+            switch (stmt->kind) {
+                case NODE_StmtDBTypeDecl: {
+                    StmtDBTypeDecl *s = (StmtDBTypeDecl *)stmt;
+                    VEC_WIRDB *g = s->db.type == TOK_UDBTYPE ?
+                        &aw.wir->g_udbs : &aw.wir->g_cdbs;
+
+                    WIRDB db = (WIRDB){
+                        .qualifier = {
+                            .path = aw.current_module->source->path,
+                            .name = s->name
+                        },
+                        .fields = VEC_EMPTY,
+                        .data = VEC_EMPTY
+                    };
+                    
+                    for (size_t i = 0; i < s->fields.count; i++)
+                        visit_db_field_decl(&aw, s->fields.at[i], &db);
+
+                    for (size_t i = 0; i < s->data.count; i++) {
+                        VEC_PUSH(db.data, ((WIRData){.values = VEC_EMPTY}), aw.arena);
+                        visit_db_data(&aw, s->data.at[i], &db, i);
+                    }
+
+                    VEC_PUSH(*g, db, aw.arena);
+                    break;
+                }
+                case NODE_StmtDefDB: {
+                    StmtDefDB *s = (StmtDefDB *)stmt;
+                    if (s->db == DB_UDB)
+                        udb_def = s;
+                    else cdb_def = s;
+                    break;
+                }
+                default:
+                    ;
+            }
+        }
+    }
+
+    // Order DBs by def.
+    if (udb_def) rearrange_db_types(arena, &aw.wir->g_udbs, udb_def);
+    if (cdb_def) rearrange_db_types(arena, &aw.wir->g_cdbs, cdb_def);
+
+    // Compile all statements into IR.
+    for (size_t i = 0; i < modules->count; i++) {
+        aw.current_module = &modules->at[i];
+        for (size_t j = 0; j < aw.current_module->ast->stmts.count; j++) {
+            visit_Stmt(&aw, aw.current_module->ast->stmts.at[j]);
             assert(aw.local_frames.count == 0);
         }
-
-        mod->wir = aw.wir;
     }
+
+    return *aw.wir;
 }

@@ -10,7 +10,6 @@ typedef struct Module {
     Source *source;
     ProgramAST *ast;
     Environment *env;
-    WIR *wir;
 } Module;
 VEC_DEF(Module);
 

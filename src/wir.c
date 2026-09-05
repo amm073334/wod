@@ -14,19 +14,9 @@
 #define SDB_STRING_VAR_DBTYPE 4
 #define SDB_NORMAL_VAR_DBTYPE 14
 
-typedef struct GlobalEntry {
-    StringView path;
-    StringView name;
-} GlobalEntry;
-VEC_DEF(GlobalEntry);
-
 typedef struct WIRCompiler {
     // Maps globally-qualified names to global indices.
-    VEC_GlobalEntry g_cevs;
-    VEC_GlobalEntry g_cdbs;
-    VEC_GlobalEntry g_udbs;
-    VEC_GlobalEntry g_ints;
-    VEC_GlobalEntry g_strs;
+    WIR *wir;
 
     // Maps offsets to concrete references.
     VEC_int32_t local_int_map;
@@ -1463,12 +1453,12 @@ static void compile_dbs(WIRCompiler *wc, VEC_WIRDB *g, VEC_DBType *dbs) {
         
         DBType db;
         db_init(&db);
-        db.TYPENAME = wdb->name;
+        db.TYPENAME = wdb->qualifier.name;
 
         for (size_t j = 0; j < wdb->fields.count; j++) {
-            WIRVar *field = &wdb->fields.at[j];
+            WIRField *field = &wdb->fields.at[j];
             VEC_PUSH(db.itemdef, ((DBItemDef){
-                .type = field->type == WIRVAR_INT ?
+                .type = field->type == WIRFIELD_INT ?
                     DBITEM_INT : DBITEM_STR,
                 .ITEMNAME = field->name,
                 .VMEMO = SV(""),
@@ -1483,28 +1473,8 @@ static void compile_dbs(WIRCompiler *wc, VEC_WIRDB *g, VEC_DBType *dbs) {
     }
 }
 
-static void compile_wir(WIRCompiler *wc, Module *mod) {
-    WIR *wir = mod->wir;
-
-    // Dump all the top-level symbols in the current file
-    // into the global list.
-    {
-        #define LOAD_SYMBOLS(dst, src) do { \
-            for (size_t i = 0; i < src.count; i++) { \
-                VEC_PUSH(dst, ((GlobalEntry){ \
-                    .path = mod->source->path, \
-                    .name = src.at[i].name \
-                }), wc->arena); \
-            }} while (0)
-        
-        LOAD_SYMBOLS(wc->g_ints, wir->g_ints);
-        LOAD_SYMBOLS(wc->g_strs, wir->g_strs);
-        LOAD_SYMBOLS(wc->g_cevs, wir->g_cevs);
-        LOAD_SYMBOLS(wc->g_udbs, wir->g_udbs);
-        LOAD_SYMBOLS(wc->g_cdbs, wir->g_cdbs);
-        
-        #undef LOAD_SYMBOLS
-    }
+static void compile_wir(WIRCompiler *wc) {
+    WIR *wir = wc->wir;
 
     // Process global variables.
     for (size_t i = 0; i < wir->g_ints.count; i++)
@@ -1532,7 +1502,7 @@ static void compile_wir(WIRCompiler *wc, Module *mod) {
         // Then compile the code into commands.
         CommonEvent cev;
         cev_init(&cev, wc->arena);
-        cev.COMMON_NAME = wcev->name;
+        cev.COMMON_NAME = wcev->qualifier.name;
         wc->cev = &cev;
         wc->indent = 0;
 
@@ -1567,13 +1537,9 @@ static bool validate(WIRCompiler *wc, WIRCev *wcev) {
     return true;
 }
 
-GameData wir_pass(VEC_Module *modules, Arena *arena) {
+GameData wir_pass(WIR *wir, Arena *arena) {
     WIRCompiler wc = {
-        .g_ints = VEC_EMPTY,
-        .g_strs = VEC_EMPTY,
-        .g_cevs = VEC_EMPTY,
-        .g_udbs = VEC_EMPTY,
-        .g_cdbs = VEC_EMPTY,
+        .wir = wir,
         .arena = arena,
         .had_error = false
     };
@@ -1587,12 +1553,11 @@ GameData wir_pass(VEC_Module *modules, Arena *arena) {
     wc.gd.sdb.at[SDB_NORMAL_VAR_DBTYPE].data.count = 0;
     wc.gd.sdb.at[SDB_STRING_VAR_DBTYPE].data.count = 0;
     
-    for (size_t i = 0; i < modules->count; i++)
-        compile_wir(&wc, &modules->at[i]);
+    compile_wir(&wc);
 
     // Assign entry point.
-    for (size_t i = 0; i < wc.g_cevs.count; i++) {
-        if (sv_equals(wc.g_cevs.at[i].name, SV("main"))) {
+    for (size_t i = 0; i < wir->g_cevs.count; i++) {
+        if (sv_equals(wir->g_cevs.at[i].qualifier.name, SV("main"))) {
             wc.gd.entry = 500000 + i;
         }
     }
@@ -1680,7 +1645,7 @@ void print_wir(WIR *wir) {
         size_t stack_i = 0;
         size_t stack_s = 0;
 
-        printf(SV_FMT ":\n", SV_FMT_VAL(wir->g_cevs.at[cev].name));
+        printf(SV_FMT ":\n", SV_FMT_VAL(wir->g_cevs.at[cev].qualifier.name));
 
         for (size_t i = 0; i < arr.count; i++) {
             WIRInst *inst = arr.at[i];
@@ -1849,12 +1814,23 @@ void print_wir(WIR *wir) {
         printf("\n");
     }
 
+    for (size_t i = 0; i < wir->g_udbs.count; i++) {
+        WIRDB *db = &wir->g_udbs.at[i];
+
+        printf("(udb type) " SV_FMT ":\n", SV_FMT_VAL(db->qualifier.name));
+        for (size_t j = 0; j < db->fields.count; j++) {
+            WIRField *field = &db->fields.at[j];
+            
+            printf(SV_FMT "\n", SV_FMT_VAL(field->name));
+        }
+    }
+
     for (size_t i = 0; i < wir->g_cdbs.count; i++) {
         WIRDB *db = &wir->g_cdbs.at[i];
 
-        printf("(DB) " SV_FMT ":\n", SV_FMT_VAL(db->name));
+        printf("(cdb type) " SV_FMT ":\n", SV_FMT_VAL(db->qualifier.name));
         for (size_t j = 0; j < db->fields.count; j++) {
-            WIRVar *field = &db->fields.at[j];
+            WIRField *field = &db->fields.at[j];
             
             printf(SV_FMT "\n", SV_FMT_VAL(field->name));
         }

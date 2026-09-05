@@ -1,0 +1,20 @@
+apply "../bin";
+
+import "../_test.wod";
+
+cdbtype Test {
+    int a = 999;
+    int b = 2;
+    int c = 123;
+} = {
+    { .a = 1 },
+    hello,
+}
+
+cev void main() {
+    exit();
+}
+
+def cdbtype {
+    Test
+}

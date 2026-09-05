@@ -4,7 +4,11 @@ apply "../bin";
 
 import "../_test.wod";
 
-udb A {
+def udbtype {
+    A
+}
+
+udbtype A {
     int a;
     int b = 2;
     int c = 123;
@@ -12,7 +16,7 @@ udb A {
     { .a = 0 }
 }
 
-void main() {
+cev void main() {
     // Unlike with CDB types, reading from a nonexistent data element for a
     // UDB type will issue an error.
     //

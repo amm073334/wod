@@ -13,12 +13,6 @@
 #include "path.h"
 #include "module.h"
 
-static void print_all_wirs(VEC_Module *modules) {
-    for (size_t i = 0; i < modules->count; i++) {
-        print_wir(modules->at[i].wir);
-    }
-}
-
 int main(int argc, const char *argv[]) {
     if (argc != 2) {
         fprintf(stderr, "Usage: %s <file>\n", argv[0]);
@@ -38,10 +32,10 @@ int main(int argc, const char *argv[]) {
 
     constexpr_pass(&modules, &arena);
 
-    ast2wir_pass(&modules, &arena);
+    WIR wir = ast2wir_pass(&modules, &arena);
+    print_wir(&wir);
 
     GameData gd = wir_pass(&modules, &arena);
-    print_all_wirs(&modules);
 
     // If an `apply` directory is specified, then apply the text output there.
     // Otherwise, just compile output into the directory the source file is in.

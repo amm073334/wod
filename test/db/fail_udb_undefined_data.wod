@@ -1,0 +1,24 @@
+apply "../bin";
+
+import "../_test.wod";
+
+udbtype Test {
+    int a = 999;
+    int b = 2;
+    int c = 123;
+} = {
+    hello,
+    bello
+}
+
+dbdata Test hello {
+    .a = 1
+}
+
+cev void main() {
+    exit();
+}
+
+def udbtype {
+    Test
+}

@@ -1,0 +1,22 @@
+// EXPECT: 999
+
+apply "../bin";
+
+import "../_test.wod";
+
+cdbtype Test {
+    int a = 999;
+    int b = 2;
+    int c = 123;
+} = {
+    {},
+}
+
+def cdbtype {
+    Test
+}
+
+cev void main() {
+    output("${Test[0].a}");
+    exit();
+}

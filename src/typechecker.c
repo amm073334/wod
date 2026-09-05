@@ -835,6 +835,7 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
 
             Symbol *field_sym = try_insert_vardecl(tc, field);
             if (field_sym) {
+                field_sym->local_offset = i;
                 if (field->initializer) {
                     if (!field->initializer->type.is_constexpr)
                         tc_error(tc, &field->initializer->tok,
@@ -860,7 +861,9 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
                     .db_type = s->sym,
                 }, s->data.at[i]->base.tok, !s->data.at[i]->no_body, tc->arena);
 
-                if (!sym) {
+                if (sym) {
+                    sym->local_offset = i;
+                } else {
                     tc_error(tc, &s->data.at[i]->base.tok, SV("Duplicate data name."));
                 }
             }
@@ -879,40 +882,40 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
         StmtDBDataDecl *s = (StmtDBDataDecl *)stmt;
 
         // Check that specified UDB type exists.
-        Symbol *dbtype_sym = find_including_imports(tc, tc->current_env, s->db_type.text);
+        s->dbtype_sym = find_including_imports(tc, tc->current_env, s->db_type.text);
 
-        if (!dbtype_sym) {
+        if (!s->dbtype_sym) {
             tc_error(tc, &s->db_type, SV("Undeclared or ambiguous identifier."));
             return;
         }
 
-        if (dbtype_sym->type.basetype != TYPE_DBTYPE) {
+        if (s->dbtype_sym->type.basetype != TYPE_DBTYPE) {
             tc_error(tc, &s->db_type, SV("Name does not correspond to a DB type."));
             return;
         }
 
-        if (dbtype_sym->type.db_kind != DB_UDB) {
+        if (s->dbtype_sym->type.db_kind != DB_UDB) {
             tc_error(tc, &s->db_type, SV("Name does not correspond to a UDB type."));
             return;
         }
 
         // Check that data element is actually present in the UDB type.
-        Symbol *data_sym = env_find(dbtype_sym->type.db_named_data, s->data->name);
-        if (!data_sym) {
+        s->data_sym = env_find(s->dbtype_sym->type.db_named_data, s->data->name);
+        if (!s->data_sym) {
             tc_error(tc, &s->data->base.tok, SV("No such data element listed in UDB."));
             return;
         }
 
         // Check that data element is not already defined.
-        if (data_sym->defined) {
+        if (s->data_sym->defined) {
             tc_error(tc, &s->data->base.tok, SV("Data element is already defined elsewhere."));
             return;
         }
 
-        data_sym->defined = true;
+        s->data_sym->defined = true;
 
         // Check that contents are sane.
-        check_data_element(tc, dbtype_sym, s->data);
+        check_data_element(tc, s->dbtype_sym, s->data);
 
         return;
     }

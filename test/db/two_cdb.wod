@@ -4,20 +4,20 @@ apply "../bin";
 
 import "../_test.wod";
 
-cdb A {
+cdbtype A {
     int a;
     int b = 2;
     int c = 123;
 } = { default }
 
-cdb B {
+cdbtype B {
     int a;
     int b = 21;
     int c;
     str asdf;
 } = { default }
 
-void main() {
+cev void main() {
     B[23].asdf = "hmm";
     A[5].b = 23;
     A[20].c = 9;
@@ -25,4 +25,8 @@ void main() {
 
     output("${B[A[5].b].asdf} ${B[299].b + A[99].c + B[A[B[2].b - 1].c].c}");
     exit();
+}
+
+def cdbtype {
+    B, A
 }

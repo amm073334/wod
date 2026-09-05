@@ -285,6 +285,9 @@ typedef struct {
     Stmt base;
     Token db_type;
     ExprDBDataElem *data;
+
+    Symbol *dbtype_sym;
+    Symbol *data_sym;
 } StmtDBDataDecl;
 
 // Return a topological sort of all modules, or an empty vector

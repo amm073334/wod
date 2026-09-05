@@ -3,7 +3,8 @@
 
 #include "common.h"
 #include "module.h"
+#include "wir.h"
 
-void ast2wir_pass(VEC_Module *modules, Arena *arena);
+WIR ast2wir_pass(VEC_Module *modules, Arena *arena);
 
 #endif // WOD_AST2WIR_H_
