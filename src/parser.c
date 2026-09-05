@@ -112,7 +112,7 @@ static void synchronize(Parser *parser) {
             case TOK_VOID:
             case TOK_INT:
             case TOK_BOOL:
-            case TOK_CDB:
+            case TOK_CDBTYPE:
             case TOK_IF:
             case TOK_LOOP:
             case TOK_FOR:
@@ -908,7 +908,7 @@ static Stmt *db_type_decl(Parser *parser) {
     consume(parser, TOK_LEFT_BRACE, SV("Expected '{' before DB data list."));
     
     VEC_PTR_ExprDBDataElem data = VEC_EMPTY;
-    if (db.type == TOK_UDB) {
+    if (db.type == TOK_UDBTYPE) {
         data = udb_data_list(parser);
     } else {
         data = cdb_data_list(parser);
@@ -925,10 +925,10 @@ static Stmt *db_type_decl(Parser *parser) {
 }
 
 static Stmt *def_db(Parser *parser) {
-    if (!match(parser, TOK_UDB)
-        && !match(parser, TOK_CDB)) {
+    if (!match(parser, TOK_UDBTYPE)
+        && !match(parser, TOK_CDBTYPE)) {
     
-        error_current(parser, SV("Expected 'udb' or 'cdb'."));
+        error_current(parser, SV("Expected 'udbtype' or 'cdbtype'."));
     }
 
     Token db = parser->previous;
@@ -945,7 +945,7 @@ static Stmt *def_db(Parser *parser) {
 
     StmtDefDB *stmt;
     ALLOC_NODE(stmt, db, StmtDefDB,
-        (StmtDefDB){ .db = db.type == TOK_UDB ? DB_UDB : DB_CDB,
+        (StmtDefDB){ .db = db.type == TOK_UDBTYPE ? DB_UDB : DB_CDB,
             .db_types = list, .symbols = VEC_EMPTY });
 
     return stmt;
@@ -974,8 +974,8 @@ static Stmt *db_data_decl(Parser *parser) {
 }
 
 static Stmt *top_decl(Parser *parser) {
-    if (match(parser, TOK_CDB) ||
-        match(parser, TOK_UDB)) {
+    if (match(parser, TOK_CDBTYPE) ||
+        match(parser, TOK_UDBTYPE)) {
         return db_type_decl(parser);
     }
 

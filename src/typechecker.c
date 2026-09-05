@@ -848,7 +848,7 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
         }
 
         // For UDB types, data elements can have names. Keep track of named elements.
-        if (s->db.type == TOK_UDB) {
+        if (s->db.type == TOK_UDBTYPE) {
             tc->current_env = s->sym->type.db_named_data;
             for (size_t i = 0; i < s->data.count; i++) {
                 if (sv_is_null(s->data.at[i]->name)) continue;
@@ -1058,8 +1058,8 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
 
             int db_kind = 0;
             switch (s->db.type) {
-                case TOK_UDB: db_kind = DB_UDB; break;
-                case TOK_CDB: db_kind = DB_CDB; break;
+                case TOK_UDBTYPE: db_kind = DB_UDB; break;
+                case TOK_CDBTYPE: db_kind = DB_CDB; break;
                 default: UNREACHABLE;
             }
 

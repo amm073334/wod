@@ -903,7 +903,7 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
     }
     case NODE_StmtDBTypeDecl: {
         StmtDBTypeDecl *s = (StmtDBTypeDecl *)stmt;
-        VEC_WIRDB *g = s->db.type == TOK_UDB ?
+        VEC_WIRDB *g = s->db.type == TOK_UDBTYPE ?
             &aw->wir->g_udbs : &aw->wir->g_cdbs;
 
         VEC_PUSH(*g,
