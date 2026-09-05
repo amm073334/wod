@@ -4,7 +4,7 @@ apply "../bin";
 
 import "../_test.wod";
 
-str hello(int a, str s, int b) {
+cev str hello(int a, str s, int b) {
     // These variables are intentionally unused.
     int _m = 1234;
     str _t = "asddf";
@@ -12,7 +12,7 @@ str hello(int a, str s, int b) {
     return "${s} ${a - b}";
 }
 
-void main() {
+cev void main() {
     int a = 2;
     int b = 9;
     str s = "${a * b}";

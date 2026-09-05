@@ -8,7 +8,7 @@ static ExprIntLit *make_int(Arena *arena, Token tok, int32_t value) {
     out->base.type = (WodType){
         .basetype = TYPE_INT,
         .is_assignable = false,
-        .is_compile_time = true
+        .is_constexpr = true
     };
     out->value = value;
     return out;
@@ -21,7 +21,7 @@ static ExprStrLit *make_str(Arena *arena, Token tok, StringView value) {
     out->base.type = (WodType){
         .basetype = TYPE_STR,
         .is_assignable = false,
-        .is_compile_time = true
+        .is_constexpr = true
     };
     out->value = value;
     return out;
@@ -34,7 +34,7 @@ static ExprBoolLit *make_bool(Arena *arena, Token tok, bool value) {
     out->base.type = (WodType){
         .basetype = TYPE_BOOL,
         .is_assignable = false,
-        .is_compile_time = true
+        .is_constexpr = true
     };
     out->value = value;
     return out;
@@ -48,7 +48,7 @@ static Expr *visit_Expr(Arena *arena, Expr *expr) {
     switch (expr->kind) {
     case NODE_ExprVar: {
         ExprVar *e = (ExprVar *)expr;
-        if (expr->type.is_compile_time) {
+        if (expr->type.is_constexpr) {
             Symbol* sym = env_find_recursive(expr->env, e->name);
             assert(sym);
 
@@ -77,8 +77,8 @@ static Expr *visit_Expr(Arena *arena, Expr *expr) {
         e->left = visit_Expr(arena, e->left);
         e->right = visit_Expr(arena, e->right);
 
-        if (!e->left->type.is_compile_time
-            || !e->right->type.is_compile_time)
+        if (!e->left->type.is_constexpr
+            || !e->right->type.is_constexpr)
             return expr;
 
         if (e->left->kind == NODE_ExprIntLit) {
@@ -118,7 +118,7 @@ static Expr *visit_Expr(Arena *arena, Expr *expr) {
         ExprUnary *e = (ExprUnary *)expr;
         e->right = visit_Expr(arena, e->right);
         
-        if (!e->right->type.is_compile_time)
+        if (!e->right->type.is_constexpr)
             return expr;
 
         switch (e->op.type) {
@@ -146,10 +146,22 @@ static Expr *visit_Expr(Arena *arena, Expr *expr) {
     case NODE_ExprIntLit:
     case NODE_ExprStrLit:
     case NODE_ExprBoolLit:
-        assert(expr->type.is_compile_time);
+        assert(expr->type.is_constexpr);
         return expr;
     case NODE_ExprInterp:
         return expr;
+    case NODE_ExprStructLitField: {
+        ExprStructLitField *e = (ExprStructLitField *)expr;
+        e->value = visit_Expr(arena, e->value);
+        return expr;
+    }
+    case NODE_ExprDBDataElem: {
+        ExprDBDataElem *e = (ExprDBDataElem *)expr;
+        for (size_t i = 0; i < e->fields.count; i++) {
+            visit_Expr(arena, e->fields.at[i]);
+        }
+        return expr;
+    }
     }
 
     return NULL;
@@ -182,8 +194,8 @@ static void visit_Stmt(Arena *arena, Stmt *stmt) {
             s->initializer = visit_Expr(arena, s->initializer);
         return;
     }
-    case NODE_StmtFuncDecl: {
-        StmtFuncDecl *s = (StmtFuncDecl *)stmt;
+    case NODE_StmtCevDecl: {
+        StmtCevDecl *s = (StmtCevDecl *)stmt;
         for (size_t i = 0; i < s->body.count; i++)
             visit_Stmt(arena, s->body.at[i]);
         return;
@@ -248,12 +260,6 @@ static void visit_Stmt(Arena *arena, Stmt *stmt) {
             s->str_operands.at[i] = visit_Expr(arena, s->str_operands.at[i]);
         return;
     }
-    case NODE_StmtDBDecl: {
-        StmtDBDecl *s = (StmtDBDecl *)stmt;
-        for (size_t i = 0; i < s->fields.count; i++)
-            visit_Stmt(arena, (Stmt *)s->fields.at[i]);
-        return;
-    }
     case NODE_StmtCall: {
         StmtCall *s = (StmtCall *)stmt;
         visit_Expr(arena, (Expr *)s->call);
@@ -267,6 +273,20 @@ static void visit_Stmt(Arena *arena, Stmt *stmt) {
     case NODE_StmtDec: {
         StmtDec *s = (StmtDec *)stmt;
         s->expr = visit_Expr(arena, s->expr);
+        return;
+    }
+    case NODE_StmtDBTypeDecl: {
+        StmtDBTypeDecl *s = (StmtDBTypeDecl *)stmt;
+        for (size_t i = 0; i < s->fields.count; i++)
+            visit_Stmt(arena, (Stmt *)s->fields.at[i]);
+
+        for (size_t i = 0; i < s->data.count; i++)
+            visit_Expr(arena, (Expr *)s->data.at[i]);
+        return;
+    }
+    case NODE_StmtDBDataDecl: {
+        StmtDBDataDecl *s = (StmtDBDataDecl *)stmt;
+        visit_Expr(arena, (Expr *)s->data);
         return;
     }
     }

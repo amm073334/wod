@@ -217,7 +217,7 @@ static void visit_db_field_decl(Ast2Wir *aw, Stmt *stmt, WIRDB *db) {
     };
 
     if (s->initializer) {
-        assert(s->initializer->type.is_compile_time);
+        assert(s->initializer->type.is_constexpr);
         wdbf.has_initializer = true;
 
         switch (s->initializer->kind) {
@@ -256,7 +256,7 @@ static WIROperand visit_Expr(Ast2Wir *aw, Expr *expr) {
     case NODE_ExprVar: {
         ExprVar *e = (ExprVar *)expr;
 
-        if (expr->type.is_compile_time) {
+        if (expr->type.is_constexpr) {
             switch (expr->type.basetype) {
             case TYPE_INT: return WIR_IMM_I(e->sym->const_i);
             case TYPE_STR: return WIR_IMM_S(e->sym->const_s);
@@ -366,11 +366,10 @@ static WIROperand visit_Expr(Ast2Wir *aw, Expr *expr) {
                     dest = tmp_str(aw);
                 else
                     dest = tmp_int(aw);
-                e->sym->type.db_type->db_kind;
-                e->sym->local_offset;
+
                 WIRInst_DBLoad *inst;
                 ALLOC_WIR(inst, WIRInst_DBLoad, (WIRInst_DBLoad){
-                    .db_kind = e->left->type.db_type->db_kind,
+                    .db_kind = e->left->type.db_type->type.db_kind,
                     .dst = dest,
                     .assign = WIR_ASSIGN_EQ,
                     .db_type = *left.as.dbdata.type_id,
@@ -705,10 +704,9 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
         }
         return;
     }
-    case NODE_StmtFuncDecl: {
-        StmtFuncDecl *s = (StmtFuncDecl *)stmt;
+    case NODE_StmtCevDecl: {
+        StmtCevDecl *s = (StmtCevDecl *)stmt;
         
-        s->sym->local_offset = aw->wir->g_cevs.count;
         VEC_PUSH(aw->wir->g_cevs,
             ((WIRCev){
                 .name = s->name,
@@ -719,6 +717,8 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
             }), aw->arena);
 
         open_frame(aw);
+        for (size_t i = 0; i < s->params.count; i++)
+            visit_Stmt(aw, (Stmt *)s->params.at[i]);
         for (size_t i = 0; i < s->body.count; i++)
             visit_Stmt(aw, s->body.at[i]);
         close_frame(aw);
@@ -901,8 +901,8 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
 
         return;
     }
-    case NODE_StmtDBDecl: {
-        StmtDBDecl *s = (StmtDBDecl *)stmt;
+    case NODE_StmtDBTypeDecl: {
+        StmtDBTypeDecl *s = (StmtDBTypeDecl *)stmt;
         VEC_WIRDB *g = s->db.type == TOK_UDB ?
             &aw->wir->g_udbs : &aw->wir->g_cdbs;
 

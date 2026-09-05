@@ -7,7 +7,7 @@ cdb TestCDB {
     int b = 2;
     str c = "asdf";
     int d = 123;
-}
+} = { default }
 
 void main() {
     output("${TestCDB[0].a + TestCDB[1].b + TestCDB[3].c}");

@@ -8,14 +8,14 @@ cdb A {
     int a;
     int b = 2;
     int c = 123;
-}
+} = { default }
 
 cdb B {
     int a;
     int b = 21;
     int c;
     str asdf;
-}
+} = { default }
 
 void main() {
     B[23].asdf = "hmm";

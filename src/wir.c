@@ -1,4 +1,5 @@
 #include "wir.h"
+#include "sdb.h"
 
 #define CSELF_BASE 1600000
 #define CSELF_INT_MAX  1600099
@@ -9,8 +10,9 @@
 #define NORMAL_VAR_BASE 2000000
 #define STRING_VAR_BASE 3000000
 #define CEV_BASE 500000
-#define UDB_BASE 10000000
-#define CDB_BASE 11000000
+
+#define SDB_STRING_VAR_DBTYPE 4
+#define SDB_NORMAL_VAR_DBTYPE 14
 
 typedef struct GlobalEntry {
     StringView path;
@@ -46,6 +48,16 @@ typedef struct WIRCompiler {
 static void wc_error(WIRCompiler *wc, StringView msg) {
     wc->had_error = true;
     (void) msg;
+}
+
+static size_t push_sdb_int(WIRCompiler *wc, StringView name) {
+    VEC_PUSH(wc->gd.sdb.at[SDB_NORMAL_VAR_DBTYPE].data, ((DBData){.name = name, .values = VEC_EMPTY}), wc->arena);
+    return wc->gd.sdb.at[SDB_NORMAL_VAR_DBTYPE].data.count - 1;
+}
+
+static size_t push_sdb_str(WIRCompiler *wc, StringView name) {
+    VEC_PUSH(wc->gd.sdb.at[SDB_STRING_VAR_DBTYPE].data, ((DBData){.name = name, .values = VEC_EMPTY}), wc->arena);
+    return wc->gd.sdb.at[SDB_STRING_VAR_DBTYPE].data.count - 1;
 }
 
 bool op_is_string(WIROperand wop) {
@@ -1460,8 +1472,8 @@ static void compile_dbs(WIRCompiler *wc, VEC_WIRDB *g, VEC_DBType *dbs) {
                     DBITEM_INT : DBITEM_STR,
                 .ITEMNAME = field->name,
                 .VMEMO = SV(""),
-                .CHOICE_NAME = SV(""),
-                .CHOICE_VAL = 0,
+                .CHOICE_NAME = VEC_EMPTY,
+                .CHOICE_VAL = VEC_EMPTY,
                 .DEFAULT_VAL = field->has_initializer ?
                     resolve(wc, field->initializer) : 0 
             }), wc->arena);
@@ -1495,9 +1507,10 @@ static void compile_wir(WIRCompiler *wc, Module *mod) {
     }
 
     // Process global variables.
-    for (size_t i = 0; i < wir->g_ints.count; i++) {
-        wc->gd.
-    }
+    for (size_t i = 0; i < wir->g_ints.count; i++)
+        push_sdb_int(wc, wir->g_ints.at[i].name);
+    for (size_t i = 0; i < wir->g_strs.count; i++)
+        push_sdb_str(wc, wir->g_strs.at[i].name);
 
     // Process every DB.
     compile_dbs(wc, &wir->g_udbs, &wc->gd.udb);
@@ -1565,6 +1578,14 @@ GameData wir_pass(VEC_Module *modules, Arena *arena) {
         .had_error = false
     };
     gd_init(&wc.gd);
+
+    // Using SDB from version 3.713.
+    wc.gd.sdb = sdb_3713(arena);
+
+    // By default, the variable-related SDB types already have a few empty elements.
+    // Clear them out for simplicity.
+    wc.gd.sdb.at[SDB_NORMAL_VAR_DBTYPE].data.count = 0;
+    wc.gd.sdb.at[SDB_STRING_VAR_DBTYPE].data.count = 0;
     
     for (size_t i = 0; i < modules->count; i++)
         compile_wir(&wc, &modules->at[i]);

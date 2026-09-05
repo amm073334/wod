@@ -31,17 +31,18 @@ typedef enum {
     TOK_DOLLAR_BRACE,
 
     // Keywords.
-    TOK_IMPORT, TOK_AS,
-    TOK_VOID, TOK_INT, TOK_STR, TOK_BOOL, TOK_CONST, TOK_INLINE,
+    TOK_IMPORT, TOK_CEV,
+    TOK_VOID, TOK_INT, TOK_STR, TOK_BOOL, TOK_CONST, TOK_MACRO,
     TOK_IF, TOK_ELSE, TOK_LOOP, TOK_RETURN, TOK_CONTINUE, TOK_BREAK,
     TOK_WHILE, TOK_FOR,
     TOK_TRUE, TOK_FALSE,
     TOK_CMD,
-    TOK_UDB, TOK_CDB, TOK_CEVTYPE,
+    TOK_UDB, TOK_CDB, TOK_DEFAULT, TOK_DBDATA, TOK_CEVTYPE,
     TOK_APPLY, TOK_EXADDR,
+    TOK_ENUM, TOK_DEF, TOK_SPACE,
 
     // Literals.
-    TOK_IDENTIFIER, TOK_NUMBER, TOK_STRING,
+    TOK_IDENTIFIER, TOK_MACRO_IDENT, TOK_NUMBER, TOK_STRING,
 
     // Used for string interpolation.
     // Idea borrowed from https://github.com/wren-lang/wren/blob/main/src/vm/wren_compiler.c
@@ -60,6 +61,12 @@ typedef struct {
 typedef struct {
     Source source;
     
+    // Keep track of interpolation depth with a simple counter.
+    // This implementation relies on the assumption that there cannot be a
+    // closing bracket in an expression, and therefore a closing bracket
+    // encountered during interpolation must be for ending interpolation.
+    // This would need to be changed if something like struct literals were to be
+    // supported.
     size_t interpolation_depth;
 
     const char *start;

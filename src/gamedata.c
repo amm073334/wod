@@ -102,6 +102,7 @@ void gd_init(GameData *gd) {
     VEC_INIT(gd->cevs);
     VEC_INIT(gd->udb);
     VEC_INIT(gd->cdb);
+    VEC_INIT(gd->sdb);
     gd->entry = 500000;
 }
 

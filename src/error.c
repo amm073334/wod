@@ -16,7 +16,7 @@ static const char *get_nth_line(Source source, size_t line) {
     return NULL;
 }
 
-void error(Location loc, size_t len, StringView message) {
+void error(Location loc, StringView message) {
     const char *line_start = get_nth_line(loc.source, loc.line);
 
     const char *line_end = line_start;
@@ -28,7 +28,7 @@ void error(Location loc, size_t len, StringView message) {
     fprintf(stderr, "%6zu | %.*s\n", loc.line,
         (int)(line_end - line_start), line_start);
     fprintf(stderr, "%*s", 8 + (int)loc.column, "");
-    for (size_t i = 0; i < len; i++) {
+    for (size_t i = 0; i < loc.length; i++) {
         fprintf(stderr, "^");
     }
     fprintf(stderr, "\n");

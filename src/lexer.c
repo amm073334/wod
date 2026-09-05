@@ -11,13 +11,13 @@ typedef struct {
 
 static const Keyword keywords[] = {
     {.name = "import",   .type = TOK_IMPORT},
-    {.name = "as",       .type = TOK_AS},
+    {.name = "cev",      .type = TOK_CEV},
     {.name = "void",     .type = TOK_VOID},
     {.name = "int",      .type = TOK_INT},
     {.name = "str",      .type = TOK_STR},
     {.name = "bool",     .type = TOK_BOOL},
     {.name = "const",    .type = TOK_CONST},
-    {.name = "inline",   .type = TOK_INLINE},
+    {.name = "macro",    .type = TOK_MACRO},
     {.name = "if",       .type = TOK_IF},
     {.name = "else",     .type = TOK_ELSE},
     {.name = "loop",     .type = TOK_LOOP},
@@ -31,9 +31,13 @@ static const Keyword keywords[] = {
     {.name = "cmd",      .type = TOK_CMD},
     {.name = "udb",      .type = TOK_UDB},
     {.name = "cdb",      .type = TOK_CDB},
+    {.name = "dbdata",   .type = TOK_DBDATA},
     {.name = "cevtype",  .type = TOK_CEVTYPE},
     {.name = "apply",    .type = TOK_APPLY},
     {.name = "exaddr",   .type = TOK_EXADDR},
+    {.name = "enum",     .type = TOK_ENUM},
+    {.name = "def",      .type = TOK_DEF},
+    {.name = "default",  .type = TOK_DEFAULT},
 };
 
 void lexer_init(Lexer *lexer, Source source) {
@@ -100,7 +104,8 @@ static Token make_token(Lexer *lexer, TokenType type) {
         .loc = {
             .source = lexer->source,
             .line = lexer->line,
-            .column = lexer->col - len
+            .column = lexer->col - len,
+            .length = len
         },
     };
 }
@@ -114,6 +119,7 @@ static Token error_token(Lexer *lexer, const char *message) {
             .source = lexer->source,
             .line = lexer->line,
             .column = lexer->col - 1,
+            .length = 1
         },
     };
 }
@@ -162,7 +168,7 @@ static TokenType identifier_type(Lexer *lexer) {
             return keywords[i].type;
         }
     }
-    return TOK_IDENTIFIER;
+    return lexer->start[0] == '$' ? TOK_MACRO_IDENT : TOK_IDENTIFIER;
 }
 
 static Token identifier(Lexer *lexer) {
@@ -223,7 +229,7 @@ Token scan_token(Lexer *lexer) {
         return make_token(lexer, TOK_EOF);
 
     char c = advance(lexer);
-    if (is_alpha(c)) return identifier(lexer);
+    if (is_alpha(c) || c == '$') return identifier(lexer);
     if (is_dec_digit(c)) {
         if (c == '0') {
             if (match(lexer, 'x'))

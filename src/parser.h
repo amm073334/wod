@@ -17,6 +17,8 @@ typedef enum {
     NODE_ExprStrLit,
     NODE_ExprBoolLit,
     NODE_ExprInterp,
+    NODE_ExprStructLitField,
+    NODE_ExprDBDataElem,
     // NODE_ExprArrayLit,
 } ExprKind;
 
@@ -33,7 +35,7 @@ VEC_PTR_DEF(Expr);
 typedef enum {
     NODE_StmtAssign,
     NODE_StmtVarDecl,
-    NODE_StmtFuncDecl,
+    NODE_StmtCevDecl,
     NODE_StmtBlock,
     NODE_StmtReturn,
     NODE_StmtIf,
@@ -43,10 +45,13 @@ typedef enum {
     NODE_StmtContinue,
     NODE_StmtBreak,
     NODE_StmtCmd,
-    NODE_StmtDBDecl,
     NODE_StmtCall,
     NODE_StmtInc,
     NODE_StmtDec,
+    NODE_StmtDefDB,
+    // NODE_StmtDefSpace,
+    NODE_StmtDBTypeDecl,
+    NODE_StmtDBDataDecl,
 } StmtKind;
 
 typedef struct Stmt {
@@ -61,9 +66,6 @@ VEC_PTR_DEF(Stmt);
 typedef struct Import {
     Token tok;
     StringView path;
-
-    // SV_NULL means unqualified.
-    StringView alias;
 } Import;
 VEC_DEF(Import);
 
@@ -80,6 +82,7 @@ typedef struct {
 
     Symbol *sym;
 } ExprVar;
+VEC_PTR_DEF(ExprVar);
 
 typedef struct {
     Expr base;
@@ -134,6 +137,21 @@ typedef struct {
     VEC_PTR_Expr value;
 } ExprArrayLit;
 
+typedef struct {
+    Expr base;
+    StringView name;
+    Expr *value;
+} ExprStructLitField;
+VEC_PTR_DEF(ExprStructLitField);
+
+typedef struct {
+    Expr base;
+    StringView name;
+    VEC_PTR_ExprStructLitField fields;
+    bool no_body;
+} ExprDBDataElem;
+VEC_PTR_DEF(ExprDBDataElem);
+
 typedef struct ExprInterp ExprInterp;
 struct ExprInterp {
     Expr base;
@@ -142,7 +160,7 @@ struct ExprInterp {
     
     // Should either be a string literal or
     // another interpolation node.
-    Expr* next;
+    Expr *next;
 };
 
 typedef struct {
@@ -171,11 +189,10 @@ typedef struct {
     StringView name;
     VEC_PTR_StmtVarDecl params;
     VEC_PTR_Stmt body;
-    bool is_inline;
     bool is_exaddr;
 
     Symbol *sym;
-} StmtFuncDecl;
+} StmtCevDecl;
 
 typedef struct {
     Stmt base;
@@ -232,15 +249,6 @@ typedef struct {
 
 typedef struct {
     Stmt base;
-    Token db;
-    StringView name;
-    VEC_PTR_StmtVarDecl fields;
-
-    Symbol *sym;
-} StmtDBDecl;
-
-typedef struct {
-    Stmt base;
     ExprCall *call;
 } StmtCall;
 
@@ -253,6 +261,31 @@ typedef struct {
     Stmt base;
     Expr *expr;
 } StmtDec;
+
+VEC_DEF(Token);
+typedef struct {
+    Stmt base;
+    DBKind db;
+    VEC_Token db_types;
+
+    VEC_PTR_Symbol symbols;
+} StmtDefDB;
+
+typedef struct {
+    Stmt base;
+    Token db;
+    StringView name;
+    VEC_PTR_StmtVarDecl fields;
+    VEC_PTR_ExprDBDataElem data;
+
+    Symbol *sym;
+} StmtDBTypeDecl;
+
+typedef struct {
+    Stmt base;
+    Token db_type;
+    ExprDBDataElem *data;
+} StmtDBDataDecl;
 
 // Return a topological sort of all modules, or an empty vector
 // if an error occurred.

@@ -14,7 +14,7 @@ cdb TestCDB {
     int a = 999;
     int b = 2;
     int c = 123;
-}
+} = { default }
 
 void main() {
     output("${TestCDB[0].a + TestCDB[1].b + TestCDB[3].c}");

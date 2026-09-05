@@ -8,7 +8,7 @@ typedef enum {
     TYPE_NONE,
     TYPE_ERROR,
 
-    // Uses is_compile_time.
+    // Uses is_constexpr.
     TYPE_VOID,
     TYPE_INT,
     TYPE_STR,
@@ -18,7 +18,7 @@ typedef enum {
     TYPE_DBDATA,
     TYPE_ARRAY,
 
-    // Doesn't use is_compile_time.
+    // Doesn't use is_constexpr.
     TYPE_DBTYPE,
     TYPE_CEVTYPE,
     TYPE_MODULE,
@@ -29,6 +29,7 @@ VEC_DEF(WodType);
 
 typedef struct Symbol Symbol;
 VEC_DEF(Symbol);
+VEC_PTR_DEF(Symbol);
 
 typedef struct Environment Environment;
 struct Environment {
@@ -43,8 +44,8 @@ struct WodType {
     // If can belong on the left side of an assignment.
     bool is_assignable;
 
-    // If constant value, inline function, etc.
-    bool is_compile_time;
+    // If constant value.
+    bool is_constexpr;
 
     union {
         // If TYPE_ARRAY:
@@ -69,11 +70,12 @@ struct WodType {
         // If TYPE_DBTYPE:
         struct {
             DBKind db_kind;
-            Environment *db_env;
+            Environment *db_fields;
+            Environment *db_named_data;
         };
 
         // If TYPE_DBDATA:
-        WodType *db_type;
+        Symbol *db_type;
 
         // If TYPE_MODULE:
         Environment *module_env;
@@ -85,9 +87,17 @@ struct Symbol {
 
     StringView name;
     WodType type;
-    
-    // For use in printing redeclaration errors.
-    Location declared_at;
+
+    // Whether or not the symbol was declared with an initializer or
+    // otherwise defined at some point.
+    // Some checks rely on this information, for example to make sure
+    // that a DB data element is properly defined at some point
+    // in the program, even if that definition is deferred after
+    // declaration.
+    bool defined;
+
+    // For error reporting.
+    Token declaration;
 
     // Path of the file the symbol is in. Only valid if symbol is
     // top-level; otherwise is `SV_NULL`.
@@ -115,7 +125,7 @@ struct Symbol {
 
 void env_init(Environment *env);
 Environment *env_new(Environment *parent, Arena *arena);
-Symbol *env_insert(Environment *env, StringView name, WodType type, Arena *arena);
+Symbol *env_insert(Environment *env, StringView name, WodType type, Token declaration, bool defined, Arena *arena);
 Symbol *env_find(Environment *env, StringView name);
 Symbol *env_find_recursive(Environment *env, StringView name);
 

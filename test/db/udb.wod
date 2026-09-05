@@ -8,6 +8,8 @@ udb A {
     int a;
     int b = 2;
     int c = 123;
+} = {
+    { .a = 0 }
 }
 
 void main() {

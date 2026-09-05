@@ -4,13 +4,15 @@
 #include "path.h"
 #include "error.h"
 
+VEC_PTR_DEF(StmtDBTypeDecl);
+
 typedef struct Typechecker {
     // Tracks environments for the current file.
     Environment *top_level_env;
     Environment *current_env;
 
     // Used to make sure that return types are right, etc.
-    StmtFuncDecl *current_func;
+    StmtCevDecl *current_func;
 
     // Used to make sure that continue/break statements are
     // only used within loops.
@@ -23,6 +25,18 @@ typedef struct Typechecker {
 
     Arena *arena;
     VEC_Module *modules;
+
+    // There should only be one of each of these across an entire project.
+    StmtDefDB *def_udb;
+    StmtDefDB *def_cdb;
+
+    // As the global def lists of all UDB/CDB types can be defined in any file, the compiler
+    // may not have encountered those lists before coming across the declaration
+    // of a DB type. Therefore, it needs to keep track of those declarations so that
+    // it can verify after checking all modules that every DB type declaration has a
+    // corresponding entry in the def list.
+    VEC_PTR_StmtDBTypeDecl all_udb_decls;
+    VEC_PTR_StmtDBTypeDecl all_cdb_decls;
 
     bool had_error;
 } Typechecker;
@@ -82,14 +96,14 @@ static bool wt_equal(WodType a, WodType b) {
             return true;
 
         case TYPE_DBDATA:
-            return wt_equal(*a.db_type, *b.db_type);
+            return wt_equal(a.db_type->type, b.db_type->type);
 
         case TYPE_ARRAY:
             return a.array_len == b.array_len 
                 && wt_equal(*a.array_of, *b.array_of);
 
         case TYPE_DBTYPE:
-            return a.db_env == b.db_env;
+            return a.db_fields == b.db_fields;
 
         case TYPE_CEVTYPE:
             UNIMPLEMENTED;
@@ -99,7 +113,7 @@ static bool wt_equal(WodType a, WodType b) {
 
 static void tc_error(Typechecker *tc, Token *token, StringView message) {
     tc->had_error = true;
-    error(token->loc, token->text.len, message);
+    error(token->loc, message);
 }
 
 static void tc_expr_error(Typechecker *tc, Expr *expr, Token *token, StringView message) {
@@ -108,9 +122,7 @@ static void tc_expr_error(Typechecker *tc, Expr *expr, Token *token, StringView 
     tc_error(tc, token, message);
 }
 
-static Symbol *find_including_imports(
-    Typechecker *tc, Environment *env, StringView name
-) {
+static Symbol *find_including_imports(Typechecker *tc, Environment *env, StringView name) {
     Symbol *sym = env_find_recursive(env, name);
     if (sym) return sym;
 
@@ -170,7 +182,7 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
         }
         
         if (e->left->type.basetype != TYPE_DBTYPE
-            && !e->index->type.is_compile_time) {
+            && !e->index->type.is_constexpr) {
 
             tc_expr_error(tc, expr, &e->index->tok,
                 SV("Currently, indices of array accesses must be constant expressions."));
@@ -181,13 +193,13 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
                 expr->type = (WodType){
                     .basetype = TYPE_DBDATA,
                     .is_assignable = false,
-                    .is_compile_time = false,
+                    .is_constexpr = false,
                     .db_type = &e->left->type
                 };
             } else {
                 expr->type = *e->left->type.array_of;
 
-                if (!expr->type.is_compile_time)
+                if (!expr->type.is_constexpr)
                     expr->type.is_assignable = true;
             }
         }
@@ -201,9 +213,12 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
 
         switch (e->left->type.basetype) {
         case TYPE_DBDATA: {
-            search = env_find(e->left->type.db_type->db_env, e->name.text);
+            search = env_find(e->left->type.db_type->type.db_fields, e->name.text);
             break;
         }
+
+        // NOTE: This case currently can't happen, since module aliases have been
+        //       disabled as a feature.
         case TYPE_MODULE:
             assert(e->left->type.module_env);
             search = env_find(e->left->type.module_env, e->name.text);
@@ -235,7 +250,7 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
         visit_Expr(tc, e->left);
         visit_Expr(tc, e->right);
 
-        if (e->left->type.basetype != e->left->type.basetype)
+        if (!wt_equal(e->left->type, e->right->type))
             tc_expr_error(tc, expr, &e->left->tok,
                 SV("Operands of binary operation are of different types."));
 
@@ -309,9 +324,9 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
             expr->type = (WodType){
                 .basetype = bt,
                 .is_assignable = false,
-                .is_compile_time =
-                    e->left->type.is_compile_time
-                    && e->right->type.is_compile_time
+                .is_constexpr =
+                    e->left->type.is_constexpr
+                    && e->right->type.is_constexpr
             };
         }
 
@@ -347,13 +362,13 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
                     .basetype = TYPE_PTR,
                     .ptr_to = &((ExprVar *)e->right)->sym->type,
                     .is_assignable = false,
-                    .is_compile_time = false
+                    .is_constexpr = false
                 };
             } else {
                 expr->type = (WodType){
                     .basetype = e->right->type.basetype,
                     .is_assignable = false,
-                    .is_compile_time = e->right->type.is_compile_time
+                    .is_constexpr = e->right->type.is_constexpr
                 };
             }
         }
@@ -388,7 +403,7 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
         expr->type = (WodType){
             .basetype = TYPE_INT,
             .is_assignable = false,
-            .is_compile_time = true
+            .is_constexpr = true
         };
         return;
     }
@@ -396,7 +411,7 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
         expr->type = (WodType){
             .basetype = TYPE_STR,
             .is_assignable = false,
-            .is_compile_time = true
+            .is_constexpr = true
         };
         return;
     }
@@ -404,7 +419,7 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
         expr->type = (WodType){
             .basetype = TYPE_BOOL,
             .is_assignable = false,
-            .is_compile_time = true
+            .is_constexpr = true
         };
         return;
     }
@@ -421,17 +436,20 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
         expr->type = (WodType){
             .basetype = TYPE_STR,
             .is_assignable = false,
-            .is_compile_time = false
+            .is_constexpr = false
         };
         return;
     }
+    case NODE_ExprStructLitField:
+    case NODE_ExprDBDataElem:
+        UNREACHABLE;
     }
 }
 
 static Symbol *try_insert_vardecl(Typechecker *tc, StmtVarDecl *s) {
     WodType ty = (WodType){
         .is_assignable = !s->is_const,
-        .is_compile_time = s->is_const
+        .is_constexpr = s->is_const
     };
 
     switch (s->type.type) {
@@ -448,7 +466,7 @@ static Symbol *try_insert_vardecl(Typechecker *tc, StmtVarDecl *s) {
         ty.basetype = TYPE_ARRAY;
         ty.array_of = array_of;
     }
-    s->sym = env_insert(tc->current_env, s->name, ty, tc->arena);
+    s->sym = env_insert(tc->current_env, s->name, ty, s->base.tok, s->initializer != NULL, tc->arena);
 
     if (!s->sym) {
         tc_error(tc, &s->base.tok, SV("Redeclaration of name."));
@@ -457,7 +475,7 @@ static Symbol *try_insert_vardecl(Typechecker *tc, StmtVarDecl *s) {
 
     if (s->array_length) {
         visit_Expr(tc, s->array_length);
-        if (!s->array_length->type.is_compile_time)
+        if (!s->array_length->type.is_constexpr)
             tc_error(tc, &s->array_length->tok,
                 SV("Array length must be a constant expression."));
     }
@@ -468,16 +486,59 @@ static Symbol *try_insert_vardecl(Typechecker *tc, StmtVarDecl *s) {
 
     if (s->initializer) {
         visit_Expr(tc, s->initializer);
-        if (s->sym->type.basetype != s->initializer->type.basetype)
+        if (!wt_equal(s->sym->type, s->initializer->type))
             tc_error(tc, &s->initializer->tok,
                 SV("Initializer does not match declared type of variable."));
 
-        if (s->is_const && !s->initializer->type.is_compile_time)
+        if (s->is_const && !s->initializer->type.is_constexpr)
             tc_error(tc, &s->initializer->tok,
                 SV("Used non-constant expression to initialize 'const' variable."));
     }
 
     return s->sym;
+}
+
+static void check_data_element(Typechecker *tc, Symbol *db_type, ExprDBDataElem *data) {
+    assert(db_type->type.basetype == TYPE_DBTYPE);
+    
+    // Check that all listed fields/assignments are sane.
+    for (size_t j = 0; j < data->fields.count; j++) {
+        ExprStructLitField *field = data->fields.at[j];
+        Symbol *sym = env_find(db_type->type.db_fields, field->name);
+        if (!sym)
+            tc_error(tc, &field->base.tok, SV("No such field in DB type declaration."));
+
+        visit_Expr(tc, field->value);
+        if (!field->value->type.is_constexpr)
+            tc_error(tc, &field->value->tok,
+                SV("Value used in definition of DB data element must be constant expression."));
+
+        if (sym) {
+            if (!wt_equal(sym->type, field->value->type)) {
+                tc_error(tc, &field->value->tok, SV("Assignment of mismatched types."));
+            }
+        }
+    }
+
+    // Any fields that have not been given a default value in the DB type declaration must be given a value.
+    for (size_t j = 0; j < db_type->type.db_fields->symbols.count; j++) {
+        Symbol sym = db_type->type.db_fields->symbols.at[j];
+        if (sym.defined) continue;
+
+        bool found = false;
+        for (size_t k = 0; k < data->fields.count; k++) {
+            ExprStructLitField *field = data->fields.at[k];
+            if (sv_equals(sym.name, field->name)) {
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            tc_error(tc, &data->base.tok, 
+                SV("DB field without a default value was not given a value in definition of data element."));
+        }
+    }
 }
 
 static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
@@ -510,8 +571,8 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
         try_insert_vardecl(tc, s);
         return;
     }
-    case NODE_StmtFuncDecl: {
-        StmtFuncDecl *s = (StmtFuncDecl *)stmt;
+    case NODE_StmtCevDecl: {
+        StmtCevDecl *s = (StmtCevDecl *)stmt;
         
         open_scope(tc);
 
@@ -621,6 +682,9 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
         StmtForRange *s = (StmtForRange *)stmt;
         open_scope(tc);
 
+        if (s->decl->is_const)
+            tc_error(tc, &s->decl->base.tok, SV("Iterator cannot be 'const'."));
+
         Symbol *sym = try_insert_vardecl(tc, s->decl);
         if (sym) {
             if (sym->type.basetype != TYPE_INT)
@@ -660,7 +724,7 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
         if (s->id->type.basetype != TYPE_INT)
             tc_error(tc, &s->id->tok, SV("Command ID must be integer type."));
         
-        if (!s->id->type.is_compile_time)
+        if (!s->id->type.is_constexpr)
             tc_error(tc, &s->id->tok, SV("Command ID must be constant expression."));
 
         for (size_t i = 0; i < s->int_operands.count; i++) {
@@ -672,7 +736,7 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
                     SV("Argument must be integer or pointer type."));
 
             if (op->type.basetype != TYPE_PTR
-                && !op->type.is_compile_time)
+                && !op->type.is_constexpr)
                 tc_error(tc, &op->tok,
                     SV("Argument must be constant expression."));
         }
@@ -685,7 +749,7 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
                     SV("Argument must be string type."));
 
             if (op->kind != NODE_ExprInterp &&
-                !op->type.is_compile_time)
+                !op->type.is_constexpr)
                 tc_error(tc, &op->tok,
                     SV("Argument must be constant expression."));
         }
@@ -716,10 +780,142 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
             tc_error(tc, &s->base.tok, SV("Can only decrement integers."));
         return;
     }
+    case NODE_StmtDefDB: {
+        StmtDefDB *s = (StmtDefDB *)stmt;
+        for (size_t i = 0; i < s->db_types.count; i++) {
+            Token db_type = s->db_types.at[i];
 
-    // This statement type should already be handled in a top-level pass.
-    case NODE_StmtDBDecl:
-        UNREACHABLE;
+            Symbol *sym = find_including_imports(tc, tc->current_env, db_type.text);
+
+            if (sym
+                && sym->type.basetype == TYPE_DBTYPE
+                && sym->type.db_kind == s->db) {
+                VEC_PUSH(s->symbols, sym, tc->arena);
+                continue;
+            }
+
+            if (!sym) {
+                tc_error(tc, &db_type, SV("Undeclared or ambiguous identifier."));
+            } else if (sym->type.basetype != TYPE_DBTYPE) {
+                tc_error(tc, &db_type, SV("List item is not a DB type."));
+            } else if (sym->type.db_kind != s->db) {
+                tc_error(tc, &db_type, SV("List item is not of the correct DB kind."));
+            }
+
+            VEC_PUSH(s->symbols, NULL, tc->arena);
+        }
+
+        // Check that the same DB type declaration isn't being used twice in the list.
+        assert(s->db_types.count == s->symbols.count);
+        for (size_t i = 0; i < s->symbols.count; i++) {
+            Symbol *si = s->symbols.at[i];
+            if (!si) continue;
+            for (size_t j = i + 1; j < s->db_types.count; j++) {
+                Symbol *sj = s->symbols.at[j];
+                if (!sj) continue;
+                if (si == sj)
+                    tc_error(tc, &s->db_types.at[j], SV("DB type was already used in this 'def' list."));
+            }
+        }
+
+        return;
+    }
+    case NODE_StmtDBTypeDecl: {
+        StmtDBTypeDecl *s = (StmtDBTypeDecl *)stmt;
+        if (!s->sym) return;
+
+        assert(tc->current_env = tc->top_level_env);
+        tc->current_env = s->sym->type.db_fields;
+        for (size_t i = 0; i < s->fields.count; i++) {
+            StmtVarDecl *field = s->fields.at[i];
+            assert(!field->is_const);
+
+            if (field->is_const)
+                tc_error(tc, &field->base.tok, SV("DB field cannot be 'const'."));
+
+            Symbol *field_sym = try_insert_vardecl(tc, field);
+            if (field_sym) {
+                if (field->initializer) {
+                    if (!field->initializer->type.is_constexpr)
+                        tc_error(tc, &field->initializer->tok,
+                            SV("DB field initializer must be constant expression."));
+                            
+                    if (field->initializer->type.basetype == TYPE_STR)
+                        tc_error(tc, &field->initializer->tok,
+                            SV("DB field initializer cannot be a string."));
+                }
+            }
+        }
+
+        // For UDB types, data elements can have names. Keep track of named elements.
+        if (s->db.type == TOK_UDB) {
+            tc->current_env = s->sym->type.db_named_data;
+            for (size_t i = 0; i < s->data.count; i++) {
+                if (sv_is_null(s->data.at[i]->name)) continue;
+
+                Symbol *sym = env_insert(s->sym->type.db_named_data, s->data.at[i]->name, (WodType){
+                    .basetype = TYPE_DBDATA,
+                    .is_assignable = false,
+                    .is_constexpr = false,
+                    .db_type = s->sym,
+                }, s->data.at[i]->base.tok, !s->data.at[i]->no_body, tc->arena);
+
+                if (!sym) {
+                    tc_error(tc, &s->data.at[i]->base.tok, SV("Duplicate data name."));
+                }
+            }
+        }
+        tc->current_env = tc->top_level_env;
+        
+        // Check that defined data elements actually match the specified DB type's fields.
+        for (size_t i = 0; i < s->data.count; i++) {
+            if (s->data.at[i]->no_body) continue;
+            check_data_element(tc, s, s->data.at[i]);
+        }
+
+        return;
+    }
+    case NODE_StmtDBDataDecl: {
+        StmtDBDataDecl *s = (StmtDBDataDecl *)stmt;
+
+        // Check that specified UDB type exists.
+        Symbol *dbtype_sym = find_including_imports(tc, tc->current_env, s->db_type.text);
+
+        if (!dbtype_sym) {
+            tc_error(tc, &s->db_type, SV("Undeclared or ambiguous identifier."));
+            return;
+        }
+
+        if (dbtype_sym->type.basetype != TYPE_DBTYPE) {
+            tc_error(tc, &s->db_type, SV("Name does not correspond to a DB type."));
+            return;
+        }
+
+        if (dbtype_sym->type.db_kind != DB_UDB) {
+            tc_error(tc, &s->db_type, SV("Name does not correspond to a UDB type."));
+            return;
+        }
+
+        // Check that data element is actually present in the UDB type.
+        Symbol *data_sym = env_find(dbtype_sym->type.db_named_data, s->data->name);
+        if (!data_sym) {
+            tc_error(tc, &s->data->base.tok, SV("No such data element listed in UDB."));
+            return;
+        }
+
+        // Check that data element is not already defined.
+        if (data_sym->defined) {
+            tc_error(tc, &s->data->base.tok, SV("Data element is already defined elsewhere."));
+            return;
+        }
+
+        data_sym->defined = true;
+
+        // Check that contents are sane.
+        check_data_element(tc, dbtype_sym, s->data);
+
+        return;
+    }
     }
 }
 
@@ -761,18 +957,6 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
         }
         VEC_PUSH(tc->unqualified_imports, sub_env, tc->arena);
 
-        // If import has an alias, insert the symbol into the environment.
-        if (sv_is_null(s.alias)) continue;
-        
-        Symbol *sym = env_insert(tc->top_level_env, s.alias,
-            (WodType){ .basetype = TYPE_MODULE,
-                .is_assignable = false, .module_env = sub_env }, tc->arena);
-
-        if (!sym) {
-            tc_error(tc, &s.tok, SV("Duplicate import."));
-            continue;
-        }
-
         skip:;
     }
 
@@ -787,25 +971,27 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
         case NODE_StmtVarDecl: {
             StmtVarDecl *s = (StmtVarDecl *)stmt;
         
-            if (!s->is_const && s->initializer)
+            if (!s->is_const && s->initializer) {
                 tc_error(tc, &s->base.tok,
                     SV("Non-constant globals cannot have initializers."));
+            }
 
-            if (s->is_const && !s->initializer)
+            if (s->is_const && !s->initializer) {
                 tc_error(tc, &s->base.tok,
                     SV("Constant variables must be initialized."));
-        
+            }
+                    
             Symbol *sym = try_insert_vardecl(tc, s);
             if (sym) sym->top_level_path = 
                 tc->modules->at[module_index].source->path;
 
             break;
         }
-        case NODE_StmtFuncDecl: {
-            StmtFuncDecl *s = (StmtFuncDecl *)stmt;
+        case NODE_StmtCevDecl: {
+            StmtCevDecl *s = (StmtCevDecl *)stmt;
 
             WodType wt = { .basetype = TYPE_FUNC,
-                .is_assignable = false, .is_compile_time = s->is_inline,
+                .is_assignable = false, .is_constexpr = false,
                 .is_exaddr = s->is_exaddr };
 
             WodType *ret = arena_alloc_assert(tc->arena, sizeof(WodType));
@@ -821,9 +1007,13 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
 
             size_t i_param_size = 0;
             size_t s_param_size = 0;
-            for (size_t param = 0; param < s->params.count; param++) {
+            for (size_t param_i = 0; param_i < s->params.count; param_i++) {
                 // TODO: handle array params
-                switch (s->params.at[param]->type.type) {
+                StmtVarDecl *param = s->params.at[param_i];
+                if (param->is_const)
+                    tc_error(tc, &param->base.tok, SV("Function parameter cannot be 'const'."));
+
+                switch (param->type.type) {
                 case TOK_INT:
                     i_param_size++;
                     VEC_PUSH(wt.params,
@@ -843,18 +1033,16 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
                 }
 
                 if (i_param_size > 5)
-                    tc_error(tc, &s->params.at[param]->base.tok,
-                        SV("Exceeded maximum number of integer-based parameters "
-                           "in non-exaddr common event."));
+                    tc_error(tc, &param->base.tok,
+                        SV("More than 5 integer parameters are not currently supported."));
                 
                 if (s_param_size > 5)
-                    tc_error(tc, &s->params.at[param]->base.tok,
-                        SV("Exceeded maximum number of string-based parameters "
-                           "in non-exaddr common event."));
+                    tc_error(tc, &param->base.tok,
+                        SV("More than 5 string parameters are not currently supported."));
             }
 
             s->sym = env_insert(tc->current_env, s->name,
-                wt, tc->arena);
+                wt, stmt->tok, true, tc->arena);
 
             if (!s->sym)
                 tc_error(tc, &s->base.tok, SV("Redeclaration of name."));
@@ -863,9 +1051,10 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
 
             break;
         }
-        case NODE_StmtDBDecl: {
-            StmtDBDecl *s = (StmtDBDecl *)stmt;
-            Environment *db_env = env_new_assert(NULL, tc->arena);
+        case NODE_StmtDBTypeDecl: {
+            StmtDBTypeDecl *s = (StmtDBTypeDecl *)stmt;
+            Environment *db_fields = env_new_assert(NULL, tc->arena);
+            Environment *db_named_data = env_new_assert(NULL, tc->arena);
 
             int db_kind = 0;
             switch (s->db.type) {
@@ -876,36 +1065,45 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
 
             s->sym = env_insert(tc->current_env, s->name,
                 (WodType){ .basetype = TYPE_DBTYPE, .is_assignable = false,
-                    .db_kind = db_kind, .db_env = db_env }, tc->arena);
+                    .db_kind = db_kind, .db_fields = db_fields, .db_named_data = db_named_data },
+                    stmt->tok, true, tc->arena);
 
             if (!s->sym) {
                 tc_error(tc, &stmt->tok, SV("Redeclaration of name."));
                 break;
-            } else s->sym->top_level_path = 
-                tc->modules->at[module_index].source->path;
+            } 
+            
+            s->sym->top_level_path = tc->modules->at[module_index].source->path;
 
-            assert(tc->current_env = tc->top_level_env);
-            tc->current_env = db_env;
-            for (size_t j = 0; j < s->fields.count; j++) {
-                StmtVarDecl *field = s->fields.at[j];
-                assert(!field->is_const);
+            if (db_kind == DB_UDB)
+                VEC_PUSH(tc->all_udb_decls, s, tc->arena);
+            else if (db_kind == DB_CDB)
+                VEC_PUSH(tc->all_cdb_decls, s, tc->arena);
+            else UNREACHABLE;
 
-                Symbol *field_sym = try_insert_vardecl(tc, field);
-                if (field_sym) {
-                    field_sym->local_offset = j;
-                
-                    if (field->initializer) {
-                        if (!field->initializer->type.is_compile_time)
-                            tc_error(tc, &field->initializer->tok,
-                                SV("DB field initializer must be constant expression."));
-                                
-                        if (field->initializer->type.basetype == TYPE_STR)
-                            tc_error(tc, &field->initializer->tok,
-                                SV("DB field initializer cannot be a string."));
-                    }
+            break;
+        }
+        case NODE_StmtDefDB: {
+            StmtDefDB *s = (StmtDefDB *)stmt;
+            switch (s->db) {
+                case DB_UDB: {
+                    if (tc->def_udb)
+                        tc_error(tc, &s->base.tok, SV("Redefinition of UDB type list."));
+                    else tc->def_udb = s;
+                    break;
                 }
+                case DB_CDB: {
+                    if (tc->def_cdb)
+                        tc_error(tc, &s->base.tok, SV("Redefinition of CDB type list."));
+                    else tc->def_cdb = s;
+                    break;
+                }
+                default: UNREACHABLE;
             }
-            tc->current_env = tc->top_level_env;
+
+            if (s->db_types.count > 100) {
+                tc_error(tc, &s->base.tok, SV("Exceeded 100 DB types."));
+            }
             break;
         }
         default: UNREACHABLE;
@@ -914,13 +1112,13 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
 
     if (module_index == tc->modules->count - 1 && !env_find(tc->top_level_env, SV("main"))) {
         tc->had_error = true;
-        source_error(*tc->modules->at[0].source, SV("No 'main' function."));
+        source_error(*tc->modules->at[module_index].source, SV("No 'main' function."));
     }
 
     // Do a second pass to look inside functions.
     for (size_t i = 0; i < ast->stmts.count; i++) {
         Stmt *stmt = ast->stmts.at[i];
-        if (stmt->kind == NODE_StmtFuncDecl)
+        if (stmt->kind == NODE_StmtCevDecl || stmt->kind == NODE_StmtDefDB)
             visit_Stmt(tc, stmt);
     }
 
@@ -930,18 +1128,66 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
     return tc->had_error ? NULL : tc->top_level_env;
 }
 
+static void check_def_lists(Typechecker *tc, VEC_PTR_StmtDBTypeDecl *all_decls, StmtDefDB *def) {
+    // If there is at least one DB type decl, there should be a def list.
+    if (all_decls->count > 0 && !def) {
+        tc->had_error = true;
+        source_error(*tc->modules->at[tc->modules->count - 1].source,
+            SV("Could not find DB 'def' list, but DB type declarations were found."));
+        return;
+    }
+
+    // Check that all declared DB types are present in the def list.
+    for (size_t i = 0; i < all_decls->count; i++) {
+        bool found = false;
+        for (size_t j = 0; j < def->symbols.count; j++) {
+            if (all_decls->at[i]->sym == def->symbols.at[j]) {
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            tc_error(&tc, &all_decls->at[i]->base.tok,
+                SV("DB type was not found in the corresponding DB 'def' list."));
+        }
+    }
+}
+
 bool typecheck_modules(VEC_Module *modules, Arena *arena) {
     assert(modules->count > 0);
 
-    Typechecker tc;
-    tc.arena = arena;
-    tc.had_error = false;
-    tc.loop_depth = 0;
-    tc.current_func = NULL;
-    tc.modules = modules;
+    Typechecker tc = {
+        .arena = arena,
+        .had_error = false,
+        .loop_depth = 0,
+        .current_func = NULL,
+        .def_udb = NULL,
+        .def_cdb = NULL,
+        .all_udb_decls = VEC_EMPTY,
+        .all_cdb_decls = VEC_EMPTY,
+        .modules = modules,
+    };
     
     for (size_t i = 0; i < modules->count; i++) {
         typecheck_file(&tc, i);
+    }
+
+    check_def_lists(&tc, &tc.all_udb_decls, tc.def_udb);
+    check_def_lists(&tc, &tc.all_cdb_decls, tc.def_cdb);
+
+    // For UDB types, data elements can be listed just by name without a body, but their body must
+    // be completed elsewhere if so.
+    // Check that data elements without a body are defined elsewhere.
+    for (size_t i = 0; i < tc.all_udb_decls.count; i++) {
+        Environment *named = tc.all_udb_decls.at[i]->sym->type.db_named_data;
+        for (size_t j = 0; j < named->symbols.count; j++) {
+            Symbol sym = named->symbols.at[j];
+            assert(sym.type.basetype == TYPE_DBDATA);
+            if (!sym.defined) {
+                tc_error(&tc, &sym.declaration, SV("Data element was declared but not defined."));
+            }
+        }
     }
 
     return !tc.had_error;

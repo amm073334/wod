@@ -332,9 +332,15 @@ typedef struct WIRVar {
 } WIRVar;
 VEC_DEF(WIRVar);
 
+typedef struct WIRData {
+    VEC_WIROperand values;
+} WIRData;
+VEC_DEF(WIRData);
+
 typedef struct WIRDB {
     StringView name;
     VEC_WIRVar fields;
+    VEC_WIRData data;
 } WIRDB;
 VEC_DEF(WIRDB);
 

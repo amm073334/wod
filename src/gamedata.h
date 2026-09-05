@@ -11,6 +11,7 @@ typedef struct {
     VEC_CommonEvent cevs;
     VEC_DBType udb;
     VEC_DBType cdb;
+    VEC_DBType sdb;
     
     int32_t entry;
 } GameData;

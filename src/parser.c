@@ -30,7 +30,7 @@ static void parse_error(Parser *parser, Token *token, StringView message) {
     parser->panic_mode = true;
     parser->had_error = true;
 
-    error(token->loc, token->text.len, message);
+    error(token->loc, message);
 }
 
 static void lex_error(Parser *parser, Location loc, StringView message) {
@@ -38,7 +38,7 @@ static void lex_error(Parser *parser, Location loc, StringView message) {
     parser->panic_mode = true;
     parser->had_error = true;
 
-    error(loc, 1, message);
+    error(loc, message);
 }
 
 static void error_previous(Parser *parser, StringView message) {
@@ -97,6 +97,10 @@ static bool check_vartype(Parser *parser) {
     default:
         return false;
     }
+}
+
+static bool match_vartype(Parser *parser) {
+    if (check_vartype(parser)) advance(parser);
 }
 
 static void synchronize(Parser *parser) {
@@ -423,13 +427,7 @@ static Import import(Parser *parser) {
     Import imp = (Import){
         .tok = parser->previous,
         .path = remove_quotes(parser->previous.text),
-        .alias = SV_NULL
     };
-
-    if (match(parser, TOK_AS)) {
-        consume(parser, TOK_IDENTIFIER, SV("Expected an alias."));
-        imp.alias = parser->previous.text;
-    }
 
     consume(parser, TOK_SEMICOLON, SV("Expected ';' after import path."));
 
@@ -469,15 +467,13 @@ static Stmt *break_stmt(Parser *parser) {
     return (Stmt *)stmt;
 }
 
-static StmtVarDecl *var_decl(Parser *parser, bool parse_const, bool parse_initializer) {
+static StmtVarDecl *var_decl(Parser *parser) {
     bool is_const = false;
-    
-    if (parse_const && match(parser, TOK_CONST)) {
+    if (match(parser, TOK_CONST)) {
         is_const = true;
-        advance(parser);
     }
 
-    if (!match(parser, TOK_INT) && !match(parser, TOK_STR) && !match(parser, TOK_BOOL))
+    if (!match_vartype(parser))
         error_current(parser, SV("Invalid declaration type."));
 
     Token var_type = parser->previous;
@@ -492,10 +488,8 @@ static StmtVarDecl *var_decl(Parser *parser, bool parse_const, bool parse_initia
     Token param_name = parser->previous;
 
     Expr *initializer = NULL;
-    if (parse_initializer) {
-        if (match(parser, TOK_EQUAL)) {
-            initializer = expression(parser);
-        }
+    if (match(parser, TOK_EQUAL)) {
+        initializer = expression(parser);
     }
 
     StmtVarDecl *stmt;
@@ -627,7 +621,7 @@ static Stmt *for_stmt(Parser *parser) {
     if (!check(parser, TOK_SEMICOLON)) {
         if (check_vartype(parser)) {
             init_is_decl = true;
-            init = (Stmt *)var_decl(parser, false, true);
+            init = (Stmt *)var_decl(parser);
             if (!((StmtVarDecl *)init)->initializer)
                 error_previous(parser, SV("Expected initializer."));
         } else {
@@ -714,7 +708,7 @@ static Stmt *declaration(Parser *parser) {
     if (check_vartype(parser) || 
         check(parser, TOK_CONST)) {
 
-        Stmt *stmt = (Stmt *)var_decl(parser, true, true);
+        Stmt *stmt = (Stmt *)var_decl(parser);
         consume(parser, TOK_SEMICOLON, SV("Expected ';' after declaration."));
         return stmt;
     }
@@ -760,23 +754,10 @@ static Stmt *statement(Parser *parser) {
     return stmt;
 }
 
-static Stmt *function_decl(Parser *parser) {
-    bool is_inline = false;
-    if (parser->previous.type == TOK_INLINE) {
-        is_inline = true;
-        advance(parser);
-    }
-    
-    bool is_exaddr = false;
-    if (parser->previous.type == TOK_EXADDR) {
-        is_exaddr = true;
-        advance(parser);
-    }
+static Stmt *cev_decl(Parser *parser) {
+    bool is_exaddr = match(parser, TOK_EXADDR);
 
-    if (is_inline && is_exaddr) {
-        error_previous(parser, SV("Common event cannot both be inline and exaddr."));
-    }
-
+    advance(parser);
     switch (parser->previous.type) {
         case TOK_VOID:
         case TOK_INT:
@@ -796,7 +777,7 @@ static Stmt *function_decl(Parser *parser) {
     VEC_PTR_StmtVarDecl params;
     VEC_INIT(params);
     if (!check(parser, TOK_RIGHT_PAREN)) do {
-        StmtVarDecl *stmt = var_decl(parser, false, false);
+        StmtVarDecl *stmt = var_decl(parser);
         VEC_PUSH(params, stmt, parser->arena);
     } while (match(parser, TOK_COMMA));
 
@@ -805,18 +786,112 @@ static Stmt *function_decl(Parser *parser) {
 
     VEC_PTR_Stmt body = block(parser);
 
-    StmtFuncDecl *stmt;
-    ALLOC_NODE(stmt, loc, StmtFuncDecl,
-        (StmtFuncDecl){ .ret = ret, .name = loc.text, .params = params,
-            .body = body, .is_inline = is_inline, .is_exaddr = is_exaddr });
+    StmtCevDecl *stmt;
+    ALLOC_NODE(stmt, loc, StmtCevDecl,
+        (StmtCevDecl){ .ret = ret, .name = loc.text, .params = params,
+            .body = body, .is_exaddr = is_exaddr });
 
     return (Stmt *)stmt;
 }
 
-static Stmt *db_decl(Parser *parser) {
+static void data_item(Parser *parser, VEC_PTR_ExprStructLitField *vec) {
+    do {
+        consume(parser, TOK_DOT, SV("Expected '.' before field name."));
+        consume(parser, TOK_IDENTIFIER, SV("Expected field name."));
+        Token tok = parser->previous;
+        
+        consume(parser, TOK_EQUAL, SV("Expected '=' after field name."));
+
+        Expr *expr = expression(parser);
+
+        ExprStructLitField *field;
+        ALLOC_NODE(field, tok, ExprStructLitField,
+            (ExprStructLitField){ .name = tok.text, .value = expr });
+
+        VEC_PUSH(*vec, field, parser->arena);
+    } while (match(parser, TOK_COMMA) && !check(parser, TOK_RIGHT_BRACE));
+
+    consume(parser, TOK_RIGHT_BRACE, SV("Expected '}' after data fields."));
+}
+
+static VEC_PTR_ExprDBDataElem udb_data_list(Parser *parser) {
+    VEC_PTR_ExprDBDataElem data = VEC_EMPTY;
+
+    if (check(parser, TOK_RIGHT_BRACE)) {
+        error_current(parser, SV("Data list should have at least one element."));
+        return data;
+    }
+
+    if (match(parser, TOK_DEFAULT)) {
+        error_current(parser, SV("A 'default' data list is not available for UDB types."));
+        return data;
+    }
+
+    do {
+        StringView name = SV_NULL;
+        Token item_tok;
+        bool no_body = true;
+
+        if (match(parser, TOK_IDENTIFIER)) {
+            name = parser->previous.text;
+            item_tok = parser->previous;
+            if (match(parser, TOK_LEFT_BRACE))
+                no_body = false;
+        } else {
+            no_body = false;
+            item_tok = parser->current;
+            consume(parser, TOK_LEFT_BRACE, SV("Expected '{' before data fields."));
+        }
+
+        ExprDBDataElem *item;
+        ALLOC_NODE(item, item_tok, ExprDBDataElem,
+            (ExprDBDataElem){ .name = name, .fields = VEC_EMPTY, .no_body = no_body });
+
+        if (!no_body) {
+            data_item(parser, &item->fields);
+        }    
+
+        VEC_PUSH(data, item, parser->arena);
+    } while (match(parser, TOK_COMMA) && !check(parser, TOK_RIGHT_BRACE));
+
+    return data;
+}
+
+static VEC_PTR_ExprDBDataElem cdb_data_list(Parser *parser) {
+    VEC_PTR_ExprDBDataElem data = VEC_EMPTY;
+
+    if (check(parser, TOK_RIGHT_BRACE)) {
+        error_current(parser, SV("Data list should have at least one element."));
+        return data;
+    }
+
+    if (match(parser, TOK_DEFAULT)) return data;
+
+    do {
+        if (match(parser, TOK_IDENTIFIER)) {
+            error_previous(parser,
+                SV("CDB data elements cannot be given names, as their index may change at runtime, "
+                   "and the language resolves names at compile time."));
+        }
+
+        consume(parser, TOK_LEFT_BRACE, SV("Expected '{' before data fields."));
+
+        ExprDBDataElem *item;
+        ALLOC_NODE(item, parser->previous, ExprDBDataElem,
+            (ExprDBDataElem){ .name = SV_NULL, .fields = VEC_EMPTY, .no_body = false });
+        
+        data_item(parser, &item->fields);
+
+        VEC_PUSH(data, item, parser->arena);
+    } while (match(parser, TOK_COMMA) && !check(parser, TOK_RIGHT_BRACE));
+
+    return data;
+}
+
+static Stmt *db_type_decl(Parser *parser) {
     Token db = parser->previous;
 
-    consume(parser, TOK_IDENTIFIER, SV("Expected DB name."));
+    consume(parser, TOK_IDENTIFIER, SV("Expected DB type name."));
     StringView name = parser->previous.text;
 
     consume(parser, TOK_LEFT_BRACE, SV("Expected '{' before DB fields."));
@@ -824,44 +899,107 @@ static Stmt *db_decl(Parser *parser) {
     VEC_PTR_StmtVarDecl fields;
     VEC_INIT(fields);
     while (check_vartype(parser)) {
-        StmtVarDecl *stmt = var_decl(parser, false, true);
+        StmtVarDecl *stmt = var_decl(parser);
         consume(parser, TOK_SEMICOLON, SV("Expected ';' after declaration."));
         VEC_PUSH(fields, stmt, parser->arena);
     }
+    
+    consume(parser, TOK_EQUAL, SV("Expected '=' after DB type definition."));
+    consume(parser, TOK_LEFT_BRACE, SV("Expected '{' before DB data list."));
+    
+    VEC_PTR_ExprDBDataElem data = VEC_EMPTY;
+    if (db.type == TOK_UDB) {
+        data = udb_data_list(parser);
+    } else {
+        data = cdb_data_list(parser);
+    }
 
-    consume(parser, TOK_RIGHT_BRACE, SV("Expected '}' after DB fields."));
+    consume(parser, TOK_RIGHT_BRACE, SV("Expected '}' after DB data list."));
 
-    StmtDBDecl *stmt;
-    ALLOC_NODE(stmt, db, StmtDBDecl,
-        (StmtDBDecl){ .name = name,
-            .db = db, .fields = fields });
+    StmtDBTypeDecl *stmt;
+    ALLOC_NODE(stmt, db, StmtDBTypeDecl,
+        (StmtDBTypeDecl){ .name = name,
+            .db = db, .fields = fields, .data = data});
    
+    return (Stmt *)stmt;
+}
+
+static Stmt *def_db(Parser *parser) {
+    if (!match(parser, TOK_UDB)
+        && !match(parser, TOK_CDB)) {
+    
+        error_current(parser, SV("Expected 'udb' or 'cdb'."));
+    }
+
+    Token db = parser->previous;
+
+    consume(parser, TOK_LEFT_BRACE, SV("Expected '{' before DB list."));
+
+    VEC_Token list = VEC_EMPTY;
+    if (!check(parser, TOK_RIGHT_BRACE)) do {
+        consume(parser, TOK_IDENTIFIER, SV("Expected DB type name."));
+        VEC_PUSH(list, parser->previous, parser->arena);
+    } while (match(parser, TOK_COMMA) && !check(parser, TOK_RIGHT_BRACE));
+    
+    consume(parser, TOK_RIGHT_BRACE, SV("Expected '}' after DB list."));
+
+    StmtDefDB *stmt;
+    ALLOC_NODE(stmt, db, StmtDefDB,
+        (StmtDefDB){ .db = db.type == TOK_UDB ? DB_UDB : DB_CDB,
+            .db_types = list, .symbols = VEC_EMPTY });
+
+    return stmt;
+}
+
+static Stmt *db_data_decl(Parser *parser) {
+    consume(parser, TOK_IDENTIFIER, SV("Expected UDB type name."));
+    Token db_type = parser->previous;
+    
+    consume(parser, TOK_IDENTIFIER, SV("Expected data name."));
+    Token tok = parser->previous;
+    
+    consume(parser, TOK_LEFT_BRACE, SV("Expected '{' before data fields."));
+
+    ExprDBDataElem *item;
+    ALLOC_NODE(item, tok, ExprDBDataElem,
+        (ExprDBDataElem){ .name = tok.text, .fields = VEC_EMPTY, .no_body = false });
+
+    data_item(parser, &item->fields);
+
+    StmtDBDataDecl *stmt;
+    ALLOC_NODE(stmt, tok, StmtDBDataDecl,
+        (StmtDBDataDecl){ .db_type = db_type, .data = item });
+
     return (Stmt *)stmt;
 }
 
 static Stmt *top_decl(Parser *parser) {
     if (match(parser, TOK_CDB) ||
         match(parser, TOK_UDB)) {
-        return db_decl(parser);
+        return db_type_decl(parser);
     }
 
-    if (match(parser, TOK_INLINE) ||
-        match(parser, TOK_VOID) ||
-        match(parser, TOK_INT) ||
-        match(parser, TOK_STR)) {
-
-        return function_decl(parser);
+    if (match(parser, TOK_CEV)) {
+        return cev_decl(parser);
     }
 
     if (match(parser, TOK_CONST)) {
-        return (Stmt *)var_decl(parser, true, true);
+        return (Stmt *)var_decl(parser);
     }
 
     if (match(parser, TOK_IMPORT)) {
         error_previous(parser, SV("Imports must go at the top of a file."));
         return NULL;
     }
+
+    if (match(parser, TOK_DEF)) {
+        return def_db(parser);
+    }
     
+    if (match(parser, TOK_DBDATA)) {
+        return db_data_decl(parser);
+    }
+
     error_current(parser, SV("Unexpected declaration."));
     return NULL;
 }
@@ -939,8 +1077,7 @@ static bool parse_all_modules_helper(
             return true;
 
         if (import_node)
-            error(import_node->tok.loc, import_node->tok.text.len,
-                SV("Cyclic import detected."));
+            error(import_node->tok.loc, SV("Cyclic import detected."));
         return false;
     }
     
