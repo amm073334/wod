@@ -1,5 +1,4 @@
 #include "environment.h"
-#include "lexer.h"
 #include <stdio.h>
 
 void env_init(Environment *env) {
@@ -33,7 +32,7 @@ Symbol *env_find(Environment *env, StringView name) {
     return NULL;
 }
 
-Symbol *env_insert(Environment *env, StringView name, WodType type, Token declaration, bool defined, Arena *arena) {
+Symbol *env_insert(Environment *env, StringView name, WodType type, Location declaration, bool defined, Arena *arena) {
     Symbol *entry = env_find(env, name);
     if (entry) return NULL;
 

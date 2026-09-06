@@ -109,11 +109,19 @@ static bool wt_equal(WodType a, WodType b) {
             UNIMPLEMENTED;
             return false;
     }
+
+    UNREACHABLE;
+    return false;
 }
 
 static void tc_error(Typechecker *tc, Token *token, StringView message) {
     tc->had_error = true;
     error(token->loc, message);
+}
+
+static void tc_loc_error(Typechecker *tc, Location loc, StringView message) {
+    tc->had_error = true;
+    error(loc, message);
 }
 
 static void tc_expr_error(Typechecker *tc, Expr *expr, Token *token, StringView message) {
@@ -190,11 +198,13 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
 
         if (expr->type.basetype != TYPE_ERROR) {
             if (e->left->type.basetype == TYPE_DBTYPE) {
+                assert(e->left->kind == NODE_ExprVar);
+
                 expr->type = (WodType){
                     .basetype = TYPE_DBDATA,
                     .is_assignable = false,
                     .is_constexpr = false,
-                    .db_type = &e->left->type
+                    .db_type = ((ExprVar *)e->left)->sym
                 };
             } else {
                 expr->type = *e->left->type.array_of;
@@ -466,7 +476,7 @@ static Symbol *try_insert_vardecl(Typechecker *tc, StmtVarDecl *s) {
         ty.basetype = TYPE_ARRAY;
         ty.array_of = array_of;
     }
-    s->sym = env_insert(tc->current_env, s->name, ty, s->base.tok, s->initializer != NULL, tc->arena);
+    s->sym = env_insert(tc->current_env, s->name, ty, s->base.tok.loc, s->initializer != NULL, tc->arena);
 
     if (!s->sym) {
         tc_error(tc, &s->base.tok, SV("Redeclaration of name."));
@@ -500,10 +510,12 @@ static Symbol *try_insert_vardecl(Typechecker *tc, StmtVarDecl *s) {
 
 static void check_data_element(Typechecker *tc, Symbol *db_type, ExprDBDataElem *data) {
     assert(db_type->type.basetype == TYPE_DBTYPE);
+
+    VEC_StringView listed = VEC_EMPTY;
     
     // Check that all listed fields/assignments are sane.
-    for (size_t j = 0; j < data->fields.count; j++) {
-        ExprStructLitField *field = data->fields.at[j];
+    for (size_t i = 0; i < data->fields.count; i++) {
+        ExprStructLitField *field = data->fields.at[i];
         Symbol *sym = env_find(db_type->type.db_fields, field->name);
         if (!sym)
             tc_error(tc, &field->base.tok, SV("No such field in DB type declaration."));
@@ -518,16 +530,23 @@ static void check_data_element(Typechecker *tc, Symbol *db_type, ExprDBDataElem 
                 tc_error(tc, &field->value->tok, SV("Assignment of mismatched types."));
             }
         }
+
+        for (size_t j = 0; j < listed.count; j++) {
+            if (sv_equals(listed.at[j], field->name))
+                tc_error(tc, &field->base.tok, SV("Field was already given value in definition."));
+        }
+
+        VEC_PUSH(listed, field->name, tc->arena);
     }
 
     // Any fields that have not been given a default value in the DB type declaration must be given a value.
-    for (size_t j = 0; j < db_type->type.db_fields->symbols.count; j++) {
-        Symbol sym = db_type->type.db_fields->symbols.at[j];
+    for (size_t i = 0; i < db_type->type.db_fields->symbols.count; i++) {
+        Symbol sym = db_type->type.db_fields->symbols.at[i];
         if (sym.defined) continue;
 
         bool found = false;
-        for (size_t k = 0; k < data->fields.count; k++) {
-            ExprStructLitField *field = data->fields.at[k];
+        for (size_t j = 0; j < data->fields.count; j++) {
+            ExprStructLitField *field = data->fields.at[j];
             if (sv_equals(sym.name, field->name)) {
                 found = true;
                 break;
@@ -859,7 +878,7 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
                     .is_assignable = false,
                     .is_constexpr = false,
                     .db_type = s->sym,
-                }, s->data.at[i]->base.tok, !s->data.at[i]->no_body, tc->arena);
+                }, s->data.at[i]->base.tok.loc, !s->data.at[i]->no_body, tc->arena);
 
                 if (sym) {
                     sym->local_offset = i;
@@ -873,7 +892,7 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
         // Check that defined data elements actually match the specified DB type's fields.
         for (size_t i = 0; i < s->data.count; i++) {
             if (s->data.at[i]->no_body) continue;
-            check_data_element(tc, s, s->data.at[i]);
+            check_data_element(tc, s->sym, s->data.at[i]);
         }
 
         return;
@@ -1045,7 +1064,7 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
             }
 
             s->sym = env_insert(tc->current_env, s->name,
-                wt, stmt->tok, true, tc->arena);
+                wt, stmt->tok.loc, true, tc->arena);
 
             if (!s->sym)
                 tc_error(tc, &s->base.tok, SV("Redeclaration of name."));
@@ -1069,7 +1088,7 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
             s->sym = env_insert(tc->current_env, s->name,
                 (WodType){ .basetype = TYPE_DBTYPE, .is_assignable = false,
                     .db_kind = db_kind, .db_fields = db_fields, .db_named_data = db_named_data },
-                    stmt->tok, true, tc->arena);
+                    stmt->tok.loc, true, tc->arena);
 
             if (!s->sym) {
                 tc_error(tc, &stmt->tok, SV("Redeclaration of name."));
@@ -1151,7 +1170,7 @@ static void check_def_lists(Typechecker *tc, VEC_PTR_StmtDBTypeDecl *all_decls, 
         }
 
         if (!found) {
-            tc_error(&tc, &all_decls->at[i]->base.tok,
+            tc_error(tc, &all_decls->at[i]->base.tok,
                 SV("DB type was not found in the corresponding DB 'def' list."));
         }
     }
@@ -1188,7 +1207,7 @@ bool typecheck_modules(VEC_Module *modules, Arena *arena) {
             Symbol sym = named->symbols.at[j];
             assert(sym.type.basetype == TYPE_DBDATA);
             if (!sym.defined) {
-                tc_error(&tc, &sym.declaration, SV("Data element was declared but not defined."));
+                tc_loc_error(&tc, sym.declaration, SV("Data element was declared but not defined."));
             }
         }
     }

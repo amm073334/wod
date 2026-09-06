@@ -4,7 +4,7 @@ apply "../bin";
 
 import "../_test.wod";
 
-void main() {
+cev void main() {
     int a = 1;
     int b = 2;
     output("test ${a + b}");

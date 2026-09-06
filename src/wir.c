@@ -333,9 +333,9 @@ static void interp_int_var(char *buf, size_t buf_size, bool is_exaddr, int32_t r
 
 static void interp_str_var(char *buf, size_t buf_size, bool is_exaddr, int32_t ref) {
     if (is_exaddr) {
-        snprintf(buf, sizeof(buf), "\\s[%zu]", ref - STRING_VAR_BASE);
+        snprintf(buf, buf_size, "\\s[%zu]", ref - STRING_VAR_BASE);
     } else {
-        snprintf(buf, sizeof(buf), "\\cself[%zu]", ref - CSELF_BASE);
+        snprintf(buf, buf_size, "\\cself[%zu]", ref - CSELF_BASE);
     }
 }
 
@@ -765,88 +765,86 @@ static void addr_alloc_pass(WIRCompiler *wc, WIRCev *wcev) {
         }
         case _WIRInst_PopIntN: {
             WIRInst_PopIntN *inst = (WIRInst_PopIntN *)wirinst;
-            assert(i_top <= inst->n);
             i_top -= inst->n;
             break;
         }
         case _WIRInst_PopStrN: {
             WIRInst_PopStrN *inst = (WIRInst_PopStrN *)wirinst;
-            assert(s_top <= inst->n);
             s_top -= inst->n;
             break;
         }
         case _WIRInst_Binop: {
             WIRInst_Binop *inst = (WIRInst_Binop *)wirinst;
-            update_temp_map(wc, i_top, s_top, inst->dest);
-            update_temp_map(wc, i_top, s_top, inst->a);
-            update_temp_map(wc, i_top, s_top, inst->b);
+            update_temp_map(wcev, i_top, s_top, inst->dest);
+            update_temp_map(wcev, i_top, s_top, inst->a);
+            update_temp_map(wcev, i_top, s_top, inst->b);
             break;
         }
         case _WIRInst_Compare: {
             WIRInst_Compare *inst = (WIRInst_Compare *)wirinst;
-            update_temp_map(wc, i_top, s_top, inst->dest);
-            update_temp_map(wc, i_top, s_top, inst->a);
-            update_temp_map(wc, i_top, s_top, inst->b);
+            update_temp_map(wcev, i_top, s_top, inst->dest);
+            update_temp_map(wcev, i_top, s_top, inst->a);
+            update_temp_map(wcev, i_top, s_top, inst->b);
             break;
         }
         case _WIRInst_IfBegin: {
             WIRInst_IfBegin *inst = (WIRInst_IfBegin *)wirinst;
-            update_temp_map(wc, i_top, s_top, inst->cond);
+            update_temp_map(wcev, i_top, s_top, inst->cond);
             break;
         }
         case _WIRInst_IfBeginOp: {
             WIRInst_IfBeginOp *inst = (WIRInst_IfBeginOp *)wirinst;
-            update_temp_map(wc, i_top, s_top, inst->a);
-            update_temp_map(wc, i_top, s_top, inst->b);
+            update_temp_map(wcev, i_top, s_top, inst->a);
+            update_temp_map(wcev, i_top, s_top, inst->b);
             break;
         }
         case _WIRInst_LoopBeginN: {
             WIRInst_LoopBeginN *inst = (WIRInst_LoopBeginN *)wirinst;
-            update_temp_map(wc, i_top, s_top, inst->count);
+            update_temp_map(wcev, i_top, s_top, inst->count);
             break;
         }
         case _WIRInst_Call: {
             WIRInst_Call *inst = (WIRInst_Call *)wirinst;
-            update_temp_map(wc, i_top, s_top, inst->dest);
+            update_temp_map(wcev, i_top, s_top, inst->dest);
             for (size_t arg = 0; arg < inst->args.count; arg++)
-                update_temp_map(wc, i_top, s_top, inst->args.at[arg]);
+                update_temp_map(wcev, i_top, s_top, inst->args.at[arg]);
             break;
         }
         case _WIRInst_ReturnVal: {
             WIRInst_ReturnVal *inst = (WIRInst_ReturnVal *)wirinst;
-            update_temp_map(wc, i_top, s_top, inst->val);
+            update_temp_map(wcev, i_top, s_top, inst->val);
             break;
         }
         case _WIRInst_DBLoad: {
             WIRInst_DBLoad *inst = (WIRInst_DBLoad *)wirinst;
-            update_temp_map(wc, i_top, s_top, inst->dst);
-            update_temp_map(wc, i_top, s_top, inst->db_type);
-            update_temp_map(wc, i_top, s_top, inst->db_data);
-            update_temp_map(wc, i_top, s_top, inst->db_field);
+            update_temp_map(wcev, i_top, s_top, inst->dst);
+            update_temp_map(wcev, i_top, s_top, inst->db_type);
+            update_temp_map(wcev, i_top, s_top, inst->db_data);
+            update_temp_map(wcev, i_top, s_top, inst->db_field);
             break;
         }
         case _WIRInst_DBStore: {
             WIRInst_DBStore *inst = (WIRInst_DBStore *)wirinst;
-            update_temp_map(wc, i_top, s_top, inst->src);
-            update_temp_map(wc, i_top, s_top, inst->db_type);
-            update_temp_map(wc, i_top, s_top, inst->db_data);
-            update_temp_map(wc, i_top, s_top, inst->db_field);
+            update_temp_map(wcev, i_top, s_top, inst->src);
+            update_temp_map(wcev, i_top, s_top, inst->db_type);
+            update_temp_map(wcev, i_top, s_top, inst->db_data);
+            update_temp_map(wcev, i_top, s_top, inst->db_field);
             break;
         }
         case _WIRInst_StrAssign: {
             WIRInst_StrAssign *inst = (WIRInst_StrAssign *)wirinst;
-            update_temp_map(wc, i_top, s_top, inst->dest);
-            update_temp_map(wc, i_top, s_top, inst->src);
+            update_temp_map(wcev, i_top, s_top, inst->dest);
+            update_temp_map(wcev, i_top, s_top, inst->src);
             break;
         }
         case _WIRInst_Label: {
             WIRInst_Label *inst = (WIRInst_Label *)wirinst;
-            update_temp_map(wc, i_top, s_top, inst->name);
+            update_temp_map(wcev, i_top, s_top, inst->name);
             break;
         }
         case _WIRInst_Goto: {
             WIRInst_Goto *inst = (WIRInst_Goto *)wirinst;
-            update_temp_map(wc, i_top, s_top, inst->name);
+            update_temp_map(wcev, i_top, s_top, inst->name);
             break;
         }
         case _WIRInst_NOP:
@@ -1548,6 +1546,7 @@ static void compile_dbs(WIRCompiler *wc, VEC_WIRDB *g, VEC_DBType *dbs) {
         db_init(&db);
         db.TYPENAME = wdb->qualifier.name;
 
+        // Handle fields.
         for (size_t j = 0; j < wdb->fields.count; j++) {
             WIRField *field = &wdb->fields.at[j];
             VEC_PUSH(db.itemdef, ((DBItemDef){
@@ -1560,6 +1559,20 @@ static void compile_dbs(WIRCompiler *wc, VEC_WIRDB *g, VEC_DBType *dbs) {
                 .DEFAULT_VAL = field->has_initializer ?
                     resolve(wc, field->initializer) : 0 
             }), wc->arena);
+        }
+
+        // Handle data.
+        for (size_t j = 0; j < wdb->data.count; j++) {
+            VEC_DBVal values = VEC_EMPTY;
+            WIRData wdata = wdb->data.at[j];
+            for (size_t k = 0; k < wdata.values.count; k++) {
+                WIROperand wop = wdata.values.at[k];
+                if (op_is_strlit(wop))
+                    VEC_PUSH(values, (DBVal){ .str_val = interpolate(wc, wop) }, wc->arena);
+                else 
+                    VEC_PUSH(values, (DBVal){ .int_val = resolve(wc, wop) }, wc->arena);
+            }
+            VEC_PUSH(db.data, ((DBData){ .name = wdata.name, .values = values }), wc->arena);
         }
 
         VEC_PUSH(*dbs, db, wc->arena);
@@ -1591,7 +1604,7 @@ static void compile_wir(WIRCompiler *wc) {
         comp_if_pass(wcev, wc->arena);
         
         // Map concrete addresses to temporaries.
-        addr_alloc_pass(wc->arena, wcev);
+        addr_alloc_pass(wc, wcev);
     }
 
     // Then compile the code into commands.

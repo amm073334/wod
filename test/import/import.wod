@@ -4,7 +4,7 @@ apply "../bin";
 
 import "../_test.wod";
 
-void main() {
+cev void main() {
     cmd [122](1600005,0,0)("asdf");
     cmd [122](1600005,1536,0,0)("test_output");
     exit();

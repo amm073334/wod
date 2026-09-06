@@ -1,0 +1,25 @@
+// EXPECT: a 8 z 999
+
+apply "../bin";
+
+import "../_test.wod";
+
+cev void main() {
+    output("${Test.hello.d} ${Test.bello.b + Test.hello.a + Test.bello.c} ${Test.bello.d} ${Test.bello.a}");
+    exit();
+}
+
+dbdata Test hello {
+    .d = "a",
+    .a = 1,
+    .d = "b"
+}
+
+udbtype Test {
+    int a = 999;
+    int b = 2;
+    int c = 123;
+    str d;
+} = {
+    hello,
+}

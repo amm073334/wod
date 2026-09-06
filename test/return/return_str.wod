@@ -4,11 +4,11 @@ apply "../bin";
 
 import "../_test.wod";
 
-str test() {
+cev str test() {
     return "asdf";
 }
 
-void main() {
+cev void main() {
     output(test());
     exit();
 }

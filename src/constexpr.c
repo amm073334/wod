@@ -158,7 +158,7 @@ static Expr *visit_Expr(Arena *arena, Expr *expr) {
     case NODE_ExprDBDataElem: {
         ExprDBDataElem *e = (ExprDBDataElem *)expr;
         for (size_t i = 0; i < e->fields.count; i++) {
-            visit_Expr(arena, e->fields.at[i]);
+            visit_Expr(arena, (Expr *)e->fields.at[i]);
         }
         return expr;
     }
@@ -289,6 +289,8 @@ static void visit_Stmt(Arena *arena, Stmt *stmt) {
         visit_Expr(arena, (Expr *)s->data);
         return;
     }
+    case NODE_StmtDefDB:
+        return;
     }
 }
 

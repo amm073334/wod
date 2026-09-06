@@ -97,7 +97,7 @@ struct Symbol {
     bool defined;
 
     // For error reporting.
-    Token declaration;
+    Location declaration;
 
     // Path of the file the symbol is in. Only valid if symbol is
     // top-level; otherwise is `SV_NULL`.
@@ -125,7 +125,7 @@ struct Symbol {
 
 void env_init(Environment *env);
 Environment *env_new(Environment *parent, Arena *arena);
-Symbol *env_insert(Environment *env, StringView name, WodType type, Token declaration, bool defined, Arena *arena);
+Symbol *env_insert(Environment *env, StringView name, WodType type, Location declaration, bool defined, Arena *arena);
 Symbol *env_find(Environment *env, StringView name);
 Symbol *env_find_recursive(Environment *env, StringView name);
 

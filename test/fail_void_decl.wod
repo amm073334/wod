@@ -1,4 +1,4 @@
-void main() {
+cev void main() {
     void asdf = 5;
     int asdf = 4
     return;

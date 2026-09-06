@@ -100,11 +100,17 @@ static bool check_vartype(Parser *parser) {
 }
 
 static bool match_vartype(Parser *parser) {
-    if (check_vartype(parser)) advance(parser);
+    if (!check_vartype(parser)) return false;
+    advance(parser);
+    return true;
 }
 
 static void synchronize(Parser *parser) {
     parser->panic_mode = false;
+
+    // Always advance at least one token to avoid getting stuck
+    // in an infinite loop.
+    advance(parser);
 
     while (parser->current.type != TOK_EOF) {
         if (parser->previous.type == TOK_SEMICOLON) return;
@@ -948,7 +954,7 @@ static Stmt *def_db(Parser *parser) {
         (StmtDefDB){ .db = db.type == TOK_UDBTYPE ? DB_UDB : DB_CDB,
             .db_types = list, .symbols = VEC_EMPTY });
 
-    return stmt;
+    return (Stmt *)stmt;
 }
 
 static Stmt *db_data_decl(Parser *parser) {

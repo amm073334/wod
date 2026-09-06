@@ -247,7 +247,7 @@ static void visit_db_data(Ast2Wir *aw, ExprDBDataElem *e, WIRDB *db, size_t data
     if (e->no_body)
         return;
 
-    WIRData data = { .values = VEC_EMPTY };
+    WIRData data = { .name = e->name, .values = VEC_EMPTY };
     for (size_t i = 0; i < db->fields.count; i++) {
         bool found = false;
         for (size_t j = 0; j < e->fields.count; j++) {
@@ -1013,8 +1013,8 @@ WIR ast2wir_pass(VEC_Module *modules, Arena *arena) {
     };
     wir_init(aw.wir);
 
-    StmtDefDB *udb_def;
-    StmtDefDB *cdb_def;
+    StmtDefDB *udb_def = NULL;
+    StmtDefDB *cdb_def = NULL;
 
     // Do a pass to find all DB types and defs.
     for (size_t i = 0; i < modules->count; i++) {
@@ -1036,12 +1036,12 @@ WIR ast2wir_pass(VEC_Module *modules, Arena *arena) {
                         .data = VEC_EMPTY
                     };
                     
-                    for (size_t i = 0; i < s->fields.count; i++)
-                        visit_db_field_decl(&aw, s->fields.at[i], &db);
+                    for (size_t k = 0; k < s->fields.count; k++)
+                        visit_db_field_decl(&aw, s->fields.at[k], &db);
 
-                    for (size_t i = 0; i < s->data.count; i++) {
+                    for (size_t k = 0; k < s->data.count; k++) {
                         VEC_PUSH(db.data, ((WIRData){.values = VEC_EMPTY}), aw.arena);
-                        visit_db_data(&aw, s->data.at[i], &db, i);
+                        visit_db_data(&aw, s->data.at[k], &db, k);
                     }
 
                     VEC_PUSH(*g, db, aw.arena);
@@ -1054,8 +1054,7 @@ WIR ast2wir_pass(VEC_Module *modules, Arena *arena) {
                     else cdb_def = s;
                     break;
                 }
-                default:
-                    ;
+                default: break;
             }
         }
     }

@@ -1,4 +1,4 @@
-int asdf() {
+cev int asdf() {
     int a = 5;
     return a;
 }

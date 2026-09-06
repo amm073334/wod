@@ -4,7 +4,7 @@ apply "../bin";
 
 import "../_test.wod";
 
-void main() {
+cev void main() {
     int total = 0;
     
     int i = 1;

@@ -113,7 +113,7 @@ bool db_write_txt(DBType *ty, FILE *stream) {
         for (size_t i = 0; i < ty->data.count; i++) {
             DBData *data = &ty->data.at[i];
             
-            if (data->values.count != ty->itemdef.count);
+            if (data->values.count != ty->itemdef.count)
                 return false;
             
             for (size_t j = 0; j < data->values.count; j++) {
@@ -129,4 +129,6 @@ bool db_write_txt(DBType *ty, FILE *stream) {
 
     fprintf(stream, "\n");
     fprintf(stream, "<<--CSV_END-->>\n");
+
+    return true;
 }

@@ -2,7 +2,7 @@ apply "../bin";
 
 import "../_test.wod";
 
-void main() {
+cev void main() {
     str a = "asdf";
     a += "b";
     output("${a}");

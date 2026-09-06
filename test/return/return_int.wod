@@ -4,13 +4,13 @@ apply "../bin";
 
 import "../_test.wod";
 
-int test() {
+cev int test() {
     int a = 123;
     int b = a * 456 + 1;
     return a ^ b;
 }
 
-void main() {
+cev void main() {
     output("${test()}");
     exit();
 }

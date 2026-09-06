@@ -1,4 +1,4 @@
-// Archive of SDB formats.
+﻿// Archive of SDB formats.
 
 #ifndef WOD_SDB_H_
 #define WOD_SDB_H_
@@ -3988,6 +3988,8 @@ VEC_DBType sdb_3713(Arena *arena) {
         }
         VEC_PUSH(db, ty, arena);
     }
+
+    return db;
 }
 
 #endif // WOD_SDB_H_

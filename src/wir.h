@@ -352,6 +352,7 @@ typedef struct WIRField {
 VEC_DEF(WIRField);
 
 typedef struct WIRData {
+    StringView name;
     VEC_WIROperand values;
 } WIRData;
 VEC_DEF(WIRData);
@@ -374,7 +375,7 @@ typedef struct WIR {
     VEC_WIRDB g_cdbs;
 } WIR;
 
-GameData wir_pass(VEC_Module *modules, Arena *arena);
+GameData wir_pass(WIR *wir, Arena *arena);
 void wir_init(WIR *wir);
 void print_wir(WIR *wir);
 

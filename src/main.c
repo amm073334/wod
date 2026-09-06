@@ -35,7 +35,7 @@ int main(int argc, const char *argv[]) {
     WIR wir = ast2wir_pass(&modules, &arena);
     print_wir(&wir);
 
-    GameData gd = wir_pass(&modules, &arena);
+    GameData gd = wir_pass(&wir, &arena);
 
     // If an `apply` directory is specified, then apply the text output there.
     // Otherwise, just compile output into the directory the source file is in.

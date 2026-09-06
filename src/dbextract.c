@@ -289,6 +289,8 @@ int main(int argc, const char *argv[]) {
     }
 
     fprintf(out,
+        "    return db;\n");
+    fprintf(out,
         "}\n");
 
     return 0;

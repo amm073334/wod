@@ -1,5 +1,5 @@
-int f() {
+cev int f() {
     return;
 }
 
-void main() {}
+cev void main() {}

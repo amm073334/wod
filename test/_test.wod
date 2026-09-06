@@ -1,7 +1,7 @@
-void output(str out) {
+cev void output(str out) {
     cmd [122](&out,1536,0,0)("test_output");
 }
 
-void exit() {
+cev void exit() {
     cmd [175]()();
 }
