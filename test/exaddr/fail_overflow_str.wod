@@ -1,0 +1,9 @@
+apply "../bin";
+
+import "../_test.wod";
+
+cev void main() {
+    str[6] a;
+
+    exit();
+}

@@ -315,6 +315,10 @@ typedef struct WIRCev {
     Qualifier qualifier;
     VEC_PTR_WIRInst insts;
 
+    // For debugging, as it's possible for the CSelf space
+    // to overflow at compile time.
+    Location loc;
+
     // Convenience fields to keep track of the lowest unused
     // virtual temporary.
     size_t n_temp_ints;
@@ -322,7 +326,16 @@ typedef struct WIRCev {
 
     // If true, allocate globals for the common event's address
     // space instead of using CSelfs.
+    // This also means that any callers of the common event will
+    // need to place their arguments in the correct globals instead
+    // of just emitting a call.
     bool is_exaddr;
+
+    // Maps virtual offsets to addresses.
+    VEC_int32_t local_int_map;
+    VEC_int32_t local_str_map;
+    VEC_int32_t temp_int_map;
+    VEC_int32_t temp_str_map;
 } WIRCev;
 VEC_DEF(WIRCev);
 

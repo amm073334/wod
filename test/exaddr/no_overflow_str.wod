@@ -1,0 +1,11 @@
+// EXPECT: ok
+
+apply "../bin";
+
+import "../_test.wod";
+
+cev void main() {
+    str[5] a;
+    output("ok");
+    exit();
+}

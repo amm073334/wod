@@ -607,6 +607,9 @@ static WIROperand visit_Expr(Ast2Wir *aw, Expr *expr) {
             .as.interp = results
         };
     }
+    case NODE_ExprStructLitField:
+    case NODE_ExprDBDataElem:
+        UNREACHABLE;
     }
 
     UNREACHABLE;
@@ -753,6 +756,7 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
                     .path = aw->current_module->source->path,
                     .name = s->name
                 },
+                .loc = stmt->tok.loc,
                 .insts = VEC_EMPTY,
                 .n_temp_ints = 0,
                 .n_temp_strs = 0,
