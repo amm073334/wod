@@ -1,0 +1,17 @@
+// EXPECT: 7006652 hey
+
+apply "../bin";
+
+import "../_test.wod";
+
+exaddr cev str hmm(int a, int b, str s) {
+    return "${a * b} ${s}";
+}
+
+cev void main() {
+    int x = 1234;
+    int y = 5678;
+    str z = "hey";
+    output("${hmm(x, y, z)}");
+    exit();
+}

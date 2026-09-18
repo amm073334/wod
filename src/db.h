@@ -1,4 +1,4 @@
-﻿#ifndef WOD_DB_H_
+#ifndef WOD_DB_H_
 #define WOD_DB_H_
 
 #include <stdio.h>

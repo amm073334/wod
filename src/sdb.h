@@ -1,4 +1,4 @@
-﻿// Archive of SDB formats.
+// Archive of SDB formats.
 
 #ifndef WOD_SDB_H_
 #define WOD_SDB_H_

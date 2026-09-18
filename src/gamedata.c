@@ -220,6 +220,30 @@ void gd_write_dir(GameData *gd, StringView out) {
 
     {
         StringView path = 
+            sv_concat(&arena, basic_data_dir, SV("SysDataBase.Auto.txt"));
+        if (!path.data)
+            goto alloc_error;
+
+        FILE *sdb_dat = fopen(path.data, "wb");
+        if (!sdb_dat) {
+            fprintf(stderr, "Failed to open SysDataBase.Auto.txt.");
+            goto cleanup;
+        }
+
+        fprintf(sdb_dat, "[DATABASE_TEXT_OUTPUT]\n");
+        fprintf(sdb_dat, "TYPE_NUM=%zu\n", gd->sdb.count);
+        for (size_t i = 0; i < gd->sdb.count; i++) {
+            fprintf(sdb_dat, "----\n");
+            if (!db_write_txt(&gd->sdb.at[i], sdb_dat)) {
+                fprintf(stderr, "Invalid SDB.");
+                goto cleanup;
+            }
+        }
+        fclose(sdb_dat);
+    }
+
+    {
+        StringView path = 
             sv_concat(&arena, map_data_dir, SV("SampleMap.mps.Auto.txt"));
         if (!path.data)
             goto alloc_error;

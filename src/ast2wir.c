@@ -255,7 +255,7 @@ static void visit_db_data(Ast2Wir *aw, ExprDBDataElem *e, WIRDB *db, size_t data
 
             found = true;
 
-            Expr *value = e->fields.at[i]->value;
+            Expr *value = e->fields.at[j]->value;
             assert(value->type.is_constexpr);
 
             WIROperand wop = { 0 };
@@ -428,8 +428,22 @@ static WIROperand visit_Expr(Ast2Wir *aw, Expr *expr) {
                 emit_to_current_cev(aw, (WIRInst *)inst);
                 return dest;
             }
+        } else if (left.kind == OPKIND_GLOBAL_UDBTYPE) {
+            // Find index.
+            assert(e->left->type.basetype == TYPE_DBTYPE);
+            Symbol *data = env_find(e->left->type.db_named_data, e->name.text);
+            assert(data);
+
+            return (WIROperand){
+                .kind = OPKIND_DBDATA,
+                .as.dbdata = {
+                    .type_id = heapalloc(aw->arena, left),
+                    .data_id = heapalloc(aw->arena, WIR_IMM_I((int32_t)data->local_offset))
+                }
+            };
         }
-        UNIMPLEMENTED;
+
+        UNREACHABLE;
         return (WIROperand){0};
     }
     case NODE_ExprBinary: {
@@ -701,7 +715,7 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
 
         switch (s->sym->type.basetype) {
         case TYPE_STR: {
-            if (!s->sym->env->parent) {
+            if (!s->sym->enclosing_env->parent) {
                 assert(!s->initializer);
                 VEC_PUSH(aw->wir->g_strs, ((Qualifier){
                     .path = aw->current_module->source->path,
@@ -723,7 +737,7 @@ static void visit_Stmt(Ast2Wir *aw, Stmt *stmt) {
             break;
         }
         default: {
-            if (!s->sym->env->parent) {
+            if (!s->sym->enclosing_env->parent) {
                 assert(!s->initializer);
                 VEC_PUSH(aw->wir->g_ints, ((Qualifier){
                     .path = aw->current_module->source->path,

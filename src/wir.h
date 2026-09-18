@@ -325,10 +325,7 @@ typedef struct WIRCev {
     size_t n_temp_strs;
 
     // If true, allocate globals for the common event's address
-    // space instead of using CSelfs.
-    // This also means that any callers of the common event will
-    // need to place their arguments in the correct globals instead
-    // of just emitting a call.
+    // space in the case the CSelf space overflows.
     bool is_exaddr;
 
     // Maps virtual offsets to addresses.

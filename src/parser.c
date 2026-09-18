@@ -761,7 +761,11 @@ static Stmt *statement(Parser *parser) {
 }
 
 static Stmt *cev_decl(Parser *parser) {
-    bool is_exaddr = match(parser, TOK_EXADDR);
+    bool is_exaddr = false; 
+    if (parser->previous.type == TOK_EXADDR) {
+        is_exaddr = true;
+        consume(parser, TOK_CEV, SV("Expected 'cev'."));
+    }
 
     advance(parser);
     switch (parser->previous.type) {
@@ -801,7 +805,7 @@ static Stmt *cev_decl(Parser *parser) {
 }
 
 static void data_item(Parser *parser, VEC_PTR_ExprStructLitField *vec) {
-    do {
+    if (!check(parser, TOK_RIGHT_BRACE)) do {
         consume(parser, TOK_DOT, SV("Expected '.' before field name."));
         consume(parser, TOK_IDENTIFIER, SV("Expected field name."));
         Token tok = parser->previous;
@@ -910,6 +914,8 @@ static Stmt *db_type_decl(Parser *parser) {
         VEC_PUSH(fields, stmt, parser->arena);
     }
     
+    consume(parser, TOK_RIGHT_BRACE, SV("Expected '}' after DB fields."));
+
     consume(parser, TOK_EQUAL, SV("Expected '=' after DB type definition."));
     consume(parser, TOK_LEFT_BRACE, SV("Expected '{' before DB data list."));
     
@@ -985,7 +991,7 @@ static Stmt *top_decl(Parser *parser) {
         return db_type_decl(parser);
     }
 
-    if (match(parser, TOK_CEV)) {
+    if (match(parser, TOK_CEV) || match(parser, TOK_EXADDR)) {
         return cev_decl(parser);
     }
 

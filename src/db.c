@@ -117,7 +117,7 @@ bool db_write_txt(DBType *ty, FILE *stream) {
                 return false;
             
             for (size_t j = 0; j < data->values.count; j++) {
-                if (ty->itemdef.at[i].type == DBITEM_INT)
+                if (ty->itemdef.at[j].type == DBITEM_INT)
                     fprintf(stream, "%d,", data->values.at[j].int_val);
                 else
                     fprintf(stream, "\"" SV_FMT "\",", SV_FMT_VAL(data->values.at[j].str_val));

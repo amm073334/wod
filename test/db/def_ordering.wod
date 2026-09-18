@@ -1,0 +1,56 @@
+// EXPECT: 123 456 111 222
+
+apply "../bin";
+
+import "../_test.wod";
+
+cdbtype C_A {
+    int a;
+} = {
+    { .a = 123 }
+}
+
+cdbtype C_B {
+    int a;
+} = { 
+    { .a = 456 }
+}
+
+udbtype U_A {
+    int a;
+} = {
+    { .a = 111 }
+}
+
+udbtype U_B {
+    int a;
+} = { 
+    { .a = 222 }
+}
+
+cev void main() {
+    int c_a;
+    int c_b;
+    
+    int u_a;
+    int u_b;
+
+    // Read CDB types.
+    cmd [250](0,0,0,4096,&c_b)("","","","");
+    cmd [250](1,0,0,4096,&c_a)("","","","");
+    
+    // Read UDB types.
+    cmd [250](0,0,0,4608,&u_b)("","","","");
+    cmd [250](1,0,0,4608,&u_a)("","","","");
+
+    output("${c_a} ${c_b} ${u_a} ${u_b}");
+    exit();
+}
+
+def cdbtype {
+    C_B, C_A
+}
+
+def udbtype {
+    U_B, U_A
+}

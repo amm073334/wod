@@ -1,0 +1,23 @@
+apply "../bin";
+
+import "../_test.wod";
+
+def udbtype {
+    A
+}
+
+udbtype A {
+    int a;
+    int b = 2;
+    int c = 123;
+} = {
+    { .a = 0 },
+    yup { .a = 0 },
+}
+
+cev void main() {
+    A.yup.c = 123;
+    
+    output("${A[0].a} ${A[0].b} ${A[0].c} ${A.yup.a}");
+    exit();
+}

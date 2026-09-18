@@ -70,7 +70,6 @@ static bool wt_equal(WodType a, WodType b) {
         case TYPE_ERROR:
         case TYPE_VOID:
         case TYPE_MODULE:
-            UNREACHABLE;
             return false;
 
         case TYPE_INT:
@@ -219,11 +218,11 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
         ExprAccess *e = (ExprAccess *)expr;
         visit_Expr(tc, e->left);
 
-        Symbol *search = NULL;
+        e->sym = NULL;
 
         switch (e->left->type.basetype) {
         case TYPE_DBDATA: {
-            search = env_find(e->left->type.db_type->type.db_fields, e->name.text);
+            e->sym = env_find(e->left->type.db_type->type.db_fields, e->name.text);
             break;
         }
 
@@ -231,24 +230,33 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
         //       disabled as a feature.
         case TYPE_MODULE:
             assert(e->left->type.module_env);
-            search = env_find(e->left->type.module_env, e->name.text);
+            e->sym = env_find(e->left->type.module_env, e->name.text);
             break;
 
         case TYPE_DBTYPE:
-            tc_expr_error(tc, expr, &e->left->tok,
-                SV("Tried to access member of DB directly."));
+            if (e->left->type.db_kind == DB_CDB) {
+                e->sym = NULL;
+                tc_expr_error(tc, expr, &e->left->tok,
+                    SV("CDB types cannot be accessed by data name."));
+                return;
+            }
+            e->sym = env_find(e->left->type.db_named_data, e->name.text);
             break;
 
+        case TYPE_ERROR:
+            // Avoid cascading errors.
+            e->sym = NULL;
+            expr->type.basetype = TYPE_ERROR;
+            return;
+        
         default:
             tc_expr_error(tc, expr, &e->left->tok,
                 SV("Tried to access member of type that has no members."));
             break;
         }
 
-        e->sym = search;
-
-        if (search)
-            expr->type = search->type;
+        if (e->sym)
+            expr->type = e->sym->type;
         else
             tc_expr_error(tc, expr, &e->name, SV("No such member found."));
 
@@ -260,10 +268,16 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
         visit_Expr(tc, e->left);
         visit_Expr(tc, e->right);
 
+        // Break early to avoid cascading errors.
+        if (e->left->type.basetype == TYPE_ERROR || e->right->type.basetype == TYPE_ERROR) {
+            expr->type.basetype = TYPE_ERROR;
+            return;
+        }
+        
         if (!wt_equal(e->left->type, e->right->type))
             tc_expr_error(tc, expr, &e->left->tok,
                 SV("Operands of binary operation are of different types."));
-
+        
         BaseType bt;
         switch (e->op.type) {
         case TOK_PLUS:
@@ -841,53 +855,18 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
     }
     case NODE_StmtDBTypeDecl: {
         StmtDBTypeDecl *s = (StmtDBTypeDecl *)stmt;
+
+        // Should have received a symbol during the top-level pass.
+        // Otherwise, something failed already.
         if (!s->sym) return;
 
-        assert(tc->current_env = tc->top_level_env);
-        tc->current_env = s->sym->type.db_fields;
+        // Check field initializers.
         for (size_t i = 0; i < s->fields.count; i++) {
             StmtVarDecl *field = s->fields.at[i];
-            assert(!field->is_const);
 
-            if (field->is_const)
-                tc_error(tc, &field->base.tok, SV("DB field cannot be 'const'."));
-
-            Symbol *field_sym = try_insert_vardecl(tc, field);
-            if (field_sym) {
-                field_sym->local_offset = i;
-                if (field->initializer) {
-                    if (!field->initializer->type.is_constexpr)
-                        tc_error(tc, &field->initializer->tok,
-                            SV("DB field initializer must be constant expression."));
-                            
-                    if (field->initializer->type.basetype == TYPE_STR)
-                        tc_error(tc, &field->initializer->tok,
-                            SV("DB field initializer cannot be a string."));
-                }
-            }
+            if (field->initializer)
+                visit_Expr(tc, field->initializer);
         }
-
-        // For UDB types, data elements can have names. Keep track of named elements.
-        if (s->db.type == TOK_UDBTYPE) {
-            tc->current_env = s->sym->type.db_named_data;
-            for (size_t i = 0; i < s->data.count; i++) {
-                if (sv_is_null(s->data.at[i]->name)) continue;
-
-                Symbol *sym = env_insert(s->sym->type.db_named_data, s->data.at[i]->name, (WodType){
-                    .basetype = TYPE_DBDATA,
-                    .is_assignable = false,
-                    .is_constexpr = false,
-                    .db_type = s->sym,
-                }, s->data.at[i]->base.tok.loc, !s->data.at[i]->no_body, tc->arena);
-
-                if (sym) {
-                    sym->local_offset = i;
-                } else {
-                    tc_error(tc, &s->data.at[i]->base.tok, SV("Duplicate data name."));
-                }
-            }
-        }
-        tc->current_env = tc->top_level_env;
         
         // Check that defined data elements actually match the specified DB type's fields.
         for (size_t i = 0; i < s->data.count; i++) {
@@ -921,7 +900,7 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
         // Check that data element is actually present in the UDB type.
         s->data_sym = env_find(s->dbtype_sym->type.db_named_data, s->data->name);
         if (!s->data_sym) {
-            tc_error(tc, &s->data->base.tok, SV("No such data element listed in UDB."));
+            tc_error(tc, &s->data->base.tok, SV("No such data element listed in UDB type."));
             return;
         }
 
@@ -1093,8 +1072,59 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
             if (!s->sym) {
                 tc_error(tc, &stmt->tok, SV("Redeclaration of name."));
                 break;
-            } 
-            
+            }
+
+            // Insert fields. Don't visit initializers yet since they may contain other top-level symbols.
+            tc->current_env = s->sym->type.db_fields;
+            for (size_t j = 0; j < s->fields.count; j++) {
+                StmtVarDecl *field = s->fields.at[j];
+
+                if (field->is_const)
+                    tc_error(tc, &field->base.tok, SV("DB field cannot be 'const'."));
+
+                Symbol *field_sym = try_insert_vardecl(tc, field);
+                if (field_sym) {
+
+                    // Disallow assigning to UDB fields.
+                    if (db_kind == DB_UDB)
+                        field_sym->type.is_assignable = false;
+
+                    field_sym->local_offset = j;
+                    if (field->initializer) {
+                        if (!field->initializer->type.is_constexpr)
+                            tc_error(tc, &field->initializer->tok,
+                                SV("DB field initializer must be constant expression."));
+                                
+                        if (field->initializer->type.basetype == TYPE_STR)
+                            tc_error(tc, &field->initializer->tok,
+                                SV("DB field initializer cannot be a string."));
+                    }
+                }
+            }
+
+            // For UDB types, data elements can have names. Keep track of named elements.
+            if (s->db.type == TOK_UDBTYPE) {
+                tc->current_env = s->sym->type.db_named_data;
+                for (size_t j = 0; j < s->data.count; j++) {
+                    ExprDBDataElem *elem = s->data.at[j];
+                    if (sv_is_null(elem->name)) continue;
+
+                    elem->sym = env_insert(s->sym->type.db_named_data, elem->name, (WodType){
+                        .basetype = TYPE_DBDATA,
+                        .is_assignable = false,
+                        .is_constexpr = false,
+                        .db_type = s->sym,
+                    }, elem->base.tok.loc, !elem->no_body, tc->arena);
+
+                    if (elem->sym) {
+                        elem->sym->local_offset = j;
+                    } else {
+                        tc_error(tc, &elem->base.tok, SV("Duplicate data name."));
+                    }
+                }
+            }
+            tc->current_env = tc->top_level_env;
+
             s->sym->top_level_path = tc->modules->at[module_index].source->path;
 
             if (db_kind == DB_UDB)
@@ -1128,6 +1158,16 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
             }
             break;
         }
+        case NODE_StmtDBDataDecl: {
+            // Any named data elements should be declared when visiting the DB type declaration
+            // in the top-level pass, so they don't need to be declared here.
+            //
+            // Visiting the data element's members should be done in the second pass later,
+            // so they're also not handled here.
+            //
+            // So just break.
+            break;
+        }
         default: UNREACHABLE;
         }
     }
@@ -1137,11 +1177,10 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
         source_error(*tc->modules->at[module_index].source, SV("No 'main' function."));
     }
 
-    // Do a second pass to look inside functions.
+    // Do a second pass to look inside declarations.
     for (size_t i = 0; i < ast->stmts.count; i++) {
         Stmt *stmt = ast->stmts.at[i];
-        if (stmt->kind == NODE_StmtCevDecl || stmt->kind == NODE_StmtDefDB)
-            visit_Stmt(tc, stmt);
+        visit_Stmt(tc, stmt);
     }
 
     // Update module info.
@@ -1150,12 +1189,14 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
     return tc->had_error ? NULL : tc->top_level_env;
 }
 
-static void check_def_lists(Typechecker *tc, VEC_PTR_StmtDBTypeDecl *all_decls, StmtDefDB *def) {
+static void check_def_lists(Typechecker *tc, VEC_PTR_StmtDBTypeDecl *all_decls, StmtDefDB *def, bool cdb) {
     // If there is at least one DB type decl, there should be a def list.
     if (all_decls->count > 0 && !def) {
         tc->had_error = true;
         source_error(*tc->modules->at[tc->modules->count - 1].source,
-            SV("Could not find DB 'def' list, but DB type declarations were found."));
+            cdb ?
+            SV("Could not find CDB 'def' list, but CDB type declarations were found.")
+            : SV("Could not find UDB 'def' list, but UDB type declarations were found."));
         return;
     }
 
@@ -1171,7 +1212,9 @@ static void check_def_lists(Typechecker *tc, VEC_PTR_StmtDBTypeDecl *all_decls, 
 
         if (!found) {
             tc_error(tc, &all_decls->at[i]->base.tok,
-                SV("DB type was not found in the corresponding DB 'def' list."));
+                cdb ?
+                SV("CDB type was not found in the corresponding CDB 'def' list.")
+                : SV("UDB type was not found in the corresponding UDB 'def' list."));
         }
     }
 }
@@ -1195,8 +1238,8 @@ bool typecheck_modules(VEC_Module *modules, Arena *arena) {
         typecheck_file(&tc, i);
     }
 
-    check_def_lists(&tc, &tc.all_udb_decls, tc.def_udb);
-    check_def_lists(&tc, &tc.all_cdb_decls, tc.def_cdb);
+    check_def_lists(&tc, &tc.all_udb_decls, tc.def_udb, false);
+    check_def_lists(&tc, &tc.all_cdb_decls, tc.def_cdb, true);
 
     // For UDB types, data elements can be listed just by name without a body, but their body must
     // be completed elsewhere if so.

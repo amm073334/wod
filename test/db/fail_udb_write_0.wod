@@ -1,0 +1,35 @@
+apply "../bin";
+
+import "../_test.wod";
+
+def udbtype {
+    A
+}
+
+udbtype A {
+    int a;
+    int b = 2;
+    int c = 123;
+} = {
+    { .a = 0 },
+    yup { .a = 0 },
+}
+
+cev void main() {
+    // Unlike with CDB types, reading from a nonexistent data element for a
+    // UDB type will issue an error.
+    //
+    // For some reason, writing to the UDB may or may not work, depending on
+    // some unknown circumstances. (The engine does not allow you to do it
+    // directly, but some command editing makes it possible.)
+    //
+    // This could be convenient as a way to have non-persistent state, but
+    // it seems to be inconsistent in terms of whether or not it works.
+    //
+    // Since it's kind of unstable, just disallow it for now.
+ 
+    A[0].a = 123;
+    
+    output("${A[0].a} ${A[0].b} ${A[0].c} ${A.yup.a}");
+    exit();
+}

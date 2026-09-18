@@ -9,6 +9,8 @@
 #define TEST_OUTPUT_FILE    "test_output"
 #define TEST_TIMEOUT_MS     10000
 
+#define EXIT_COMPILE_ERROR  2
+
 #define C_RED "\x1b[31m"
 #define C_GRN "\x1b[32m"
 #define C_RESET "\x1b[m"
@@ -110,21 +112,21 @@ void test_one(const char *input_file) {
     }
 
     int ret = system(command.data);
-    if (ret == 1) {
-        failed(file_name, "Test crashed the compiler.");
-        goto end;
-    }
 
     // If test should fail, just check exit code.
     if (starts_with(file_name, "fail")) {
-        if (ret != 2) failed(file_name, "Test that should fail to compile compiled successfully.");
-        else passed(file_name);
+        if (ret == EXIT_COMPILE_ERROR) passed(file_name);
+        else if (ret == 0) failed(file_name, "Test that should fail to compile compiled successfully.");
+        else failed(file_name, "Unexpected error; the compiler may have crashed.");
         goto end;
     }
 
     // If test should compile successfully, exit code should be 0.
-    if (ret != 0) {
+    if (ret == EXIT_COMPILE_ERROR) {
         failed(file_name, "Test failed to compile.");
+        goto end;
+    } else if (ret != 0) {
+        failed(file_name, "Unexpected error; the compiler may have crashed.");
         goto end;
     }
 

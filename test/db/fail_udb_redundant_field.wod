@@ -22,4 +22,15 @@ udbtype Test {
     str d;
 } = {
     hello,
+    bello
+}
+
+dbdata Test bello {
+    .b = 3,
+    .d = "z",
+    .c = 4,
+}
+
+def udbtype {
+    Test
 }

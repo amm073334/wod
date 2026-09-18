@@ -1,0 +1,12 @@
+// EXPECT: zxcv
+
+apply "../bin";
+
+import "../_test.wod";
+
+exaddr cev void main() {
+    str[6] a;
+    a[5] = "zxcv";
+    output("${a[5]}")
+    exit();
+}

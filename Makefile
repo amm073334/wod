@@ -10,7 +10,7 @@ OBJECTS := $(addprefix $(BUILD_DIR)/,$(notdir $(INCLUDES:.c=.obj)))
 
 TESTS := $(wildcard $(TEST_DIR)/*.wod)
 
-WARNINGS = /Wall /wd5045 /wd4820 /wd4061 /wd4668 /wd4201
+FLAGS = /utf-8 /Wall /wd5045 /wd4820 /wd4061 /wd4668 /wd4201
 
 release: wodc.exe
 
@@ -19,19 +19,19 @@ debug: wodc.exe test.exe
 
 wodc.exe: $(HEADERS) $(SOURCES)
 	@ if not exist $(BUILD_DIR) mkdir $(BUILD_DIR)
-	@ cl $(CFLAGS) $(WARNINGS) /Fo$(BUILD_DIR)\ \
+	@ cl $(CFLAGS) $(FLAGS) /Fo$(BUILD_DIR)\ \
 		$(SOURCE_DIR)/main.c $(filter-out $(MAINS),$(SOURCES)) /link /out:$@
 
 test.exe: wodc.exe
 	@ if not exist $(BUILD_DIR) mkdir $(BUILD_DIR)
-	@ cl $(CFLAGS) $(WARNINGS) /Fo$(BUILD_DIR)\ $(SOURCE_DIR)/test.c $(OBJECTS) /link /out:$@
+	@ cl $(CFLAGS) $(FLAGS) /Fo$(BUILD_DIR)\ $(SOURCE_DIR)/test.c $(OBJECTS) /link /out:$@
 
 test: test.exe
 	@ .\test.exe -f test
 
 dbextract.exe: $(SOURCE_DIR)/dbextract.c
 	@ if not exist $(BUILD_DIR) mkdir $(BUILD_DIR)
-	@ cl $(CFLAGS) /Zi $(WARNINGS) /Fo$(BUILD_DIR)\ $(SOURCE_DIR)/dbextract.c $(SOURCE_DIR)/source.c $(SOURCE_DIR)/memory.c $(SOURCE_DIR)/sv.c /link /out:$@
+	@ cl $(CFLAGS) /Zi $(FLAGS) /Fo$(BUILD_DIR)\ $(SOURCE_DIR)/dbextract.c $(SOURCE_DIR)/source.c $(SOURCE_DIR)/memory.c $(SOURCE_DIR)/sv.c /link /out:$@
 
 clean:
 	@ if exist build rmdir /s /q build

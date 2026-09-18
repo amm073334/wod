@@ -148,7 +148,16 @@ typedef struct {
     Expr base;
     StringView name;
     VEC_PTR_ExprStructLitField fields;
+
+    // True for UDB data elements that are given
+    // a name without any definition. This is to
+    // facilitate forward declaration of data
+    // elements, in the case that a single data
+    // element is associated with some complex
+    // logic that should be in its own file.
     bool no_body;
+
+    Symbol *sym;
 } ExprDBDataElem;
 VEC_PTR_DEF(ExprDBDataElem);
 

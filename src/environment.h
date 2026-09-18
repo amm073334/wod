@@ -83,7 +83,7 @@ struct WodType {
 };
 
 struct Symbol {
-    Environment *env;
+    Environment *enclosing_env;
 
     StringView name;
     WodType type;
@@ -105,7 +105,7 @@ struct Symbol {
     StringView top_level_path;
 
     union {
-        // Keeps track of offsets for locals and DB fields.
+        // Keeps track of offsets for locals, DB fields, and named DB data.
         //
         // For locals, these are populated in the AST2WIR phase
         // because the tree traversal needs to simulate a compile-time stack

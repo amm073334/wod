@@ -1,0 +1,12 @@
+// EXPECT: 1234
+
+apply "../bin";
+
+import "../_test.wod";
+
+exaddr cev void main() {
+    int[96] a;
+    a[95] = 1234;
+    output("${a[95]}");
+    exit();
+}

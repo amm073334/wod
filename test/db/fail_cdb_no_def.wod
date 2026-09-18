@@ -1,0 +1,15 @@
+apply "../bin";
+
+import "../_test.wod";
+
+cdbtype Test {
+    int a = 999;
+    int b = 2;
+    int c = 123;
+} = {
+    { .a = 1 },
+}
+
+cev void main() {
+    exit();
+}
