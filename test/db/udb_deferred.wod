@@ -14,7 +14,7 @@ dbdata Test hello {
     .a = 1
 }
 
-udbtype Test {
+udbt Test {
     int a = 999;
     int b = 2;
     int c = 123;
@@ -30,6 +30,6 @@ dbdata Test bello {
     .c = 4,
 }
 
-def udbtype {
+def udbt {
     Test
 }

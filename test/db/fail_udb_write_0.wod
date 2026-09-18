@@ -2,11 +2,11 @@ apply "../bin";
 
 import "../_test.wod";
 
-def udbtype {
+def udbt {
     A
 }
 
-udbtype A {
+udbt A {
     int a;
     int b = 2;
     int c = 123;

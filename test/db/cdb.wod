@@ -4,7 +4,7 @@ apply "../bin";
 
 import "../_test.wod";
 
-cdbtype TestCDB {
+cdbt TestCDB {
     int a;
     int b = 2;
     int c = 123;
@@ -15,6 +15,6 @@ cev void main() {
     exit();
 }
 
-def cdbtype {
+def cdbt {
     TestCDB,
 }

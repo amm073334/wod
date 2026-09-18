@@ -4,25 +4,25 @@ apply "../bin";
 
 import "../_test.wod";
 
-cdbtype C_A {
+cdbt C_A {
     int a;
 } = {
     { .a = 123 }
 }
 
-cdbtype C_B {
+cdbt C_B {
     int a;
 } = { 
     { .a = 456 }
 }
 
-udbtype U_A {
+udbt U_A {
     int a;
 } = {
     { .a = 111 }
 }
 
-udbtype U_B {
+udbt U_B {
     int a;
 } = { 
     { .a = 222 }
@@ -47,10 +47,10 @@ cev void main() {
     exit();
 }
 
-def cdbtype {
+def cdbt {
     C_B, C_A
 }
 
-def udbtype {
+def udbt {
     U_B, U_A
 }

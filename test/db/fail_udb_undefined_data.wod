@@ -2,7 +2,7 @@ apply "../bin";
 
 import "../_test.wod";
 
-udbtype Test {
+udbt Test {
     int a = 999;
     int b = 2;
     int c = 123;
@@ -19,6 +19,6 @@ cev void main() {
     exit();
 }
 
-def udbtype {
+def udbt {
     Test
 }

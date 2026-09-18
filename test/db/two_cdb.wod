@@ -4,13 +4,13 @@ apply "../bin";
 
 import "../_test.wod";
 
-cdbtype A {
+cdbt A {
     int a;
     int b = 2;
     int c = 123;
 } = { default }
 
-cdbtype B {
+cdbt B {
     int a;
     int b = 21;
     int c;
@@ -27,6 +27,6 @@ cev void main() {
     exit();
 }
 
-def cdbtype {
+def cdbt {
     B, A
 }
