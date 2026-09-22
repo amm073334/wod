@@ -129,6 +129,45 @@ static void tc_expr_error(Typechecker *tc, Expr *expr, Token *token, StringView 
     tc_error(tc, token, message);
 }
 
+static Expr *make_int(Arena *arena, Token tok, int32_t value) {
+    ExprIntLit *out = arena_alloc_assert(arena, sizeof(ExprIntLit));
+    out->base.tok = tok;
+    out->base.kind = NODE_ExprIntLit;
+    out->base.type = (WodType){
+        .basetype = TYPE_INT,
+        .is_assignable = false,
+        .is_constexpr = true
+    };
+    out->value = value;
+    return (Expr *)out;
+}
+
+static Expr *make_str(Arena *arena, Token tok, StringView value) {
+    ExprStrLit *out = arena_alloc_assert(arena, sizeof(ExprStrLit));
+    out->base.tok = tok;
+    out->base.kind = NODE_ExprStrLit;
+    out->base.type = (WodType){
+        .basetype = TYPE_STR,
+        .is_assignable = false,
+        .is_constexpr = true
+    };
+    out->value = value;
+    return (Expr *)out;
+}
+
+static Expr *make_bool(Arena *arena, Token tok, bool value) {
+    ExprBoolLit *out = arena_alloc_assert(arena, sizeof(ExprBoolLit));
+    out->base.tok = tok;
+    out->base.kind = NODE_ExprBoolLit;
+    out->base.type = (WodType){
+        .basetype = TYPE_BOOL,
+        .is_assignable = false,
+        .is_constexpr = true
+    };
+    out->value = value;
+    return (Expr *)out;
+}
+
 static Symbol *find_including_imports(Typechecker *tc, Environment *env, StringView name) {
     Symbol *sym = env_find_recursive(env, name);
     if (sym) return sym;
@@ -151,7 +190,7 @@ static Symbol *find_including_imports(Typechecker *tc, Environment *env, StringV
     return sym;
 }
 
-static void visit_Expr(Typechecker *tc, Expr *expr) {
+static Expr *visit_Expr(Typechecker *tc, Expr *expr) {
     expr->env = tc->current_env;
 
     // Initialize node's type to TYPE_NONE. If an error occurs somewhere,
@@ -167,13 +206,22 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
             tc_expr_error(tc, expr, &e->base.tok, SV("Undeclared or ambiguous identifier."));
         } else {
             expr->type = e->sym->type;
+        
+            if (expr->type.is_constexpr) {
+                switch (expr->type.basetype) {
+                    case TYPE_INT: return make_int(tc->arena, expr->tok, e->sym->const_i);
+                    case TYPE_STR: return make_str(tc->arena, expr->tok, e->sym->const_s);
+                    case TYPE_BOOL: return make_bool(tc->arena, expr->tok, e->sym->const_b);
+                    default: UNREACHABLE;
+                }
+            }
         }
-        return;
+        return expr;
     }
     case NODE_ExprArray: {
         ExprArray *e = (ExprArray *)expr;
 
-        visit_Expr(tc, e->left);
+        e->left = visit_Expr(tc, e->left);
 
         if (e->left->type.basetype != TYPE_ARRAY
             && e->left->type.basetype != TYPE_DBTYPE) {
@@ -181,7 +229,7 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
                 SV("Tried to index into non-array type."));
         }
 
-        visit_Expr(tc, e->index);
+        e->index = visit_Expr(tc, e->index);
 
         if (e->index->type.basetype != TYPE_INT) {
             tc_expr_error(tc, expr, &e->index->tok,
@@ -192,31 +240,39 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
             && !e->index->type.is_constexpr) {
 
             tc_expr_error(tc, expr, &e->index->tok,
-                SV("Currently, indices of array accesses must be constant expressions."));
+                SV("Index of array access must be constant expression."));
         }
 
-        if (expr->type.basetype != TYPE_ERROR) {
-            if (e->left->type.basetype == TYPE_DBTYPE) {
-                assert(e->left->kind == NODE_ExprVar);
+        if (expr->type.basetype == TYPE_ERROR) return expr;
+        
+        if (e->left->type.basetype == TYPE_DBTYPE) {
+            assert(e->left->kind == NODE_ExprVar);
 
-                expr->type = (WodType){
-                    .basetype = TYPE_DBDATA,
-                    .is_assignable = false,
-                    .is_constexpr = false,
-                    .db_type = ((ExprVar *)e->left)->sym
-                };
-            } else {
-                expr->type = *e->left->type.array_of;
+            expr->type = (WodType){
+                .basetype = TYPE_DBDATA,
+                .is_assignable = false,
+                .is_constexpr = false,
+                .db_type = ((ExprVar *)e->left)->sym
+            };
+        } else {
+            assert(e->left->type.basetype == TYPE_ARRAY);
+            assert(e->index->kind == NODE_ExprIntLit);
 
-                if (!expr->type.is_constexpr)
-                    expr->type.is_assignable = true;
-            }
+            if (((ExprIntLit *)e->index)->value < 0)
+                tc_expr_error(tc, expr, &e->index->tok,
+                    SV("Index of array access must be positive."));
+
+            if (((ExprIntLit *)e->index)->value >= e->left->type.array_len)
+                tc_expr_error(tc, expr, &e->index->tok,
+                    SV("Index of array access is out of bounds."));
+
+            expr->type = *e->left->type.array_of;
         }
-        return;
+        return expr;
     }
     case NODE_ExprAccess: {
         ExprAccess *e = (ExprAccess *)expr;
-        visit_Expr(tc, e->left);
+        e->left = visit_Expr(tc, e->left);
 
         e->sym = NULL;
 
@@ -238,7 +294,7 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
                 e->sym = NULL;
                 tc_expr_error(tc, expr, &e->left->tok,
                     SV("CDB types cannot be accessed by data name."));
-                return;
+                return expr;
             }
             e->sym = env_find(e->left->type.db_named_data, e->name.text);
             break;
@@ -247,7 +303,7 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
             // Avoid cascading errors.
             e->sym = NULL;
             expr->type.basetype = TYPE_ERROR;
-            return;
+            return expr;
         
         default:
             tc_expr_error(tc, expr, &e->left->tok,
@@ -260,25 +316,25 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
         else
             tc_expr_error(tc, expr, &e->name, SV("No such member found."));
 
-        return;
+        return expr;
     }
     case NODE_ExprBinary: {
         ExprBinary *e = (ExprBinary *)expr;
 
-        visit_Expr(tc, e->left);
-        visit_Expr(tc, e->right);
+        e->left = visit_Expr(tc, e->left);
+        e->right = visit_Expr(tc, e->right);
 
         // Break early to avoid cascading errors.
         if (e->left->type.basetype == TYPE_ERROR || e->right->type.basetype == TYPE_ERROR) {
             expr->type.basetype = TYPE_ERROR;
-            return;
+            return expr;
         }
         
         if (!wt_equal(e->left->type, e->right->type))
             tc_expr_error(tc, expr, &e->left->tok,
                 SV("Operands of binary operation are of different types."));
         
-        BaseType bt;
+        BaseType bt = TYPE_NONE;
         switch (e->op.type) {
         case TOK_PLUS:
         case TOK_MINUS:
@@ -339,27 +395,71 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
             break;
         }
         default:
-            bt = TYPE_ERROR;
             tc_expr_error(tc, expr, &e->right->tok, SV("Unsupported operation."));
             break;
         }
 
-        if (expr->type.basetype != TYPE_ERROR) {
-            expr->type = (WodType){
-                .basetype = bt,
-                .is_assignable = false,
-                .is_constexpr =
-                    e->left->type.is_constexpr
-                    && e->right->type.is_constexpr
-            };
+        if (expr->type.basetype == TYPE_ERROR)
+            return expr;
+
+        expr->type = (WodType){
+            .basetype = bt,
+            .is_assignable = false,
+            .is_constexpr =
+                e->left->type.is_constexpr
+                && e->right->type.is_constexpr
+        };
+
+        if (!expr->type.is_constexpr)
+            return expr;
+
+        // By this point, it is known that the expression is a constant expression,
+        // so it should be evaluated.
+        switch (e->left->kind) {
+            case NODE_ExprIntLit: {
+                assert(e->right->kind == NODE_ExprIntLit);
+                int32_t left = ((ExprIntLit *)e->left)->value;
+                int32_t right = ((ExprIntLit *)e->right)->value;
+
+                switch (e->op.type) {
+                case TOK_PLUS:            return make_int(tc->arena, expr->tok, left + right);
+                case TOK_MINUS:           return make_int(tc->arena, expr->tok, left - right);
+                case TOK_STAR:            return make_int(tc->arena, expr->tok, left * right);
+                case TOK_SLASH:           return make_int(tc->arena, expr->tok, left / right);
+                case TOK_PERCENT:         return make_int(tc->arena, expr->tok, left % right);
+                case TOK_LESS_LESS:       return make_int(tc->arena, expr->tok, left << right);
+                case TOK_GREATER_GREATER: return make_int(tc->arena, expr->tok, left >> right);
+
+                case TOK_EQUAL_EQUAL:     return make_bool(tc->arena, expr->tok, left == right);
+                case TOK_BANG_EQUAL:      return make_bool(tc->arena, expr->tok, left != right);
+                case TOK_LESS:            return make_bool(tc->arena, expr->tok, left < right);
+                case TOK_LESS_EQUAL:      return make_bool(tc->arena, expr->tok, left <= right);
+                case TOK_GREATER:         return make_bool(tc->arena, expr->tok, left > right);
+                case TOK_GREATER_EQUAL:   return make_bool(tc->arena, expr->tok, left >= right);
+                default: UNREACHABLE;
+                }
+                break;
+            }
+            case NODE_ExprBoolLit: {
+                assert(e->right->kind == NODE_ExprBoolLit);
+                bool left = ((ExprBoolLit *)e->left)->value;
+                bool right = ((ExprBoolLit *)e->right)->value;
+                switch (e->op.type) {
+                case TOK_AMP_AMP:   return make_bool(tc->arena, expr->tok, left && right);
+                case TOK_PIPE_PIPE: return make_bool(tc->arena, expr->tok, left || right);
+                default: UNREACHABLE;
+                }
+                break;
+            }
+            default: UNREACHABLE;
         }
 
-        return;
+        return expr;
     }
     case NODE_ExprUnary: {
         ExprUnary *e = (ExprUnary *)expr;
 
-        visit_Expr(tc, e->right);
+        e->right = visit_Expr(tc, e->right);
 
         switch (e->op.type) {
         case TOK_MINUS:
@@ -380,28 +480,45 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
         default: UNREACHABLE;
         }
 
-        if (expr->type.basetype != TYPE_ERROR) {
-            if (e->op.type == TOK_AMP) {
-                expr->type = (WodType){
-                    .basetype = TYPE_PTR,
-                    .ptr_to = &((ExprVar *)e->right)->sym->type,
-                    .is_assignable = false,
-                    .is_constexpr = false
-                };
-            } else {
-                expr->type = (WodType){
-                    .basetype = e->right->type.basetype,
-                    .is_assignable = false,
-                    .is_constexpr = e->right->type.is_constexpr
-                };
-            }
+        if (expr->type.basetype == TYPE_ERROR) return expr;
+        
+        if (e->op.type == TOK_AMP) {
+            expr->type = (WodType){
+                .basetype = TYPE_PTR,
+                .ptr_to = &((ExprVar *)e->right)->sym->type,
+                .is_assignable = false,
+                .is_constexpr = false
+            };
+        } else {
+            expr->type = (WodType){
+                .basetype = e->right->type.basetype,
+                .is_assignable = false,
+                .is_constexpr = e->right->type.is_constexpr
+            };
         }
-        return;
+
+        if (!expr->type.is_constexpr) return expr;
+
+        switch (e->op.type) {
+        case TOK_MINUS: {
+            assert(e->right->kind == NODE_ExprIntLit);
+            int32_t right = ((ExprIntLit *)e->right)->value;
+            return make_int(tc->arena, expr->tok, -right);
+        }
+        case TOK_BANG: {
+            assert(e->right->kind == NODE_ExprBoolLit);
+            bool right = ((ExprBoolLit *)e->right)->value;
+            return make_bool(tc->arena, expr->tok,!right);
+        }
+        default: UNREACHABLE;
+        }
+
+        return expr;
     }
     case NODE_ExprCall: {
         ExprCall *e = (ExprCall *)expr;
 
-        visit_Expr(tc, e->callee);
+        e->callee = visit_Expr(tc, e->callee);
         if (e->callee->type.basetype != TYPE_FUNC) {
             tc_expr_error(tc, expr, &e->callee->tok,
                 SV("Tried to call non-callable type."));
@@ -410,7 +527,7 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
                 SV("Insufficient number of arguments to function call."));
         } else {
             for (size_t i = 0; i < e->args.count; i++) {
-                visit_Expr(tc, e->args.at[i]);
+                e->args.at[i] = visit_Expr(tc, e->args.at[i]);
                 if (!wt_equal(e->callee->type.params.at[i], e->args.at[i]->type))
                     tc_expr_error(tc, expr, &e->args.at[i]->tok,
                         SV("Type mismatch in call."));
@@ -421,7 +538,7 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
             expr->type = *e->callee->type.return_type;
         }
 
-        return;
+        return expr;
     }
     case NODE_ExprIntLit: {
         expr->type = (WodType){
@@ -429,7 +546,7 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
             .is_assignable = false,
             .is_constexpr = true
         };
-        return;
+        return expr;
     }
     case NODE_ExprStrLit: {
         expr->type = (WodType){
@@ -437,7 +554,7 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
             .is_assignable = false,
             .is_constexpr = true
         };
-        return;
+        return expr;
     }
     case NODE_ExprBoolLit: {
         expr->type = (WodType){
@@ -445,63 +562,131 @@ static void visit_Expr(Typechecker *tc, Expr *expr) {
             .is_assignable = false,
             .is_constexpr = true
         };
-        return;
+        return expr;
+    }
+    case NODE_ExprArrayLit: {
+        ExprArrayLit *e = (ExprArrayLit *)expr;
+        assert(e->values.count > 0);
+
+        Expr **first = &e->values.at[0];
+
+        *first = visit_Expr(tc, *first);
+        bool is_constexpr = (*first)->type.is_constexpr;
+
+        for (size_t i = 1; i < e->values.count; i++) {
+            Expr **elem = &e->values.at[i];
+
+            *elem = visit_Expr(tc, *elem);
+
+            if (!wt_equal((*first)->type, (*elem)->type))
+                tc_expr_error(tc, expr, &(*elem)->tok,
+                    SV("All elements must be of the same type."));
+        
+            is_constexpr = is_constexpr && (*elem)->type.is_constexpr;
+        }
+
+        if (expr->type.basetype == TYPE_ERROR) return expr;
+
+        expr->type = (WodType){
+            .basetype = TYPE_ARRAY,
+            .is_assignable = false,
+            .is_constexpr = is_constexpr,
+            .array_len = (int32_t)e->values.count,
+            .array_of = &(*first)->type,
+        };
+        return expr;
     }
     case NODE_ExprInterp: {
         Expr *p = expr;
         while (p->kind == NODE_ExprInterp) {
             ExprInterp *e = (ExprInterp *)p;
-            visit_Expr(tc, e->expr);
+            e->expr = visit_Expr(tc, e->expr);
             p = e->next;
         }
         assert(p->kind == NODE_ExprStrLit);
-        visit_Expr(tc, p);
+        p = visit_Expr(tc, p);
 
         expr->type = (WodType){
             .basetype = TYPE_STR,
             .is_assignable = false,
             .is_constexpr = false
         };
-        return;
+        return expr;
+    }
+    case NODE_ExprPrimType: {
+        // So that it isn't possible to perform operations on
+        // these expressions.
+        expr->type = (WodType){
+            .basetype = TYPE_NONE,
+            .is_assignable = false,
+            .is_constexpr = false
+        };
+        return expr;
     }
     case NODE_ExprStructLitField:
     case NODE_ExprDBDataElem:
         UNREACHABLE;
     }
+
+    return expr;
 }
 
-static Symbol *try_insert_vardecl(Typechecker *tc, StmtVarDecl *s) {
-    WodType ty = (WodType){
-        .is_assignable = !s->is_const,
-        .is_constexpr = s->is_const
+static WodType *make_type(Typechecker *tc, Expr *expr, bool is_assignable, bool is_const) {
+    WodType *ty = arena_alloc_assert(tc->arena, sizeof(WodType));
+    *ty = (WodType){
+        .is_assignable = is_assignable,
+        .is_constexpr = is_const
     };
+    
+    if (expr->kind == NODE_ExprArray) {
+        ExprArray *e = (ExprArray *)expr;
+        e->index = visit_Expr(tc, e->index);
+        if (!e->index->type.is_constexpr)
+            tc_error(tc, &e->index->tok,
+                SV("Array length must be a constant expression."));
 
-    switch (s->type.type) {
-        case TOK_INT:  ty.basetype = TYPE_INT; break;
-        case TOK_STR:  ty.basetype = TYPE_STR; break;
-        case TOK_BOOL: ty.basetype = TYPE_BOOL; break;
-        // TODO: other variable types
-        default: UNREACHABLE;
+        ty->basetype = TYPE_ARRAY;
+        ty->array_of = make_type(tc, e->left, is_assignable, is_const);
+        if (!e->index->type.basetype == TYPE_INT)
+            tc_error(tc, &e->index->tok,
+                SV("Array length must be of integer type."));
+        
+        if (!tc->had_error) {
+            assert(e->index->kind == NODE_ExprIntLit);
+            ty->array_len = ((ExprIntLit *)e->index)->value;
+
+            if (ty->array_len <= 0) {
+                tc_error(tc, &e->index->tok,
+                    SV("Array length must be positive."));
+            }
+        }
+    } else if (expr->kind == NODE_ExprPrimType) {
+        ExprPrimType *e = (ExprPrimType *)expr;
+        switch (e->type.type) {
+            case TOK_INT:  ty->basetype = TYPE_INT; break;
+            case TOK_STR:  ty->basetype = TYPE_STR; break;
+            case TOK_BOOL: ty->basetype = TYPE_BOOL; break;
+            default: UNREACHABLE;
+        }
+    } else {
+        UNREACHABLE;
     }
 
-    if (s->array_length) {
-        WodType *array_of = arena_alloc_assert(tc->arena, sizeof(WodType));
-        *array_of = ty;
-        ty.basetype = TYPE_ARRAY;
-        ty.array_of = array_of;
-    }
-    s->sym = env_insert(tc->current_env, s->name, ty, s->base.tok.loc, s->initializer != NULL, tc->arena);
+    return ty;
+}
+
+// Whether or not the symbol can be assigned to needs to be provided.
+// Originally this information could be determined just based on whether or not the variable was declared `const`,
+// since all non-const variables could be assigned to.
+// However, some variables may not be assignable even though they are not declared `const`, such as UDB fields.
+static Symbol *try_insert_vardecl(Typechecker *tc, StmtVarDecl *s, bool is_assignable) {
+    WodType *ty = make_type(tc, s->ty, is_assignable, s->is_const);
+
+    s->sym = env_insert(tc->current_env, s->name, *ty, s->base.tok.loc, s->initializer != NULL, tc->arena);
 
     if (!s->sym) {
         tc_error(tc, &s->base.tok, SV("Redeclaration of name."));
         return NULL;
-    }
-
-    if (s->array_length) {
-        visit_Expr(tc, s->array_length);
-        if (!s->array_length->type.is_constexpr)
-            tc_error(tc, &s->array_length->tok,
-                SV("Array length must be a constant expression."));
     }
 
     if (s->is_const && !s->initializer)
@@ -509,7 +694,7 @@ static Symbol *try_insert_vardecl(Typechecker *tc, StmtVarDecl *s) {
             SV("Variable marked 'const' must have initializer."));
 
     if (s->initializer) {
-        visit_Expr(tc, s->initializer);
+        s->initializer = visit_Expr(tc, s->initializer);
         if (!wt_equal(s->sym->type, s->initializer->type))
             tc_error(tc, &s->initializer->tok,
                 SV("Initializer does not match declared type of variable."));
@@ -534,7 +719,7 @@ static void check_data_element(Typechecker *tc, Symbol *db_type, ExprDBDataElem 
         if (!sym)
             tc_error(tc, &field->base.tok, SV("No such field in DB type declaration."));
 
-        visit_Expr(tc, field->value);
+        field->value = visit_Expr(tc, field->value);
         if (!field->value->type.is_constexpr)
             tc_error(tc, &field->value->tok,
                 SV("Value used in definition of DB data element must be constant expression."));
@@ -581,17 +766,17 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
     case NODE_StmtAssign: {
         StmtAssign *s = (StmtAssign *)stmt;
 
-        visit_Expr(tc, s->left);
+        s->left = visit_Expr(tc, s->left);
 
         if (!s->left->type.is_assignable)
             tc_error(tc, &s->left->tok, SV("Cannot assign to this expression."));
 
-        if (s->left->type.basetype == TYPE_STR
+        if (s->left->type.basetype != TYPE_INT
             && s->assign_type.type != TOK_EQUAL)
             tc_error(tc, &s->assign_type,
-                SV("Only simple assignment ('=') can be used for strings."));
+                SV("Only simple assignment ('=') can be used for types other than integers."));
 
-        visit_Expr(tc, s->right);
+        s->right = visit_Expr(tc, s->right);
 
         if (!wt_equal(s->left->type, s->right->type))
             tc_error(tc, &stmt->tok, SV("Assignment of incompatible types."));
@@ -601,7 +786,10 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
     case NODE_StmtVarDecl: {
         StmtVarDecl *s = (StmtVarDecl *)stmt;
 
-        try_insert_vardecl(tc, s);
+        // There's no need to re-insert global-level variables.
+        if (!tc->current_env->parent) return;
+
+        try_insert_vardecl(tc, s, !s->is_const);
         return;
     }
     case NODE_StmtCevDecl: {
@@ -646,7 +834,7 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
         }
 
         if (s->expr) {
-            visit_Expr(tc, s->expr);
+            s->expr = visit_Expr(tc, s->expr);
     
             if (!wt_equal(*f->type.return_type, s->expr->type))
                 tc_error(tc, &s->expr->tok, SV("Return type mismatch."));
@@ -656,7 +844,7 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
     }
     case NODE_StmtIf: {
         StmtIf *s = (StmtIf *)stmt;
-        visit_Expr(tc, s->condition);
+        s->condition = visit_Expr(tc, s->condition);
         if (s->condition->type.basetype != TYPE_BOOL)
             tc_error(tc, &s->condition->tok, SV("'if' condition must be boolean type."));
 
@@ -674,7 +862,7 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
     case NODE_StmtLoop: {
         StmtLoop *s = (StmtLoop *)stmt;
         if (s->count) {
-            visit_Expr(tc, s->count);
+            s->count = visit_Expr(tc, s->count);
             if (s->count->type.basetype != TYPE_INT)
                 tc_error(tc, &s->count->tok,
                     SV("Loop count must be integer type."));
@@ -695,7 +883,7 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
             visit_Stmt(tc, s->init);
 
         if (s->condition) {
-            visit_Expr(tc, s->condition);
+            s->condition = visit_Expr(tc, s->condition);
             if (s->condition->type.basetype != TYPE_BOOL)
                 tc_error(tc, &s->condition->tok,
                     SV("Condition must be of boolean type."));
@@ -718,16 +906,16 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
         if (s->decl->is_const)
             tc_error(tc, &s->decl->base.tok, SV("Iterator cannot be 'const'."));
 
-        Symbol *sym = try_insert_vardecl(tc, s->decl);
+        Symbol *sym = try_insert_vardecl(tc, s->decl, !s->decl->is_const);
         if (sym) {
             if (sym->type.basetype != TYPE_INT)
-                tc_error(tc, &s->decl->type, SV("'for' variable must be integer type."));
+                tc_error(tc, &s->decl->ty->tok, SV("'for' variable must be integer type."));
 
             // Do not allow assigning to the iterator variable of a range loop.
             sym->type.is_assignable = false;
         }
         
-        visit_Expr(tc, s->right_bound);
+        s->right_bound = visit_Expr(tc, s->right_bound);
         if (s->right_bound->type.basetype != TYPE_INT)
             tc_error(tc, &s->right_bound->tok,
                 SV("Iteration bound must be of integer type."));
@@ -753,7 +941,7 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
     }
     case NODE_StmtCmd: {
         StmtCmd *s = (StmtCmd *)stmt;
-        visit_Expr(tc, s->id);
+        s->id = visit_Expr(tc, s->id);
         if (s->id->type.basetype != TYPE_INT)
             tc_error(tc, &s->id->tok, SV("Command ID must be integer type."));
         
@@ -790,12 +978,12 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
     }
     case NODE_StmtCall: {
         StmtCall *s = (StmtCall *)stmt;
-        visit_Expr(tc, (Expr *)s->call);
+        s->call = (ExprCall *)visit_Expr(tc, (Expr *)s->call);
         return;
     }
     case NODE_StmtInc: {
         StmtInc *s = (StmtInc *)stmt;
-        visit_Expr(tc, s->expr);
+        s->expr = visit_Expr(tc, s->expr);
         if (!s->expr->type.is_assignable)
             tc_error(tc, &s->base.tok, SV("Cannot increment this expression."));
 
@@ -805,9 +993,9 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
     }
     case NODE_StmtDec: {
         StmtDec *s = (StmtDec *)stmt;
-        visit_Expr(tc, s->expr);
+        s->expr = visit_Expr(tc, s->expr);
         if (!s->expr->type.is_assignable)
-            tc_error(tc, &s->base.tok, SV("Cannot decrement expression."));
+            tc_error(tc, &s->base.tok, SV("Cannot decrement this expression."));
 
         if (s->expr->type.basetype != TYPE_INT)
             tc_error(tc, &s->base.tok, SV("Can only decrement integers."));
@@ -865,7 +1053,7 @@ static void visit_Stmt(Typechecker *tc, Stmt *stmt) {
             StmtVarDecl *field = s->fields.at[i];
 
             if (field->initializer)
-                visit_Expr(tc, field->initializer);
+                field->initializer = visit_Expr(tc, field->initializer);
         }
         
         // Check that defined data elements actually match the specified DB type's fields.
@@ -982,7 +1170,7 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
                     SV("Constant variables must be initialized."));
             }
                     
-            Symbol *sym = try_insert_vardecl(tc, s);
+            Symbol *sym = try_insert_vardecl(tc, s, !s->is_const);
             if (sym) sym->top_level_path = 
                 tc->modules->at[module_index].source->path;
 
@@ -1009,33 +1197,30 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
             size_t i_param_size = 0;
             size_t s_param_size = 0;
             for (size_t param_i = 0; param_i < s->params.count; param_i++) {
-                // TODO: handle array params
                 StmtVarDecl *param = s->params.at[param_i];
                 if (param->is_const)
                     tc_error(tc, &param->base.tok, SV("Function parameter cannot be 'const'."));
 
-                switch (param->type.type) {
-                case TOK_INT:
+                WodType *ty = make_type(tc, param->ty, !param->is_const, param->is_const);
+                switch (ty->basetype) {
+                case TYPE_INT:
+                case TYPE_BOOL:
                     i_param_size++;
                     VEC_PUSH(wt.params,
                         (WodType){ .basetype = TYPE_INT }, tc->arena);
                     break;
-                case TOK_STR:
+                case TYPE_STR:
                     s_param_size++;
                     VEC_PUSH(wt.params,
                         (WodType){ .basetype = TYPE_STR }, tc->arena);
                     break;
-                case TOK_BOOL:
-                    i_param_size++;
-                    VEC_PUSH(wt.params,
-                        (WodType){ .basetype = TYPE_BOOL }, tc->arena);
-                    break;
-                default: UNREACHABLE;
+                default:
+                    tc_error(tc, &param->base.tok, SV("Only simple types ('int', 'string', 'bool', or DB data) are accepted as common event parameters."));
                 }
 
                 if (i_param_size > 5)
                     tc_error(tc, &param->base.tok,
-                        SV("More than 5 integer parameters are not currently supported."));
+                        SV("More than 5 integer-based ('int', 'bool', or DB data type) parameters are not currently supported."));
                 
                 if (s_param_size > 5)
                     tc_error(tc, &param->base.tok,
@@ -1076,20 +1261,23 @@ static Environment *typecheck_file(Typechecker *tc, size_t module_index) {
 
             // Insert fields. Don't visit initializers yet since they may contain other top-level symbols.
             tc->current_env = s->sym->type.db_fields;
+            int32_t local_offset = 0;
             for (size_t j = 0; j < s->fields.count; j++) {
                 StmtVarDecl *field = s->fields.at[j];
 
                 if (field->is_const)
-                    tc_error(tc, &field->base.tok, SV("DB field cannot be 'const'."));
+                    tc_error(tc, &field->base.tok, SV("DB field cannot be declared 'const'."));
 
-                Symbol *field_sym = try_insert_vardecl(tc, field);
+                // Disallow assigning to UDB fields.
+                Symbol *field_sym = try_insert_vardecl(tc, field, db_kind != DB_UDB);
+
                 if (field_sym) {
+                    field_sym->local_offset = local_offset;
+                    if (field_sym->type.basetype == TYPE_ARRAY)
+                        local_offset += field_sym->type.array_len;
+                    else
+                        local_offset++;
 
-                    // Disallow assigning to UDB fields.
-                    if (db_kind == DB_UDB)
-                        field_sym->type.is_assignable = false;
-
-                    field_sym->local_offset = j;
                     if (field->initializer) {
                         if (!field->initializer->type.is_constexpr)
                             tc_error(tc, &field->initializer->tok,

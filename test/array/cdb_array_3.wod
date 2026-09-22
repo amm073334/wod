@@ -1,0 +1,36 @@
+// EXPECT: [10, 11, 12] 10 11 12 [f, g, h] f g h [1, 0, 1] 1 0 1
+
+apply "../bin";
+
+import "../_test.wod";
+
+def cdbt { A }
+
+cdbt A {
+    int[3] a;
+    str[3] b;
+    bool[3] c;
+} = { default }
+
+exaddr cev void main() {
+    int[3] x;
+    x[0] = 10;
+    x[1] = 11;
+    x[2] = 12;
+
+    str[3] y;
+    y[0] = "f";
+    y[1] = "g";
+    y[2] = "h";
+
+    bool[3] z;
+    z[0] = true;
+    z[1] = false;
+    z[2] = true;
+
+    A[0].a = x;
+    A[0].b = y;
+    A[0].c = z;
+    output("${A[0].a} ${A[0].a[0]} ${A[0].a[1]} ${A[0].a[2]} ${A[0].b} ${A[0].b[0]} ${A[0].b[1]} ${A[0].b[2]} ${A[0].c} ${A[0].c[0]} ${A[0].c[1]} ${A[0].c[2]}");
+    exit();
+}

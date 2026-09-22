@@ -1,0 +1,20 @@
+// EXPECT: 0
+
+apply "../bin";
+
+import "../_test.wod";
+
+cdbt TestCDB {
+    int a;
+    int b = 2;
+    int c = 123;
+} = { default }
+
+cev void main() {
+    output("${TestCDB[0]}");
+    exit();
+}
+
+def cdbt {
+    TestCDB,
+}

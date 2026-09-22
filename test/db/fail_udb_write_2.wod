@@ -1,0 +1,23 @@
+// This tests to make sure that there aren't any edge cases with
+// assigning to a member of a composite type (such as an array),
+// where assigning to the whole thing is prohibited but assigning to
+// the member is okay.
+
+apply "../bin";
+
+import "../_test.wod";
+
+def udbt { A }
+
+udbt A {
+    int[3] a;
+} = {
+    {
+        .a = [1,2,3]
+    }
+}
+
+cev void main() {
+    A[0].a[0] = 123;
+    exit();
+}

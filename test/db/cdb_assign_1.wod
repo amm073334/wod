@@ -1,0 +1,30 @@
+// EXPECT: 19
+
+apply "../bin";
+
+import "../_test.wod";
+
+def cdbt { C }
+
+cdbt C {
+    int a = 123 * 456;
+    int b = 5;
+    int c = 2;
+    int d = 3;
+    int e = 100;
+    int f = 0x1234;
+    int g = 0x3;
+} = { default }
+
+cev void main() {
+    int x = 1;
+    x += C[0].a;
+    x -= C[0].b;
+    x /= C[0].c;
+    x *= C[0].d;
+    x %= C[0].e;
+    x &= C[0].f;
+    x |= C[0].g;
+    output("${x}");
+    exit();
+}

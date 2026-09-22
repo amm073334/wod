@@ -6,7 +6,6 @@
 #include "typechecker.h"
 #include "ast2wir.h"
 #include "wir.h"
-#include "constexpr.h"
 #include "gamedata.h"
 #include "commonevent.h"
 #include "environment.h"
@@ -30,19 +29,17 @@ int main(int argc, const char *argv[]) {
     bool success = typecheck_modules(&modules, &arena);
     if (!success) exit(2);
 
-    constexpr_pass(&modules, &arena);
-
     WIR wir = ast2wir_pass(&modules, &arena);
-    print_wir(&wir);
 
-    GameData gd = wir_pass(&wir, &arena);
+    GameData *gd = wir_pass(&wir, &arena);
+    if (!gd) exit(2);
 
     // If an `apply` directory is specified, then apply the text output there.
     // Otherwise, just compile output into the directory the source file is in.
     ProgramAST *main_file_ast = modules.at[modules.count - 1].ast;
     if (sv_is_null(main_file_ast->apply)) {
         StringView directory = get_directory(to_sv(argv[0]), &arena);
-        gd_write_dir(&gd, directory);
+        gd_write_dir(gd, directory);
     } else {
         StringView input_directory = get_directory(input_file, &arena);
 
@@ -57,7 +54,7 @@ int main(int argc, const char *argv[]) {
         StringView build_directory = sv_concat(&arena,
             editor_directory, SV("build"));
 
-        gd_write_dir(&gd, build_directory);
+        gd_write_dir(gd, build_directory);
         if (!gd_apply(&arena,
                 sv_concat(&arena, editor_directory, SV("Editor.exe")),
                 SV("build"))) {

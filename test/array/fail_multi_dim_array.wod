@@ -1,0 +1,11 @@
+// This might be added as a feature in the future, but it shouldn't work for now.
+
+apply "../bin";
+
+import "../_test.wod";
+
+cev void main() {
+    int[3][3] a;
+
+    exit();
+}

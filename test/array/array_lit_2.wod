@@ -1,0 +1,12 @@
+// EXPECT: [8, 8, 1]
+
+apply "../bin";
+
+import "../_test.wod";
+
+cev int double(int i) { return i * 2; }
+
+cev void main() {
+    output("${[8, double(4), 1]}");
+    exit();
+}

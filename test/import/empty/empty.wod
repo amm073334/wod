@@ -1,0 +1,7 @@
+apply "../../bin";
+
+import "_empty.wod";
+
+cev void main() {
+    cmd [175]()();
+}

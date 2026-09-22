@@ -5,8 +5,8 @@ apply "../bin";
 import "../_test.wod";
 
 exaddr cev void main() {
-    int[96] a;
-    a[95] = 1234;
-    output("${a[95]}");
+    int[91] a;
+    a[90] = 1234;
+    output("${a[90]}");
     exit();
 }

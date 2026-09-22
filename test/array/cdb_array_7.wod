@@ -1,0 +1,31 @@
+// EXPECT: [3, 4, 5] [a, b, c]
+
+apply "../bin";
+
+import "../_test.wod";
+
+def cdbt { A }
+
+cdbt A {
+    int[3] u;
+    str[3] x;
+} = { default }
+
+cev void main() {
+    A[0].u[0] = 3;
+    A[0].u[1] = 4;
+    A[0].u[2] = 5;
+    
+    int[3] v;
+    v = A[0].u;
+    
+    A[0].x[0] = "a";
+    A[0].x[1] = "b";
+    A[0].x[2] = "c";
+    
+    str[3] y;
+    y = A[0].x;
+    
+    output("${v} ${y}");
+    exit();
+}

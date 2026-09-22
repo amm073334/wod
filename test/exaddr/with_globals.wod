@@ -1,0 +1,17 @@
+// EXPECT: 1234 [123, 456, 789, 101]
+
+apply "../bin";
+
+import "../_test.wod";
+
+int[4] glob_array;
+
+exaddr cev void main() {
+    glob_array = [123, 456, 789, 101];
+    
+    int[96] a;
+    a[95] = 1234;
+    
+    output("${a[95]} ${glob_array}");
+    exit();
+}

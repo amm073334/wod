@@ -88,21 +88,17 @@ static bool check(Parser *parser, TokenType type) {
     return parser->current.type == type;
 }
 
-static bool check_vartype(Parser *parser) {
+// Returns `true` if the current token indicates the start of a variable declaration.
+static bool check_var_decl(Parser *parser) {
     switch (parser->current.type) {
     case TOK_INT:
     case TOK_STR:
     case TOK_BOOL:
+    case TOK_CONST:
         return true;
     default:
         return false;
     }
-}
-
-static bool match_vartype(Parser *parser) {
-    if (!check_vartype(parser)) return false;
-    advance(parser);
-    return true;
 }
 
 static void synchronize(Parser *parser) {
@@ -195,6 +191,26 @@ static Expr *primary(Parser *parser) {
         Token name = parser->previous;
         ExprVar *expr;
         ALLOC_NODE(expr, name, ExprVar, (ExprVar){ .name = name.text });
+        return (Expr *)expr;
+    }
+
+    if (match(parser, TOK_LEFT_BRACK)) {
+        Token tok = parser->previous;
+
+        VEC_PTR_Expr values = VEC_EMPTY;
+        
+        if (!match(parser, TOK_RIGHT_BRACK)) do {
+            VEC_PUSH(values, expression(parser), parser->arena);    
+        } while (match(parser, TOK_COMMA) && !check(parser, TOK_RIGHT_BRACK));
+
+        if (values.count == 0) {
+            error_previous(parser, SV("Array literal should have at least one element."));
+        }
+
+        consume(parser, TOK_RIGHT_BRACK, SV("Expected ']' after array literal."));
+
+        ExprArrayLit *expr;
+        ALLOC_NODE(expr, tok, ExprArrayLit, (ExprArrayLit){ .values = values });
         return (Expr *)expr;
     }
 
@@ -479,15 +495,33 @@ static StmtVarDecl *var_decl(Parser *parser) {
         is_const = true;
     }
 
-    if (!match_vartype(parser))
-        error_current(parser, SV("Invalid declaration type."));
+    Expr *type = NULL;
+    switch (parser->current.type) {
+        case TOK_INT:
+        case TOK_STR:
+        case TOK_BOOL: {
+            ExprPrimType *prim;
+            ALLOC_NODE(prim, parser->current, 
+                ExprPrimType, (ExprPrimType){ .type = parser->current });
+        
+            type = (Expr *)prim;
+            advance(parser);
+            break;
+        }
+        default:
+            error_current(parser, SV("Invalid declaration type."));
+            break;
+    }
 
-    Token var_type = parser->previous;
-
-    Expr *array_length = NULL;
     if (match(parser, TOK_LEFT_BRACK)) {
-        array_length = expression(parser);
+        Expr *length = expression(parser);
         consume(parser, TOK_RIGHT_BRACK, SV("Expected ']' after array length."));
+    
+        ExprArray *arr;
+        ALLOC_NODE(arr, parser->previous, 
+            ExprArray, (ExprArray){ .left = type, .index = length });
+            
+        type = (Expr *)arr;
     }
 
     consume(parser, TOK_IDENTIFIER, SV("Expected variable name."));
@@ -500,14 +534,13 @@ static StmtVarDecl *var_decl(Parser *parser) {
 
     StmtVarDecl *stmt;
     ALLOC_NODE(stmt, param_name, StmtVarDecl, 
-        (StmtVarDecl){ .type = var_type, .name = param_name.text,
-            .array_length = array_length, .initializer = initializer,
-            .is_const = is_const });
+        (StmtVarDecl){ .ty = type, .name = param_name.text,
+            .initializer = initializer, .is_const = is_const });
 
     return stmt;
 }
 
-static Stmt *expr_like_stmt(Parser *parser) {
+static Stmt *assign_etc(Parser *parser) {
     Expr *lhs = expression(parser);
     if (lhs && lhs->kind == NODE_ExprCall &&
         check(parser, TOK_SEMICOLON)) {
@@ -625,13 +658,13 @@ static Stmt *for_stmt(Parser *parser) {
     bool init_is_decl = false;
     Stmt *init = NULL;
     if (!check(parser, TOK_SEMICOLON)) {
-        if (check_vartype(parser)) {
+        if (check_var_decl(parser)) {
             init_is_decl = true;
             init = (Stmt *)var_decl(parser);
             if (!((StmtVarDecl *)init)->initializer)
                 error_previous(parser, SV("Expected initializer."));
         } else {
-            init = expr_like_stmt(parser);
+            init = assign_etc(parser);
         }
     }
 
@@ -662,7 +695,7 @@ static Stmt *for_stmt(Parser *parser) {
 
     Stmt *iter_stmt = NULL;
     if (!check(parser, TOK_RIGHT_PAREN))
-        iter_stmt = expr_like_stmt(parser);
+        iter_stmt = assign_etc(parser);
     consume(parser, TOK_RIGHT_PAREN, SV("Expected ')' after 'for' iteration statement."));
 
     Stmt *body = statement(parser);
@@ -711,12 +744,10 @@ static Stmt *cmd_stmt(Parser *parser) {
 
 static Stmt *declaration(Parser *parser) {
     if (parser->panic_mode) synchronize(parser);
-    if (check_vartype(parser) || 
-        check(parser, TOK_CONST)) {
-
-        Stmt *stmt = (Stmt *)var_decl(parser);
+    if (check_var_decl(parser)) {
+        StmtVarDecl *decl = var_decl(parser);
         consume(parser, TOK_SEMICOLON, SV("Expected ';' after declaration."));
-        return stmt;
+        return (Stmt *)decl;
     }
 
     return statement(parser);
@@ -755,7 +786,7 @@ static Stmt *statement(Parser *parser) {
     if (match(parser, TOK_VOID))
         error_previous(parser, SV("Attempted to declare variable of type void."));
 
-    Stmt *stmt = expr_like_stmt(parser);
+    Stmt *stmt = assign_etc(parser);
     consume(parser, TOK_SEMICOLON, SV("Expected ';' after statement."));
     return stmt;
 }
@@ -908,7 +939,7 @@ static Stmt *db_type_decl(Parser *parser) {
 
     VEC_PTR_StmtVarDecl fields;
     VEC_INIT(fields);
-    while (check_vartype(parser)) {
+    while (check_var_decl(parser)) {
         StmtVarDecl *stmt = var_decl(parser);
         consume(parser, TOK_SEMICOLON, SV("Expected ';' after declaration."));
         VEC_PUSH(fields, stmt, parser->arena);
@@ -994,9 +1025,16 @@ static Stmt *top_decl(Parser *parser) {
     if (match(parser, TOK_CEV) || match(parser, TOK_EXADDR)) {
         return cev_decl(parser);
     }
+    
+    if (check(parser, TOK_VOID)) {
+        error_current(parser, SV("Expected 'cev' before 'void'."));
+        return cev_decl(parser);
+    }
 
-    if (match(parser, TOK_CONST)) {
-        return (Stmt *)var_decl(parser);
+    if (check_var_decl(parser)) {
+        Stmt *out = (Stmt *)var_decl(parser);
+        consume(parser, TOK_SEMICOLON, SV("Expected ';' after declaration."));
+        return out;
     }
 
     if (match(parser, TOK_IMPORT)) {
@@ -1011,7 +1049,7 @@ static Stmt *top_decl(Parser *parser) {
     if (match(parser, TOK_DBDATA)) {
         return db_data_decl(parser);
     }
-
+    
     error_current(parser, SV("Unexpected declaration."));
     return NULL;
 }

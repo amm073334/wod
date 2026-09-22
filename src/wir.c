@@ -30,7 +30,7 @@ typedef struct WIRCompiler {
     int32_t exaddr_int_base;
     int32_t exaddr_str_base;
 
-    GameData gd;
+    GameData *gd;
     Arena *arena;
     bool had_error;
     bool panic_mode;
@@ -45,15 +45,15 @@ static void wc_error(WIRCompiler *wc, Location loc, StringView msg) {
 }
 
 static size_t get_sdb_int_top(WIRCompiler *wc) {
-    return wc->gd.sdb.at[SDB_NORMAL_VAR_DBTYPE].data.count;
+    return wc->gd->sdb.at[SDB_NORMAL_VAR_DBTYPE].data.count;
 }
 
 static size_t get_sdb_str_top(WIRCompiler *wc) {
-    return wc->gd.sdb.at[SDB_STRING_VAR_DBTYPE].data.count;
+    return wc->gd->sdb.at[SDB_STRING_VAR_DBTYPE].data.count;
 }
 
 static size_t push_sdb_int(WIRCompiler *wc, StringView name) {
-    VEC_DBData *v = &wc->gd.sdb.at[SDB_NORMAL_VAR_DBTYPE].data;
+    VEC_DBData *v = &wc->gd->sdb.at[SDB_NORMAL_VAR_DBTYPE].data;
 
     VEC_PUSH(*v, ((DBData){.name = name, .values = VEC_EMPTY}), wc->arena);
 
@@ -66,7 +66,7 @@ static size_t push_sdb_int(WIRCompiler *wc, StringView name) {
 }
 
 static size_t push_sdb_str(WIRCompiler *wc, StringView name) {
-    VEC_DBData *v = &wc->gd.sdb.at[SDB_STRING_VAR_DBTYPE].data;
+    VEC_DBData *v = &wc->gd->sdb.at[SDB_STRING_VAR_DBTYPE].data;
 
     VEC_PUSH(*v, ((DBData){.name = name, .values = VEC_EMPTY}), wc->arena);
 
@@ -93,10 +93,6 @@ bool op_is_string(WIROperand wop) {
         case OPKIND_GLOBAL_CEV:
         case OPKIND_GLOBAL_UDBTYPE:
         case OPKIND_GLOBAL_CDBTYPE:
-            return false;
-        case OPKIND_DBDATA:
-        case OPKIND_DBFIELD:
-            UNREACHABLE;
             return false;
     }
 
@@ -247,7 +243,8 @@ static void disable_rc_pass(Arena *arena, WIRCev *wcev) {
 
 static bool qualifier_eq(Qualifier a, Qualifier b) {
     return sv_equals(a.path, b.path)
-        && sv_equals(a.name, b.name);
+        && sv_equals(a.name, b.name)
+        && a.id == b.id;
 }
 
 // Resolves a non-string `WIROperand` into a concrete integer value.
@@ -316,8 +313,6 @@ static int32_t resolve(WIRCompiler *wc, WIROperand wop) {
     
     case OPKIND_IMM_STR:
     case OPKIND_INTERP:
-    case OPKIND_DBDATA:
-    case OPKIND_DBFIELD:
         UNREACHABLE;
     }
 
@@ -399,6 +394,7 @@ static StringView interpolate(WIRCompiler *wc, WIROperand wop) {
                 if (qualifier_eq(frag.as.global, wc->wir->g_ints.at[j])) {
                     snprintf(buf, sizeof(buf), "\\v[%zu]", j);
                     next = to_sv(buf);
+                    goto found;
                 }
             }
             UNREACHABLE;
@@ -409,6 +405,7 @@ static StringView interpolate(WIRCompiler *wc, WIROperand wop) {
                 if (qualifier_eq(frag.as.global, wc->wir->g_strs.at[j])) {
                     snprintf(buf, sizeof(buf), "\\s[%zu]", j);
                     next = to_sv(buf);
+                    goto found;
                 }
             }
             UNREACHABLE;
@@ -419,12 +416,9 @@ static StringView interpolate(WIRCompiler *wc, WIROperand wop) {
         case OPKIND_GLOBAL_CDBTYPE:
             next = frag.as.global.name;
             break;
-        case OPKIND_DBDATA:
-        case OPKIND_DBFIELD:
-            UNREACHABLE;
-            break;
         }
 
+        found:
         out = sv_concat(wc->arena, out, next);
     }
 
@@ -485,14 +479,14 @@ static void update_temp_map(WIRCev *wcev, int32_t int_ex_base, int32_t str_ex_ba
         // If temporary has already been given a concrete address, skip.
         if (*v >= RC_THRESHOLD) return;
 
-        *v += CSELF_BASE + i_top;
+        *v += i_top;
 
         // If we have reached the string space, jump over it.
-        if (*v >= CSELF_STR_BASE)
+        if (i_top <= CSELF_STR_MAX && *v >= CSELF_STR_BASE)
             *v += CSELF_STR_BASE - CSELF_BASE;
 
         // If we have reached the end of the CSelf space, skip to globals.
-        if (*v > CSELF_INT_MAX)
+        if (i_top < NORMAL_VAR_BASE && *v > CSELF_INT_MAX)
             *v += NORMAL_VAR_BASE - CSELF_INT_MAX - 1 + int_ex_base;
 
     } else if (wop.kind == OPKIND_TEMP_STR) {
@@ -500,9 +494,9 @@ static void update_temp_map(WIRCev *wcev, int32_t int_ex_base, int32_t str_ex_ba
 
         if (*v >= RC_THRESHOLD) return;
 
-        *v += CSELF_STR_BASE + s_top;
+        *v += s_top;
         
-        if (*v > CSELF_STR_MAX)
+        if (s_top < STRING_VAR_BASE && *v > CSELF_STR_MAX)
             *v += STRING_VAR_BASE - CSELF_STR_MAX - 1 + str_ex_base;
     }
 }
@@ -570,7 +564,9 @@ static int32_t alloc_overflow_check(WIRCompiler *wc, Location loc, VEC_int32_t *
     return highest_addr;
 }
 
-#define UPDATE_TEMP(w) update_temp_map(wcev, wc->exaddr_int_base, wc->exaddr_str_base, i_top, s_top, w)
+#define UPDATE_TEMP(w) update_temp_map(wcev, wc->exaddr_int_base, wc->exaddr_str_base, i_addr_top.at[i_addr_top.count - 1], s_addr_top.at[s_addr_top.count - 1], w)
+
+VEC_DEF(size_t);
 
 // Assigns concrete addresses to locals and temporaries.
 static void addr_alloc_pass(WIRCompiler *wc, WIRCev *wcev) {
@@ -720,8 +716,15 @@ static void addr_alloc_pass(WIRCompiler *wc, WIRCev *wcev) {
     wcev->local_int_map = (VEC_int32_t)VEC_EMPTY;
     wcev->local_str_map = (VEC_int32_t)VEC_EMPTY;
 
-    int32_t i_top = 0;
-    int32_t s_top = 0;
+    // Tracks the top of the physical stack, which accounts for holes.
+    // The last element in each vector is the current top of stack.
+    VEC_int32_t i_addr_top = VEC_EMPTY;
+    VEC_size_t i_sizes = VEC_EMPTY;
+    VEC_PUSH(i_addr_top, CSELF_BASE, wc->arena);
+
+    VEC_int32_t s_addr_top = VEC_EMPTY;
+    VEC_size_t s_sizes = VEC_EMPTY;
+    VEC_PUSH(s_addr_top, CSELF_STR_BASE, wc->arena);
 
     for (size_t i = 0; i < wcev->insts.count; i++) {
         WIRInst *wirinst = wcev->insts.at[i];
@@ -730,22 +733,30 @@ static void addr_alloc_pass(WIRCompiler *wc, WIRCev *wcev) {
             WIRInst_PushIntN *inst = (WIRInst_PushIntN *)wirinst;
             assert(inst->n > 0);
 
-            int32_t range_start = CSELF_BASE + i_top;
-            
-            // If range has reached the string space, jump over it.
-            if (range_start >= CSELF_STR_BASE)
-                range_start += CSELF_STR_BASE - CSELF_BASE;
+            int32_t range_start = i_addr_top.at[i_addr_top.count - 1];
+            int32_t range_end = range_start + inst->n - 1;
 
-            // If range has passed the cself space, skip to globals.
+            // If range overlaps the string space, jump over it.
+            if (range_start <= CSELF_STR_MAX && range_end >= CSELF_STR_BASE) {
+                range_start = CSELF_STR_MAX + 1;
+                range_end = range_start + inst->n - 1;
+            }
+
+            // If range overlaps the interval between the CSelf space, and globals,
+            // we are out of CSelfs. Skip to globals.
             // This is done regardless of whether or not the common event
             // is actually marked exaddr, and then checked later.
-            if (range_start > CSELF_INT_MAX)
-                range_start += NORMAL_VAR_BASE - CSELF_INT_MAX - 1 + wc->exaddr_int_base;
+            if (range_start < NORMAL_VAR_BASE && range_end > CSELF_INT_MAX) {
+                range_start = NORMAL_VAR_BASE + wc->exaddr_int_base;
+                range_end = range_start + inst->n - 1;
+            }
+
+            // Update stack top.
+            VEC_PUSH(i_sizes, inst->n, wc->arena);
+            VEC_PUSH(i_addr_top, range_end + 1, wc->arena);
 
             for (size_t j = 0; j < inst->n; j++)
                 VEC_PUSH(wcev->local_int_map, range_start + j, wc->arena);
-
-            i_top += inst->n;
 
             break;
         }
@@ -753,26 +764,42 @@ static void addr_alloc_pass(WIRCompiler *wc, WIRCev *wcev) {
             WIRInst_PushStrN *inst = (WIRInst_PushStrN *)wirinst;
             assert(inst->n > 0);
 
-            int32_t range_start = CSELF_STR_BASE + s_top;
+            int32_t range_start = s_addr_top.at[s_addr_top.count - 1];
+            int32_t range_end = range_start + inst->n - 1;
 
-            if (range_start > CSELF_STR_MAX)
-                range_start += STRING_VAR_BASE - CSELF_STR_MAX - 1 + wc->exaddr_str_base;
-            
+            if (range_start < STRING_VAR_BASE && range_end > CSELF_STR_MAX) {
+                range_start = STRING_VAR_BASE + wc->exaddr_int_base;
+                range_end = range_start + inst->n - 1;
+            }
+
+            VEC_PUSH(s_sizes, inst->n, wc->arena);
+            VEC_PUSH(s_addr_top, range_end + 1, wc->arena);
+
             for (size_t j = 0; j < inst->n; j++)
                 VEC_PUSH(wcev->local_str_map, range_start + j, wc->arena);
-
-            s_top += inst->n;
 
             break;
         }
         case _WIRInst_PopIntN: {
             WIRInst_PopIntN *inst = (WIRInst_PopIntN *)wirinst;
-            i_top -= inst->n;
+            size_t n = inst->n;
+            while (n > 0) {
+                assert(i_sizes.count > 0);
+                n -= i_sizes.at[i_sizes.count - 1];
+                VEC_POP(i_sizes);
+                VEC_POP(i_addr_top);
+            }
             break;
         }
         case _WIRInst_PopStrN: {
             WIRInst_PopStrN *inst = (WIRInst_PopStrN *)wirinst;
-            s_top -= inst->n;
+            size_t n = inst->n;
+            while (n > 0) {
+                assert(s_sizes.count > 0);
+                n -= s_sizes.at[s_sizes.count - 1];
+                VEC_POP(s_sizes);
+                VEC_POP(s_addr_top);
+            }
             break;
         }
         case _WIRInst_Binop: {
@@ -874,7 +901,7 @@ static void addr_alloc_pass(WIRCompiler *wc, WIRCev *wcev) {
             NORMAL_VAR_MAX,
             SV("Ran out of integer global variables to allocate."));
         
-        int32_t new_ints = highest_int_addr - (NORMAL_VAR_BASE + wc->exaddr_int_base);
+        int32_t new_ints = highest_int_addr - (NORMAL_VAR_BASE + wc->exaddr_int_base) + 1;
         for (int32_t i = 0; i < new_ints; i++) {
             wc->exaddr_int_base++;
             push_sdb_int(wc,
@@ -882,11 +909,11 @@ static void addr_alloc_pass(WIRCompiler *wc, WIRCev *wcev) {
         }
         
         int32_t highest_str_addr = alloc_overflow_check(wc, wcev->loc,
-            &wcev->temp_str_map, &wcev->temp_str_map,
+            &wcev->local_str_map, &wcev->temp_str_map,
             STRING_VAR_MAX,
             SV("Ran out of string global variables to allocate."));
 
-        int32_t new_strs = highest_str_addr - (STRING_VAR_BASE + wc->exaddr_str_base);
+        int32_t new_strs = highest_str_addr - (STRING_VAR_BASE + wc->exaddr_str_base) + 1;
         for (int32_t i = 0; i < new_strs; i++) {
             wc->exaddr_str_base++;
             push_sdb_str(wc,
@@ -898,9 +925,10 @@ static void addr_alloc_pass(WIRCompiler *wc, WIRCev *wcev) {
             CSELF_INT_MAX,
             SV("Ran out of integer CSelfs to allocate. " 
                 "Try marking the common event as 'exaddr'."));
+        
         alloc_overflow_check(wc, wcev->loc,
-            &wcev->temp_str_map, &wcev->temp_str_map,
-            CSELF_INT_MAX,
+            &wcev->local_str_map, &wcev->temp_str_map,
+            CSELF_STR_MAX,
             SV("Ran out of string CSelfs to allocate. " 
                 "Try marking the common event as 'exaddr'."));
     }
@@ -937,7 +965,7 @@ static void push_str_command(WIRCompiler *wc, int32_t dest_ref, WIROperand src) 
         VEC_PUSH(str_fields, interpolate(wc, src), wc->arena);
     } else {
         VEC_PUSH(int_fields, dest_ref, wc->arena);
-        VEC_PUSH(int_fields, 0, wc->arena);
+        VEC_PUSH(int_fields, STR_COPY_STRVAR, wc->arena);
         VEC_PUSH(int_fields, resolve(wc, src), wc->arena);
     }
     
@@ -1389,8 +1417,6 @@ static void compile_inst(WIRCompiler *wc, size_t index) {
             break;
         case OPKIND_GLOBAL_UDBTYPE:
         case OPKIND_GLOBAL_CDBTYPE:
-        case OPKIND_DBDATA:
-        case OPKIND_DBFIELD:
             UNREACHABLE;
         }
 
@@ -1630,8 +1656,8 @@ static void compile_wir(WIRCompiler *wc) {
         push_sdb_str(wc, wir->g_strs.at[i].name);
 
     // Process every DB.
-    compile_dbs(wc, &wir->g_udbs, &wc->gd.udb);
-    compile_dbs(wc, &wir->g_cdbs, &wc->gd.cdb);
+    compile_dbs(wc, &wir->g_udbs, &wc->gd->udb);
+    compile_dbs(wc, &wir->g_cdbs, &wc->gd->cdb);
     
     // Process every `WIRCev`.
     for (size_t i = 0; i < wir->g_cevs.count; i++) {
@@ -1669,7 +1695,7 @@ static void compile_wir(WIRCompiler *wc) {
         cev_push_cmd(&cev, 0, wc->indent,
             (VEC_int32_t)VEC_EMPTY, (VEC_StringView)VEC_EMPTY);
 
-        VEC_PUSH(wc->gd.cevs, cev, wc->arena);
+        VEC_PUSH(wc->gd->cevs, cev, wc->arena);
     }
 }
 
@@ -1692,42 +1718,45 @@ static bool validate(WIRCompiler *wc, WIRCev *wcev) {
     return true;
 }
 
-GameData wir_pass(WIR *wir, Arena *arena) {
+GameData *wir_pass(WIR *wir, Arena *arena) {
     WIRCompiler wc = {
         .wir = wir,
         .arena = arena,
         .had_error = false,
         .exaddr_int_base = 0,
         .exaddr_str_base = 0,
+        .gd = arena_alloc_assert(arena, sizeof(GameData))
     };
-    gd_init(&wc.gd);
+    gd_init(wc.gd);
 
     // Using SDB from version 3.713.
-    wc.gd.sdb = sdb_3713(arena);
+    wc.gd->sdb = sdb_3713(arena);
 
     // By default, the variable-related SDB types already have a few empty elements.
     // Clear them out for simplicity.
-    wc.gd.sdb.at[SDB_NORMAL_VAR_DBTYPE].data.count = 0;
-    wc.gd.sdb.at[SDB_STRING_VAR_DBTYPE].data.count = 0;
+    wc.gd->sdb.at[SDB_NORMAL_VAR_DBTYPE].data.count = 0;
+    wc.gd->sdb.at[SDB_STRING_VAR_DBTYPE].data.count = 0;
     
     compile_wir(&wc);
+
+    if (wc.had_error) return NULL;
 
     // Assign entry point.
     for (size_t i = 0; i < wir->g_cevs.count; i++) {
         if (sv_equals(wir->g_cevs.at[i].qualifier.name, SV("main"))) {
-            wc.gd.entry = 500000 + i;
+            wc.gd->entry = 500000 + i;
         }
     }
 
     // The editor crashes if there are no DBs of a type,
     // so if there are none then add an empty one.
-    if (wc.gd.udb.count == 0) {
+    if (wc.gd->udb.count == 0) {
         DBType db; db_init(&db);
-        VEC_PUSH(wc.gd.udb, db, arena);
+        VEC_PUSH(wc.gd->udb, db, arena);
     }
-    if (wc.gd.cdb.count == 0) {
+    if (wc.gd->cdb.count == 0) {
         DBType db; db_init(&db);
-        VEC_PUSH(wc.gd.cdb, db, arena);
+        VEC_PUSH(wc.gd->cdb, db, arena);
     }
 
     return wc.gd;
@@ -1787,10 +1816,6 @@ static void print_wop(WIROperand wop) {
         case OPKIND_GLOBAL_CDBTYPE:
             printf(" $GCDB[" SV_FMT ":" SV_FMT "]",
                 SV_FMT_VAL(wop.as.global.path), SV_FMT_VAL(wop.as.global.name));
-            return;
-        case OPKIND_DBDATA:
-        case OPKIND_DBFIELD:
-            UNREACHABLE;
             return;
     }
 }
@@ -2010,10 +2035,6 @@ bool op_is_local(WIROperand wop) {
         case OPKIND_LOCAL_INT:
         case OPKIND_LOCAL_STR:
             return true;
-        case OPKIND_DBDATA:
-        case OPKIND_DBFIELD:
-            UNREACHABLE;
-            return false;
     }
     UNREACHABLE;
     return false;
@@ -2035,10 +2056,6 @@ bool op_is_global(WIROperand wop) {
         case OPKIND_GLOBAL_UDBTYPE:
         case OPKIND_GLOBAL_CDBTYPE:
             return true;
-        case OPKIND_DBDATA:
-        case OPKIND_DBFIELD:
-            UNREACHABLE;
-            return false;
     }
     UNREACHABLE;
     return false;

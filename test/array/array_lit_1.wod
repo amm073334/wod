@@ -1,0 +1,13 @@
+// EXPECT: [8, 5, 12]
+
+apply "../bin";
+
+import "../_test.wod";
+
+cev int double(int i) { return i * 2; }
+
+cev void main() {
+    int[3] v = [double(4), 5, double(6)];
+    output("${v}");
+    exit();
+}

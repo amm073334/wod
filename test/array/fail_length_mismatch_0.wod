@@ -1,11 +1,12 @@
-// EXPECT: ok
-
 apply "../bin";
 
 import "../_test.wod";
 
 cev void main() {
-    int[90] a;
-    output("ok");
+    int[5] a;
+    int[3] b;
+
+    a = b;
+
     exit();
 }

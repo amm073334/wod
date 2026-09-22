@@ -1,0 +1,22 @@
+// EXPECT: [10, 11, 12] 10 11 12
+
+apply "../bin";
+
+import "../_test.wod";
+
+def cdbt { A }
+
+cdbt A {
+    int[3] v;
+} = { default }
+
+cev void main() {
+    int[3] x;
+    x[0] = 10;
+    x[1] = 11;
+    x[2] = 12;
+
+    A[0].v = x;
+    output("${A[0].v} ${A[0].v[0]} ${A[0].v[1]} ${A[0].v[2]}");
+    exit();
+}

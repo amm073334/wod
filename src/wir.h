@@ -16,6 +16,12 @@
 typedef struct Qualifier {
     StringView path;
     StringView name;
+
+    // Sometimes, multiple distinct values are assigned
+    // to the same qualifier. This can happen with arrays,
+    // for example. A numeric ID distinguishes the
+    // individual values.
+    int32_t id;
 } Qualifier;
 VEC_DEF(Qualifier);
 
@@ -54,28 +60,6 @@ struct WIROperand {
         OPKIND_GLOBAL_CEV,
         OPKIND_GLOBAL_UDBTYPE,
         OPKIND_GLOBAL_CDBTYPE,
-        
-        ////////////////////////////////////////////////////////////
-        // The following two kinds of operand are kind of a hack.
-        //
-        // Basically the problem is that in the AST2WIR phase the
-        // expression visitor returns a WIROperand type as a way to
-        // tell the caller where the result of an expression is
-        // located; but when traversing DB access, we need more than
-        // one operand of information to emit a load or store (we
-        // need the type ID, the data ID, and the field ID).
-        //
-        // So we just extend operands to be able to hold that
-        // information, but it's a bug to actually use these operand
-        // kinds in the WIR compilation phase itself.
-
-        // Uses the `dbdata` field, which has a DB type ID
-        // and a data index.
-        OPKIND_DBDATA,
-
-        // Uses the `dbfield` field, which has a DB type ID,
-        // a data index, and a field index.
-        OPKIND_DBFIELD,
     } kind;
 
     union {
@@ -87,17 +71,6 @@ struct WIROperand {
         size_t offset;
 
         Qualifier global;
-        
-        struct {
-            WIROperand *type_id;
-            WIROperand *data_id;
-        } dbdata;
-
-        struct {
-            WIROperand *type_id;
-            WIROperand *data_id;
-            WIROperand *field_id;
-        } dbfield;
     } as;
 };
 
@@ -372,7 +345,7 @@ typedef struct WIR {
     VEC_WIRDB g_cdbs;
 } WIR;
 
-GameData wir_pass(WIR *wir, Arena *arena);
+GameData *wir_pass(WIR *wir, Arena *arena);
 void wir_init(WIR *wir);
 void print_wir(WIR *wir);
 

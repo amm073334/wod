@@ -16,10 +16,11 @@ typedef enum {
     NODE_ExprIntLit,
     NODE_ExprStrLit,
     NODE_ExprBoolLit,
+    NODE_ExprArrayLit,
     NODE_ExprInterp,
     NODE_ExprStructLitField,
     NODE_ExprDBDataElem,
-    // NODE_ExprArrayLit,
+    NODE_ExprPrimType,
 } ExprKind;
 
 typedef struct Expr {
@@ -134,7 +135,7 @@ typedef struct {
 
 typedef struct {
     Expr base;
-    VEC_PTR_Expr value;
+    VEC_PTR_Expr values;
 } ExprArrayLit;
 
 typedef struct {
@@ -173,6 +174,11 @@ struct ExprInterp {
 };
 
 typedef struct {
+    Expr base;
+    Token type;
+} ExprPrimType;
+
+typedef struct {
     Stmt base;
     Expr *left;
     Token assign_type;
@@ -181,9 +187,8 @@ typedef struct {
 
 typedef struct {
     Stmt base;
-    Token type;
+    Expr *ty;
     StringView name;
-    Expr *array_length;
     Expr *initializer;
     bool is_const;
 

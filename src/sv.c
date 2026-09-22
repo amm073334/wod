@@ -1,6 +1,8 @@
 #include "common.h"
 #include "sv.h"
 
+#include <stdio.h>
+
 StringView to_sv(const char *s) {
     return (StringView){ .data = s, .len = strlen(s) };
 }
@@ -51,4 +53,18 @@ bool sv_to_int(Arena *arena, StringView s, int32_t *out) {
 
     *out = (int32_t)n;
     return true;
+}
+
+StringView int_to_sv(Arena *arena, int32_t v) {
+    const int len = 16;
+    char *buf = arena_alloc(arena, len);
+    if (!buf) return SV_NULL;
+
+    int res = snprintf(buf, len, "%d", v);
+    if (res < 0 || res >= len) return SV_NULL;
+
+    return (StringView){
+        .data = buf,
+        .len = strlen(buf)
+    };
 }

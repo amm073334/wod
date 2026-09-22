@@ -50,7 +50,7 @@ struct WodType {
     union {
         // If TYPE_ARRAY:
         struct {
-            size_t array_len;
+            int32_t array_len;
             WodType *array_of;
         };
 

@@ -23,5 +23,6 @@ bool sv_is_null(StringView s);
 StringView sv_concat(Arena *arena, StringView a, StringView b);
 char *sv_dup(Arena *arena, StringView s);
 bool sv_to_int(Arena *arena, StringView s, int32_t *out);
+StringView int_to_sv(Arena *arena, int32_t v);
 
 #endif // WOD_SV_H_

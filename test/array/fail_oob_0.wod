@@ -1,0 +1,13 @@
+apply "../bin";
+
+import "../_test.wod";
+
+cev void main() {
+    int[3] b;
+    b[0] = 1;
+    b[1] = 1;
+    b[2] = 1;
+
+    int hmm = b[3];
+    exit();
+}

@@ -105,6 +105,16 @@ typedef enum {
     DB_FIELD_STRING = 0x40000,
 } CommandDBFlag;
 
+typedef enum {
+    STR_COPY_STRVAR     = 0x1,
+    STR_LOAD_FROM_REF   = 0x2, // キーボード入力
+    STR_KB_INPUT        = 0x3, // ロード位置を変数で指定
+
+    // Only effective when `STR_KB_INPUT` is enabled.
+    STR_KB_CANCELABLE = 0x1000,
+    STR_KB_INITIALIZE = 0x2000, // 左辺を書換
+} CommandStrFlag;
+
 typedef struct {
     CommandOp id;
     VEC_int32_t int_list;
