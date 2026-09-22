@@ -1,6 +1,6 @@
 // EXPECT: [1, 2, 3] [x, y, z] [0, 1, 0]
 
-apply "../bin";
+apply "../../bin";
 
 import "../_test.wod";
 

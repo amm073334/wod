@@ -1,6 +1,6 @@
 // EXPECT: 7006652 hey
 
-apply "../bin";
+apply "../../bin";
 
 import "../_test.wod";
 

@@ -3,7 +3,7 @@
 // where assigning to the whole thing is prohibited but assigning to
 // the member is okay.
 
-apply "../bin";
+apply "../../bin";
 
 import "../_test.wod";
 

@@ -71,7 +71,7 @@ static size_t push_sdb_str(WIRCompiler *wc, StringView name) {
     VEC_PUSH(*v, ((DBData){.name = name, .values = VEC_EMPTY}), wc->arena);
 
     if (v->count > 10000) {
-        fprintf(stderr, "Fatal error: No more space in integer globals.");
+        fprintf(stderr, "Fatal error: No more space in string globals.");
         exit(1);
     }
 

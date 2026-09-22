@@ -1,6 +1,6 @@
 // This might be added as a feature in the future, but it shouldn't work for now.
 
-apply "../bin";
+apply "../../bin";
 
 import "../_test.wod";
 

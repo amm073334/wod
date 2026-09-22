@@ -6,7 +6,7 @@
 // This test makes sure that the zeroth data element's defaults are
 // set up properly.
 
-apply "../bin";
+apply "../../bin";
 
 import "../_test.wod";
 

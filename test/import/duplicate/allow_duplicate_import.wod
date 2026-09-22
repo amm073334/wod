@@ -1,4 +1,4 @@
-apply "../../bin";
+apply "../../../bin";
 
 import "_lib.wod";
 import "../duplicate/_lib.wod";

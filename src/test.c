@@ -5,7 +5,7 @@
 #include "windows.h"
 
 #define EXPECT_STR          "// EXPECT: "
-#define BIN_DIR             "test\\bin\\"
+#define BIN_DIR             "bin\\"
 #define TEST_OUTPUT_FILE    "test_output"
 #define TEST_TIMEOUT_MS     10000
 
